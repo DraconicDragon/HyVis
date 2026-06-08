@@ -22,3 +22,6 @@
   - Scenario: 2 or more models active in the same config - In theory user could want to have model 1's tags sent to tag service A while model 2's tags should be sent to tag service B
     - making 2 separate runs would mean reading the same files for a second time (assuming that in the scenario the 2 models both fit in the first place)
     - pain, do I need new config format
+
+- option to set auto download (huggingface download) off since vibe has it too
+  - or just tell people to prefix source option with `local:`
