@@ -319,6 +319,9 @@ async def infer_files(
     # error; stays False for the remainder of inference to avoid spam.
     hydrus_reachable = hydrus is not None
 
+    listener = None
+    stop_cancel = threading.Event()
+
     try:
         with vibe.load(model_cfg.model_id, **load_kwargs) as session:
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
