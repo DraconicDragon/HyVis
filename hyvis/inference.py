@@ -136,7 +136,7 @@ def build_result_processors(
     model_id: str,
     *,
     prefer_tag_level_thresholds: bool,
-    tlt_multiplier: float,
+    tlt_relative_offset: float,
     default_threshold: float,
     category_thresholds: dict[str, float],
 ) -> list[Any]:
@@ -167,8 +167,8 @@ def build_result_processors(
             )
 
     if use_tlt:
-        processors.append(TagLevelThresholds(threshold_multiplier=tlt_multiplier))
-        logger.info("Model %s: using TagLevelThresholds(multiplier=%.2f)", model_id, tlt_multiplier)
+        processors.append(TagLevelThresholds(threshold_relative_offset=tlt_relative_offset))
+        logger.info("Model %s: using TagLevelThresholds(relative_offset=%.2f)", model_id, tlt_relative_offset)
     else:
         kwargs: dict[str, Any] = {"threshold": default_threshold}
         if category_thresholds:
@@ -298,7 +298,7 @@ async def infer_files(
     processors = build_result_processors(
         model_cfg.model_id,
         prefer_tag_level_thresholds=inf_cfg.prefer_tag_level_thresholds,
-        tlt_multiplier=inf_cfg.tag_level_threshold_multiplier,
+        tlt_relative_offset=inf_cfg.tag_level_threshold_relative_offset,
         default_threshold=inf_cfg.default_threshold,
         category_thresholds=inf_cfg.category_thresholds,
     )

@@ -30,10 +30,10 @@ key = "your_service_key_here"
 prefer_tag_level_thresholds = true
 
 
-# Multiplier applied to per-tag thresholds when TLT is active and model supports it.
+# Relative offset applied to per-tag thresholds when TLT is active and model supports it.
 # 0.1 increases each threshold by 10% (e.g. 0.80 → 0.88). Must be in range -1.0 to 1.0. 
 ### You can usually ignore this.
-tag_level_threshold_multiplier = 0.0
+tag_level_threshold_relative_offset = 0.0
 
 # Global threshold for ScoreThresholds or fallback when TLT has missing data
 default_threshold = 0.4

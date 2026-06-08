@@ -36,7 +36,7 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
     }
 )
 
-# region Config dataclasses  
+# region Config dataclasses
 
 
 @dataclass(frozen=True)
@@ -78,8 +78,8 @@ class InferenceConfig:
     prefer_tag_level_thresholds: bool = True
     """Use TagLevelThresholds when the model supports it (best_threshold column in CSV)."""
 
-    tag_level_threshold_multiplier: float = 0.0
-    """Proportional multiplier for TagLevelThresholds. 0.1 → thresholds reduced by 10%."""
+    tag_level_threshold_relative_offset: float = 0.0
+    """Relative offset for TagLevelThresholds. 0.1 → thresholds reduced by 10%."""
 
     default_threshold: float = 0.4
     """Global score threshold for ScoreThresholds (fallback)."""
@@ -159,7 +159,7 @@ class AppConfig:
         inference = InferenceConfig(
             models=models,
             prefer_tag_level_thresholds=bool(inf.get("prefer_tag_level_thresholds", True)),
-            tag_level_threshold_multiplier=float(inf.get("tag_level_threshold_multiplier", 0.0)),
+            tag_level_threshold_relative_offset=float(inf.get("tag_level_threshold_relative_offset", 0.0)),
             default_threshold=float(inf.get("default_threshold", 0.4)),
             category_thresholds={str(k): float(v) for k, v in inf.get("category_thresholds", {}).items()},
             output_categories=list(inf.get("output_categories", [])),
@@ -203,9 +203,9 @@ class AppConfig:
             if m.batch_size < 1:
                 errors.append(f"[[inference.models]][{i}]: batch_size must be ≥ 1")
 
-        multiplier = self.inference.tag_level_threshold_multiplier
-        if not (0.0 <= multiplier < 1.0):
-            errors.append("[inference] tag_level_threshold_multiplier must be in [-1.0, 1.0)")
+        relative_offset = self.inference.tag_level_threshold_relative_offset
+        if not (0.0 <= relative_offset < 1.0):
+            errors.append("[inference] tag_level_threshold_relative_offset must be in [-1.0, 1.0)")
 
         threshold = self.inference.default_threshold
         if not (0.0 <= threshold <= 1.0):
