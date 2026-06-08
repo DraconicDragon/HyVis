@@ -6,6 +6,9 @@
 - support for "AND" "OR" etc for tag queries
   - instead of using tag query from config, pull files from an open page in hydrus, saves hassle of dealing with AND/OR stuff and can use all the system tags
 
+- option to remove set tag(s) after successful push (eg temp:tagme)
+  - Scenario: images without any tags at all i guess
+
 - change/make different system because categories can be arbitrary, and "rating" tags for e6 models like JTP3 are in "meta" category, not separate "rating"
 - output tag filter
   - Scenario: I want to only have rating tags sent to hydrus; this works with setting "rating" category as only output category, but gets complicated when using models that dont have separate rating category like JTP-3 which put rating tags in "meta" category with other non-rating tags
@@ -16,7 +19,17 @@
 
 - README stuff
 
+## Interface/TUI for minimal stuff
+
+- hyvis without arg supplied:
+  - opens model info getter
+  - config chooser
+
 ## lower priority (in order)
+
+- (need more info) magic byte fallback for metadata fetch incase hydrus mime type is "unknown" (suggesting its not set, which would be unexpected)
+
+- configurable metadata fetch batch size (currently 256)
 
 - hydrus file download to memory for remote hydrus
 
