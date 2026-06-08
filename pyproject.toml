@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hyvis"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
     "requests",
     "hydrus-api",
-    "vibe @ git+https://github.com/DraconicDragon/vibe@b31a291",
+    "vibe @ git+https://github.com/DraconicDragon/vibe@257c1136cb2de317d48a02d028b45d1e1a0e2d05",
 ]
 
 [project.scripts]
