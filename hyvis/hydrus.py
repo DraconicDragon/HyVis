@@ -166,8 +166,8 @@ class HydrusClient:
                 data = self._client.get_file_metadata(hashes=batch)
                 metas: list[dict[str, Any]] = data.get("metadata", [])
             except hydrus_api.HydrusAPIException as exc:
-                logger.warning("Metadata fetch error for batch starting %d: %s", start, exc)
-                continue
+                logger.error("Metadata fetch error for batch starting %d: %s", start, exc)
+                raise HydrusAPIError from exc
 
             for meta in metas:
                 mime: str = meta.get("mime", "")
@@ -209,7 +209,7 @@ class HydrusClient:
                 else:
                     logger.warning("Unexpected error resolving path for %s: %s", info.file_hash, exc)
             except hydrus_api.HydrusAPIException as exc:
-                logger.warning("Path resolution failed for %s: %s", info.file_hash, exc)
+                logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
 
             if progress_callback is not None and idx % _PATH_LOG_INTERVAL == 0:
                 progress_callback(idx, len(file_infos))
