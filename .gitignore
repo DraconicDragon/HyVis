@@ -1,6 +1,5 @@
 # repo-specific
 *.db
-pyproject.toml
 ort_provider_test.py
 
 # Byte-compiled / optimized / DLL files
