@@ -235,7 +235,7 @@ def _print_confirmation(
         print(_c("  Threshold Settings", _BOLD))
         print(f"    prefer TagLevelThresholds  {inf.prefer_tag_level_thresholds}")
         if inf.prefer_tag_level_thresholds:
-            print(f"    TLT relative offset             {inf.tag_level_threshold_relative_offset}")
+            print(f"    TLT relative offset        {inf.tag_level_threshold_relative_offset}")
         print(f"    default threshold          {inf.default_threshold}")
         if inf.category_thresholds:
             for cat, val in inf.category_thresholds.items():
