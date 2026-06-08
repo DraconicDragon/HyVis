@@ -39,10 +39,10 @@ pip install .
 
 **Backend:**
 
-HyVis supports PyTorch and ONNX as backend. You can install either both or only one of them. PyTorch is recommended since there's more models with pytorch support than ONNX, but it is likely you may already have models downloaded that are in ONNX, and if you don't want to redownload them in PyTorch format (.safetensors/.pth etc) then you may want to install ONNX backend instead/too.  
+HyVis supports PyTorch and ONNX as backend (through vibe, the inference backend library). You can install either both or only one of them. PyTorch is recommended since there's more models with pytorch support than ONNX, but it is likely you may already have models downloaded that are in ONNX, and if you don't want to redownload them in PyTorch format (.safetensors/.pth etc) then you may want to install ONNX backend instead/too.  
 PyTorch may or may not also come with less issues for the installation but your experience may vary.
 
-***todo, but here's a simple version for CPU/Nvidia GPU*** (other GPU types may work if you know your way around that, however I unfortunately don't have amd/intel GPUs to test with. Expect to need to change a few lines of code in worst case)
+***todo*** | Install instructions for ONNX/PyTorch using CPU and Nvidia GPUs (other GPU types may work if you know your way around that, however I unfortunately don't have amd/intel GPUs to test with. Expect to need to change a few lines of code in worst case)
 
 <ins>PyTorch</ins>
 
@@ -69,16 +69,24 @@ pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.
 - May or may not just work:
   - AMD: `pip install onnxruntime-rocm`
 
+#### Updating
+
+1. Open a terminal in the top level HyVis folder (not the hyvis subfolder) and do `git pull`
+2. Activate venv
+3. Lastly `pip install .`
+
 ### Usage
 
 For any questions you can create a new discussion thread on GitHub or ask me on the Hydrus Discord/Matrix server.  
 
-Some info first: HyVis relies on toml files for it's main configurations. You can find example ones in the [config_examples folder](/config_examples/) to get started with, they also include comments that describe their respective settings a bit. They are pretty much all the same besides a few value changes.  
+Some info first: HyVis relies on toml files for it's main configurations. You can find example ones in the [config_examples folder](/config_examples/) to get started with (make a copy and edit the copy instead of editing directly), they also include comments that describe their respective settings a bit. They are pretty much all the same besides a few value changes.  
 
 - [config.example.toml](/config_examples/config.example.toml) - the main example toml file, doesn't have some values set.
 - [config.example_eva02.toml](/config_examples/config.example_eva02.toml) - example using the WD eva 02 tagger by SmilingWolf; outputs danbooru tags
 - [config.example_JTP3.toml](/config_examples/config.example_JTP3.toml) - example using the JTP-3 Hydra model by RedRocket
-  - Notes: 1. JTP-3 is not available in ONNX format. 2. Has no `rating` category but does output rating tags to `meta` category (there's no tag prefix filter support for tags yet, only categories)
+  - > Note: 1. JTP-3 is not available in ONNX format. 2. It has no `rating` category but does output rating tags to `meta` category (there's no tag prefix filter support for tags yet, only categories)
+
+---
 
 There is also some CLI args you can pass, though usually there isn't much need to use them besides maybe `--infer-only` / `--push-only`. HyVis also provides `--extra-hash-file` with which you can use old [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) text files with if you ever wanted to I guess (one sha256 hash per line)
 
@@ -110,7 +118,7 @@ options:
 
 If you for some reason liked the way [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) required you to add files or you have old files you'd like to reuse, you should be able to do the same here too by using `--extra-hash-file` cli arg. Unfortunately I haven't really tested this yet
 
-**Supported Models**: <https://github.com/DraconicDragon/vibe/blob/main/SUPPORTED_MODELS.md>
+**Supported Models** (will be nicer in future, but for now here full list, ignore the aesthetic scoring models, hyvis does not support them yet): <https://github.com/DraconicDragon/vibe/blob/main/SUPPORTED_MODELS.md>
 
 - Recommended: (todo, recommended thresholds, average of 0.4 default_threshold in toml should be fine for all of them for many tags but without trying to get false positives (range 0.3-0.5+), for JTP3 you might want to increase to 0.5-0.6+)
   - Danbooru Tags (ONNX & PyTorch compatible):
@@ -121,7 +129,24 @@ If you for some reason liked the way [wd-e621-hydrus-tagger](https://github.com/
     - newer, even heavier (6gb memory minimum required, PyTorch only): `wdv4-convnextv2-huge-dbv4-full`
   - E621 Tags: `jtp-3` (PyTorch only)
 
-HF_TOKEN will likely be required for models by animetimm (wdv4-*/dbv4 models)
+> **Note**: A caveat of the animetimm models (wdv4-\*/dbv4-full) is that they will require a HuggingFace API key *and also* require you to request access on the models' HF repositories because they are "gated". The request should be automatically accepted, but you will have to fork over your email - If you don't feel like doing that you could maybe ask a kind soul to reupload the models.
+
+<details><summary>HuggingFace API Key Usage</summary>
+
+To use the API key, set the `HF_TOKEN` environment variable when running hyvis.
+
+Windows CMD: `set HF_TOKEN=hf_abcdefg1234567890 && hyvis path/to/config.toml`
+Windows Powershell:
+
+```pwsh
+$env:HF_TOKEN="hf_abcdefg1234567890"
+
+hyvis path/to/config.toml
+```
+
+Most Linux shells: `HF_TOKEN=hf_abcdefg1234567890 hyvis path/to/config.toml`  
+
+</details>
 
 #### Running an operation
 
@@ -146,18 +171,6 @@ also you can see in second image that JTP 3 will put rating tags (safe, question
 
 ![lucario](image-3.jpg)
 </details>
-
-set the environment variable `HF_TOKEN` if you need it
-Windows CMD: `set HF_TOKEN=ABCD && hyvis path/to/config.toml`
-Windows Powershell:
-
-```pwsh
-$env:HF_TOKEN="ABCD"
-
-hyvis path/to/config.toml
-```
-
-Linux and maybe other systems: `HF_TOKEN=ABCDEF hyvis path/to/config.toml`  
 
 ### Todo
 
