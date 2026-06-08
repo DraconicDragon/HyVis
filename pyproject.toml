@@ -8,7 +8,7 @@ version = "0.9.0"
 dependencies = [
     "requests",
     "hydrus-api",
-    "vibe @ git+https://github.com/DraconicDragon/vibe@b8fb167",
+    "vibe @ git+https://github.com/DraconicDragon/vibe@b31a291",
 ]
 
 [project.scripts]
