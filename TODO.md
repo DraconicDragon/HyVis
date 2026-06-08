@@ -1,5 +1,7 @@
 # TODO
 
+- supported models as table
+
 - setting for ability to only have X top tags used
   - Scenario: want to use tags from rating category only, but don't want multiple rating tags which is possible if confidence is high enough, so we'd limit that to 1, and choose only the tag with highest confidence
 
@@ -7,7 +9,8 @@
   - instead of using tag query from config, pull files from an open page in hydrus, saves hassle of dealing with AND/OR stuff and can use all the system tags
 
 - option to remove set tag(s) after successful push (eg temp:tagme)
-  - Scenario: images without any tags at all i guess
+  - Scenario: user has images without any tags at all, adds temp:tagme to files so tag query in config can find those files, then wants to remove temp tags
+    - is there no better option to get untagged files? Does fetching from page work?
 
 - change/make different system because categories can be arbitrary, and "rating" tags for e6 models like JTP3 are in "meta" category, not separate "rating"
 - output tag filter

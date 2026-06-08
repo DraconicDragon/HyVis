@@ -42,15 +42,38 @@ pip install .
 HyVis supports PyTorch and ONNX as backend. You can install either both or only one of them. PyTorch is recommended since there's more models with pytorch support than ONNX, but it is likely you may already have models downloaded that are in ONNX, and if you don't want to redownload them in PyTorch format (.safetensors/.pth etc) then you may want to install ONNX backend instead/too.  
 PyTorch may or may not also come with less issues for the installation but your experience may vary.
 
-***todo***
+***todo, but here's a simple version for CPU/Nvidia GPU*** (other GPU types may work if you know your way around that, however I unfortunately don't have amd/intel GPUs to test with. Expect to need to change a few lines of code in worst case)
 
-- backend installation - see <https://github.com/DraconicDragon/vibe#installation>
+<ins>PyTorch</ins>
+
+- CPU:
+
+```bash
+pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops"
+```
+
+- Nvidia GPU:
+
+```bash
+pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+```
+
+<ins>ONNX</ins>
+
+> Note: Only install one onnxruntime package at a time - if you choose to switch, then uninstall the old one first using eg `pip uninstall onnxruntime-gpu`
+
+> Note for linux users and onnxruntime-gpu: You may need to install cuda/cudnn from your system package manager for it to work, otherwise it will fallback to CPU
+
+- CPU: `pip install onnxruntime`
+- Nvidia GPU: `pip install onnxruntime-gpu`
+- May or may not just work:
+  - AMD: `pip install onnxruntime-rocm`
 
 ### Usage
 
 For any questions you can create a new discussion thread on GitHub or ask me on the Hydrus Discord/Matrix server.  
 
-Some info first: HyVis relies on toml files for it's main configurations. You can find example ones in [config_examples folder](/config_examples/) to get started with, they also include comments that describe their respective settings a bit. They are pretty much all the same besides a few value changes.  
+Some info first: HyVis relies on toml files for it's main configurations. You can find example ones in the [config_examples folder](/config_examples/) to get started with, they also include comments that describe their respective settings a bit. They are pretty much all the same besides a few value changes.  
 
 - [config.example.toml](/config_examples/config.example.toml) - the main example toml file, doesn't have some values set.
 - [config.example_eva02.toml](/config_examples/config.example_eva02.toml) - example using the WD eva 02 tagger by SmilingWolf; outputs danbooru tags
