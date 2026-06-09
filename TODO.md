@@ -1,6 +1,6 @@
 # TODO
 
-- supported models as table
+- (vibe) supported models as table
 
 - setting for ability to only have X top tags used
   - Scenario: want to use tags from rating category only, but don't want multiple rating tags which is possible if confidence is high enough, so we'd limit that to 1, and choose only the tag with highest confidence
@@ -31,6 +31,12 @@
 ## lower priority (in order)
 
 - (need more info) magic byte fallback for metadata fetch incase hydrus mime type is "unknown" (suggesting its not set, which would be unexpected)
+
+- (vibe) store param count for each model(-plugin)
+  - what is this useful for
+  - I'd have to calculate it using numel()/sfts metadata/onnx graph for each model
+    - animetimm models already have info available on their readmes but not the rest
+    - No, jtp3 is not 400m params, thats the siglip2 naflex base, jtp3's hydra head and other custom stuff makes it 501m params
 
 - configurable metadata fetch batch size (currently 256)
 

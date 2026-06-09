@@ -1,3 +1,5 @@
+> This README is still a work in progress, there will be some missing information towards the end
+
 # HyVis - Hydrus Tagger
 
 HyVis is a vibecoded project that uses a vibecoded inference backend to let you tag files from Hydrus using a small variety of vision transformers.  
@@ -158,8 +160,8 @@ hyvis path/to/config.toml
 
 Showcase on how a run looks like using `jtp-3` as model
 
-![jtp-3 operation confirmation](image.jpg)
-![jtp-3 inference](image-1.jpg)
+![jtp-3 operation confirmation](.assets/image.jpg)
+![jtp-3 inference](.assets/image-1.jpg)
 
 <details><summary>JTP-3 Tag outputs + linked images</summary>
 
@@ -167,9 +169,9 @@ Showcase on how a run looks like using `jtp-3` as model
 
 also you can see in second image that JTP 3 will put rating tags (safe, questionable, explicit) in meta category; In the future there might be a better way to prefix tags instead of doing it by category only, its in the todo.md already
 
-![mischief](image-2.jpg)
+![mischief](.assets/image-2.jpg)
 
-![lucario](image-3.jpg)
+![lucario](.assets/image-3.jpg)
 </details>
 
 ### Todo
