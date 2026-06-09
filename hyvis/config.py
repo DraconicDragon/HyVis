@@ -204,7 +204,7 @@ class AppConfig:
                 errors.append(f"[[inference.models]][{i}]: batch_size must be ≥ 1")
 
         relative_offset = self.inference.tag_level_threshold_relative_offset
-        if not (0.0 <= relative_offset < 1.0):
+        if not (-1.0 <= relative_offset < 1.0):
             errors.append("[inference] tag_level_threshold_relative_offset must be in [-1.0, 1.0)")
 
         threshold = self.inference.default_threshold
