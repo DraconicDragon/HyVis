@@ -213,12 +213,13 @@ def _print_confirmation(
         print()
 
     if mode != "infer_only":
-        # Output services
-        print(_c("  Output Tag Services", _BOLD))
-        for svc in hydrus.output_tag_services:
-            name = service_name_by_key.get(svc.key, "(unknown service)")
-            print(f"    {_c(name, _BOLD, _CYAN)} {_c(svc.key, _DIM)}")
-        print()
+        if mode == "push_only":
+            # Output services
+            print(_c("  Output Tag Services (global)", _BOLD))
+            for svc in hydrus.output_tag_services:
+                name = service_name_by_key.get(svc.key, "(unknown service)")
+                print(f"    {_c(name, _BOLD, _CYAN)} {_c(svc.key, _DIM)}")
+            print()
 
     if mode != "push_only":
         # Models
@@ -229,20 +230,30 @@ def _print_confirmation(
             print(
                 f"      device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
             )
+            eff_svcs = config.resolved_output_tag_services(m)
+            svc_names = [service_name_by_key.get(s.key, s.key) for s in eff_svcs]
+            print(f"      output services  {', '.join(svc_names)}")
+            if m.output_filter is not None:
+                print(f"      output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
         print()
 
-        # Threshold settings
-        print(_c("  Threshold Settings", _BOLD))
-        print(f"    prefer TagLevelThresholds  {inf.prefer_tag_level_thresholds}")
-        if inf.prefer_tag_level_thresholds:
-            print(f"    TLT relative offset        {inf.tag_level_threshold_relative_offset}")
-        print(f"    default threshold          {inf.default_threshold}")
-        if inf.category_thresholds:
-            for cat, val in inf.category_thresholds.items():
-                print(f"      {cat}: {val}")
-        cats = inf.output_categories
-        print(f"    output categories          {', '.join(cats) if cats else '(all)'}")
-        print(f"    log level                  {_c(inf.log_level, _YELLOW, _BOLD)}")
+        # Output Filter
+        of = config.output_filter
+        print(_c("  Output Filter (global)", _BOLD))
+        print(f"    prefer TLT         {of.prefer_tag_level_thresholds}")
+        print(f"    TLT offset         {of.tag_level_threshold_relative_offset}")
+        print(f"    default threshold  {of.default_threshold}")
+        if of.category_thresholds:
+            for cat, cfg_ in of.category_thresholds.items():
+                tlt_note = "  (override TLT)" if cfg_.override_tlt else ""
+                print(f"      {cat}: {cfg_.threshold}{tlt_note}")
+        cats = of.output_categories
+        print(f"    output categories  {', '.join(cats) if cats else '(all)'}")
+        if of.tag_prefix_mapping:
+            print(f"    tag prefix mapping {of.tag_prefix_mapping}")
+        if of.max_tags_per_category:
+            print(f"    max tags / category {of.max_tags_per_category}")
+        print(f"    log level          {_c(config.hyvis.log_level, _YELLOW, _BOLD)}")
         print()
 
     # Backup Reminder
@@ -283,7 +294,7 @@ async def main() -> int:
         return 1
 
     # Logging
-    effective_log_level = args.log_level or cfg.inference.log_level or "WARNING"
+    effective_log_level = args.log_level or cfg.hyvis.log_level
     logging.basicConfig(
         level=logging.WARN,  # todo: treat differently, maybe add -v/--verbose cli arg to make this debug, otherwise PIL log spam
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
@@ -335,13 +346,7 @@ async def main() -> int:
         if total_raw:
             print(_c(f"Fetching metadata for {total_raw} candidates...  ", _DIM), end="\r", flush=True)
 
-        def _meta_progress(done: int, total: int) -> None:
-            sys.stdout.write(_c(f"\r  Filtering metadata: {done}/{total}", _DIM))
-            sys.stdout.flush()
-
         def _inline_progress(label: str, done: int, total: int) -> None:
-            # import time
-            # time.sleep(1)  # test delay
             pct = done / max(total, 1) * 100
             line = _c(f"  {label}: {done}/{total} ({pct:.0f}%)", _DIM)
             sys.stdout.write(f"\r{line}   ")
