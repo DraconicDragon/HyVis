@@ -22,12 +22,8 @@ tag_service_keys = [] # empty == "all known tags"
 # Output services: where tags will be written/added to.
 # This setting applies globally to all models.
 # It can be overriden per-model (see model section below)
-[[hydrus.output_tag_services]]
-key = "your_service_key_here"
-
-### Second global output service example
-# [[hydrus.output_tag_services]]
-# key = "another_service_key_here"
+[hydrus.output_tag_services]
+keys = ["your_service_key_here"]
 
 
 # *** Output filter  (global) ***
@@ -102,7 +98,7 @@ default_threshold = 0.4
 output_categories = [
     "rating",
     "general",
-    "artist",
+    #"artist",
     "contributor",
     "copyright",
     "character",
@@ -139,8 +135,8 @@ batch_size = 4  # higher = more VRAM usage. Not useful if device resolved to CPU
 # [inference.models.output_filter.category_thresholds]
 # "character" = { threshold = 0.8, override_tlt = true }
 
-# [[inference.models.output_tag_services]]
-# key = "model_specific_service_key_here"
+# [inference.models.output_tag_services]
+# keys = ["model_specific_service_key_here"]
 
 
 [database]

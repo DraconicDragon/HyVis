@@ -277,7 +277,9 @@ class AppConfig:
             )
             for q in h.get("file_queries", [])
         ]
-        global_output_services = [OutputTagService(key=str(s["key"])) for s in h.get("output_tag_services", [])]
+        ots_data = h.get("output_tag_services", {})
+        global_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []
+        global_output_services = [OutputTagService(key=str(k)) for k in global_keys]
         hydrus = HydrusConfig(
             api_url=str(h.get("api_url", "")).rstrip("/"),
             api_key=str(h.get("api_key", "")),
@@ -323,7 +325,7 @@ class AppConfig:
         )
         if not self.hydrus.output_tag_services and not all_models_override:
             errors.append(
-                "[hydrus] At least one [[hydrus.output_tag_services]] entry is required "
+                "[hydrus] At least one output service key is required under [hydrus.output_tag_services].keys "
                 "(or every [[inference.models]] entry must define its own output_tag_services)"
             )
 
@@ -400,7 +402,9 @@ def _parse_model_config(raw: dict[str, Any]) -> ModelConfig:
 
     per_model_services: list[OutputTagService] | None = None
     if "output_tag_services" in raw:
-        per_model_services = [OutputTagService(key=str(s["key"])) for s in raw["output_tag_services"]]
+        ots_data = raw["output_tag_services"]
+        model_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []
+        per_model_services = [OutputTagService(key=str(k)) for k in model_keys]
 
     return ModelConfig(
         model_id=str(raw["model_id"]),
