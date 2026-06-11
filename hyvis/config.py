@@ -125,9 +125,14 @@ class OutputFilterConfig:
     Tags are selected by descending score.  Omitted categories → no limit.
     """
 
-    # todo: output tags to allow tags outside of categories
     output_categories: list[str] = field(default_factory=list)
     """Only emit tags from these categories. Empty → all categories."""
+
+    include_tags: list[str] = field(default_factory=list)
+    """Tags that are always included, bypassing output_categories."""
+
+    exclude_tags: list[str] = field(default_factory=list)
+    """Tags that are always excluded, even if their category is allowed."""
 
     # Internal: raw keys present in TOML for this section.
     # Used by resolved_output_filter() to distinguish "not set" from
@@ -239,6 +244,8 @@ class AppConfig:
             tag_prefix_mapping=_pick("tag_prefix_mapping", m.tag_prefix_mapping, g.tag_prefix_mapping),
             max_tags_per_category=_pick("max_tags_per_category", m.max_tags_per_category, g.max_tags_per_category),
             output_categories=_pick("output_categories", m.output_categories, g.output_categories),
+            include_tags=_pick("include_tags", m.include_tags, g.include_tags),
+            exclude_tags=_pick("exclude_tags", m.exclude_tags, g.exclude_tags),
         )
 
     def resolved_output_tag_services(self, model_cfg: ModelConfig) -> list[OutputTagService]:
@@ -375,6 +382,8 @@ def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
         tag_prefix_mapping={str(k): str(v) for k, v in raw.get("tag_prefix_mapping", {}).items()},
         max_tags_per_category=max_tags,
         output_categories=list(raw.get("output_categories", [])),
+        include_tags=list(raw.get("include_tags", [])),
+        exclude_tags=list(raw.get("exclude_tags", [])),
         _raw_keys=frozenset(raw.keys()),
     )
 

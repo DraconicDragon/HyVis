@@ -107,6 +107,17 @@ output_categories = [
     "lore",
 ]
 
+# Explicitly include these specific tags, regardless of output_categories setting
+include_tags = [
+    # "some_unlisted_meta_tag",
+    # "particular_artist_tag",
+]
+
+# Explicitly drop these specific tags, regardless of output_categories setting
+exclude_tags = [
+    # "generic_background",
+]
+
 
 # *** Models ***
 

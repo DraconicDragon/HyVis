@@ -249,6 +249,13 @@ def _print_confirmation(
                 print(f"      {cat}: {cfg_.threshold}{tlt_note}")
         cats = of.output_categories
         print(f"    output categories  {', '.join(cats) if cats else '(all)'}")
+
+        # tag inclusions/exclusions
+        if of.include_tags:
+            print(f"    include tags       {', '.join(of.include_tags)}")
+        if of.exclude_tags:
+            print(f"    exclude tags       {', '.join(of.exclude_tags)}")
+
         if of.tag_prefix_mapping:
             print(f"    tag prefix mapping {of.tag_prefix_mapping}")
         if of.max_tags_per_category:

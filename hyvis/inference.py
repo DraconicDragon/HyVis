@@ -112,14 +112,27 @@ def extract_tags(
     records: list[TagRecord] = []
 
     categories = output_filter.output_categories
+    # Convert lists to sets for O(1) exact-match lookups
+    include_set = set(output_filter.include_tags)
+    exclude_set = set(output_filter.exclude_tags)
 
     for category, tag_scores in tags_by_category.items():
-        if categories and category not in categories:
-            continue
         prefix = output_filter.tag_prefix_mapping.get(category) or ""
-
         cat_records: list[TagRecord] = []
+
         for raw_tag, score in tag_scores.items():
+            # 1. Check Exclusions: Drop if explicitly excluded
+            if raw_tag in exclude_set:
+                continue
+
+            # 2. Check Overrides: Always keep if explicitly included
+            is_allowed = raw_tag in include_set
+
+            # 3. Check Categories: If not explicitly included, fallback to standard category checks
+            if not is_allowed:
+                if categories and category not in categories:
+                    continue
+
             cat_records.append(
                 TagRecord(
                     category=category,
