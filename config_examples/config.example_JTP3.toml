@@ -1,3 +1,11 @@
+# *** JTP-3 EXAMPLE CONFIGURATION FILE ***
+# See CONFIGURATION.md for more help on individual options
+
+[hyvis]
+# Related CLI args: --log-level
+# Options: "DEBUG" | "INFO" | "WARNING" | "ERROR"
+log_level = "ERROR"
+
 [hydrus]
 api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
@@ -5,95 +13,99 @@ api_key = "your_api_key_here"
 # The tag queries to make to get the files to run inference on. 
 [[hydrus.file_queries]]
 tags = ["system:limit is 14"]
-tag_service_keys = [] # empty → "all known tags"
+tag_service_keys = [] # empty == "all known tags"
 
-### Second query; example
+### Second query example; results are merged with the first
 # [[hydrus.file_queries]]
 # tags = ["source:pixiv", "my namespace:some value"]
 # tag_service_keys = ["abcdef1234567890"]
 
 # Output services: where tags will be written/added to.
-[[hydrus.output_tag_services]]
-key = "1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464" # CHANGE THIS
-
-### Second output tag service; example - files from both queries will be merged together
-# [[hydrus.output_tag_services]]
-# key  = "another_service_key"
-# name = "downloader tags"
+[hydrus.output_tag_services]
+keys = ["1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464"]
 
 
-# *** Inference ***
-[inference]
+# *** Output filter  (global) ***
+
+# These values apply to all models unless you define a model's own [output_filter]
+[output_filter]
+
 # Prefer TagLevelThresholds (TLT) over ScoreThresholds when the model supports it.
-# Falls back to ScoreThresholds automatically.
-### You can usually ignore this unless you want to set per-category thresholds below in [inference.category_thresholds].
+# Falls back to ScoreThresholds automatically if not supported.
+### You can usually ignore this.
 prefer_tag_level_thresholds = true
 
-
-# Relative offset applied to per-tag thresholds when TLT is active and model supports it.
-# 0.1 increases each threshold by 10% (e.g. 0.80 → 0.88). Must be in range -1.0 to 1.0. 
+# Relative offset applied to per-tag thresholds when TLT is active.
+# 0.1 increases each threshold by 10% (e.g. 0.80 → 0.88).
+# Range: -1.0 to 1.0
 ### You can usually ignore this.
 tag_level_threshold_relative_offset = 0.0
 
-# Global threshold for ScoreThresholds or fallback when TLT has missing data
+# Default threshold used unless overwritten (eg by category_thresholds).
+# TLT uses this if it has missing data.
 default_threshold = 0.6
 
-# Only output tags from these categories. Empty = all categories.
-### Usable categories: rating, general, artist, contributor, copyright, character, meta, species, lore
-output_categories = ["rating", "general", "artist", "contributor", "copyright", "character", "meta", "species", "lore"]
+# Per-category threshold overrides.
+# Two forms are accepted:
+#   category = 0.7                                        plain threshold, override_tlt is false by default
+#   category = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
+#
+# Tag names with special characters must be quoted.
+[output_filter.category_thresholds]
+"character" = 0.7
+"artist" = 0.9    # most models don't support it anyway and when they do, have low artist accuracy
 
-### Usable log levels: "debug", "info", "warning", "error", "critical"
-log_level = "error"
+# --- Tag prefix mapping ---
 
-# Per-category threshold overrides for ScoreThresholds.
-# Omitted categories use default_threshold.
-### Usable categories: rating, general, artist, contributor, copyright, character, meta, species, lore
-[inference.category_thresholds]
-character = 0.7
-artist = 0.9 # most models don't output artist tags and when they do its not particularly accurate
+# Maps category name → prefix prepended to each tag before writing to Hydrus.
+# Empty string = no prefix.
+[output_filter.tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+"contributor" = ""
+
+
+# *** Output selection ***
+
+# Only emit tags from these categories. Empty list → all categories.
+output_categories = [
+    "rating",
+    "general",
+    "artist",
+    "contributor",
+    "copyright",
+    "character",
+    "meta",
+    "species",
+    "lore",
+]
+
+# Explicitly include these specific tags, regardless of output_categories setting
+include_tags = []
+
+# Explicitly drop these specific tags, regardless of output_categories setting
+exclude_tags = []
 
 
 # *** Models ***
-# Each model runs in its own session against the same file set.
-# Options are per-model.
+
+# All models are loaded at the same time and run against the same file set.
 
 [[inference.models]]
-# Leave `source` empty to attempt to auto-download model + required files from HuggingFace; 
-# Otherwise you can set a path to a local dir containing required files 
-# (usually model.onnx/.safetensors, selected_tags.csv and possibly config.json & preprocessor_config.json)
 model_id = "jtp-3"
-source = "/home/drac/dev/models/seperate/JTP-3"
+#source = ""
 device = "auto"
-batch_size = 3 # optional | defaults to 1 if not set
-# backend  = "pytorch"    # "pytorch" | "onnx" — omit for auto
-# precision = "fp16"      # "fp16" | "bf16" | "fp32" | "auto"
-
-### Second model setup; example - will run at the same time as others. ***Usually no need to use for tagging***
-### Make sure you have enough RAM/VRAM available (depending on what device the model runs on)
-# [[inference.models]]
-# model_id   = "wd-eva02-large-v3"
-# source     = "/path/to/models/eva02"
-# device     = "cuda"
-# batch_size = 2
+batch_size = 3
+# backend  = "pytorch"   # "pytorch" | "onnx" | "auto"
+# precision = "fp16"     # "fp16" | "bf16" | "fp32" | "auto"
 
 
-# *** Tag Prefix Mapping ***
-# Maps model output category names to tag prefixes applied
-# before writing to Hydrus. Empty string = no prefix.
-### Usable categories: rating, general, artist, contributor, copyright, character, meta, species, lore
-[tag_prefix_mapping]
-rating = "rating:"
-general = "" # You probably don't want 1girl etc to be prefixed with anything but you can set it here.
-artist = "creator:"
-copyright = "series:"
-character = "character:"
-meta = "meta:"
-species = "species:"
-lore = "lore:"
-contributor = "" # empty because I don't know if "contributor:" would clash with anything, i don't think any model outputs this anyway
-
-
-# *** Database ***
 [database]
-# Path for the SQLite db. Relative paths are resolved from the directory where you run main.py.
+# Path for the SQLite database.
 path = "data/hyvis.db"
