@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .main import _MAGENTA, _c
 
 if TYPE_CHECKING:
-    from .config import AppConfig, ModelConfig
+    from .config import AppConfig, ModelConfig, OutputFilterConfig
     from .db import Database
     from .hydrus import FileInfo, HydrusClient
     from .progress import Progress
@@ -100,8 +100,7 @@ class TagRecord:
 def extract_tags(
     result_dict: dict[str, Any],
     *,
-    prefix_mapping: dict[str, str],
-    output_categories: list[str],
+    output_filter: OutputFilterConfig,
 ) -> list[TagRecord]:
     """
     Convert a TagResult.to_dict() payload into TagRecord objects.
@@ -112,12 +111,29 @@ def extract_tags(
     tags_by_category: dict[str, dict[str, float]] = result_dict.get("tags", {})
     records: list[TagRecord] = []
 
+    categories = output_filter.output_categories
+    # Convert lists to sets for O(1) exact-match lookups
+    include_set = set(output_filter.include_tags)
+    exclude_set = set(output_filter.exclude_tags)
+
     for category, tag_scores in tags_by_category.items():
-        if output_categories and category not in output_categories:
-            continue
-        prefix = prefix_mapping.get(category) or ""
+        prefix = output_filter.tag_prefix_mapping.get(category) or ""
+        cat_records: list[TagRecord] = []
+
         for raw_tag, score in tag_scores.items():
-            records.append(
+            # 1. Check Exclusions: Drop if explicitly excluded
+            if raw_tag in exclude_set:
+                continue
+
+            # 2. Check Overrides: Always keep if explicitly included
+            is_allowed = raw_tag in include_set
+
+            # 3. Check Categories: If not explicitly included, fallback to standard category checks
+            if not is_allowed:
+                if categories and category not in categories:
+                    continue
+
+            cat_records.append(
                 TagRecord(
                     category=category,
                     raw_tag=raw_tag,
@@ -125,6 +141,14 @@ def extract_tags(
                     score=float(score),
                 )
             )
+
+        limit = output_filter.max_tags_per_category.get(category)
+        if limit is not None:
+            # sort descending by score, keep top-N
+            cat_records.sort(key=lambda r: r.score, reverse=True)
+            cat_records = cat_records[:limit]
+
+        records.extend(cat_records)
 
     return records
 
@@ -139,6 +163,7 @@ def build_result_processors(
     tlt_relative_offset: float,
     default_threshold: float,
     category_thresholds: dict[str, float],
+    output_filter: OutputFilterConfig | None = None,
 ) -> list[Any]:
     """
     Build the result processor list for one model session.
@@ -167,7 +192,46 @@ def build_result_processors(
             )
 
     if use_tlt:
-        processors.append(TagLevelThresholds(threshold_relative_offset=tlt_relative_offset))
+        tlt_kwargs: dict[str, Any] = {"threshold_relative_offset": tlt_relative_offset}
+        if output_filter is not None:
+            cat_overrides = {
+                cat: cfg.threshold for cat, cfg in output_filter.category_thresholds.items() if cfg.override_tlt
+            }
+            tag_overrides = {
+                tag: cfg.threshold for tag, cfg in output_filter.tag_thresholds.items() if cfg.override_tlt
+            }
+
+            try:
+                import inspect
+
+                sig = inspect.signature(TagLevelThresholds.__init__)
+                supported_params = list(sig.parameters.keys())
+            except Exception:
+                supported_params = []
+
+            # Find matching parameters
+            cat_param_name = next((p for p in supported_params if "category" in p), None)
+            tag_param_name = next((p for p in supported_params if "tag" in p), None)
+
+            if cat_overrides:
+                if cat_param_name:
+                    tlt_kwargs[cat_param_name] = cat_overrides
+                else:
+                    logger.warning(
+                        "Model %s: TagLevelThresholds does not support category overrides; override_tlt has no effect",
+                        model_id,
+                    )
+
+            if tag_overrides:
+                if tag_param_name:
+                    tlt_kwargs[tag_param_name] = tag_overrides
+                else:
+                    logger.warning(
+                        "Model %s: TagLevelThresholds does not support tag overrides; override_tlt has no effect",
+                        model_id,
+                    )
+
+        processors.append(TagLevelThresholds(**tlt_kwargs))
         logger.info("Model %s: using TagLevelThresholds(relative_offset=%.2f)", model_id, tlt_relative_offset)
     else:
         kwargs: dict[str, Any] = {"threshold": default_threshold}
@@ -243,7 +307,6 @@ async def infer_files(
     from vibe.session import InferenceCancelled
 
     stats = PhaseStats(model_id=model_cfg.model_id)
-    inf_cfg = config.inference
 
     # Build file source from the pre-resolved local paths.
     source = LocalFileSource(file_infos)
@@ -295,12 +358,14 @@ async def infer_files(
     print(f"  {stats.skipped} items already cached")
     print()
 
+    eff = config.resolved_output_filter(model_cfg)
     processors = build_result_processors(
         model_cfg.model_id,
-        prefer_tag_level_thresholds=inf_cfg.prefer_tag_level_thresholds,
-        tlt_relative_offset=inf_cfg.tag_level_threshold_relative_offset,
-        default_threshold=inf_cfg.default_threshold,
-        category_thresholds=inf_cfg.category_thresholds,
+        prefer_tag_level_thresholds=eff.prefer_tag_level_thresholds,
+        tlt_relative_offset=eff.tag_level_threshold_relative_offset,
+        default_threshold=eff.default_threshold,
+        category_thresholds={cat: cfg.threshold for cat, cfg in eff.category_thresholds.items()},
+        output_filter=eff,
     )
 
     # Build inputs as (path_or_bytes, file_hash) tuples for inference backend.
@@ -363,11 +428,8 @@ async def infer_files(
                     duration_ms = int((time.monotonic() - t_start) * 1000)
 
                     # Count tags that will be available for pushing.
-                    tag_records = extract_tags(
-                        result_dict,
-                        prefix_mapping=config.tag_prefix_mapping,
-                        output_categories=inf_cfg.output_categories,
-                    )
+                    eff = config.resolved_output_filter(model_cfg)
+                    tag_records = extract_tags(result_dict, output_filter=eff)
 
                     try:
                         db.upsert_known_file(file_hash, mime=fi.mime, file_path=fi.local_path)
@@ -389,7 +451,7 @@ async def infer_files(
                         assert hydrus is not None  # narrowing: hydrus_reachable implies hydrus was provided
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
                         try:
-                            for svc in config.hydrus.output_tag_services:
+                            for svc in config.resolved_output_tag_services(model_cfg):
                                 hydrus.add_tags(
                                     hashes=[file_hash],
                                     service_key=svc.key,
@@ -480,8 +542,6 @@ async def push_cached_to_hydrus(
     Does NOT load the model; safe to run after the model has been unloaded.
     """
     stats = PhaseStats(model_id=model_cfg.model_id)
-    inf_cfg = config.inference
-    hydrus_cfg = config.hydrus
 
     if force:
         # Re-push everything that has been inferred, regardless of push status.
@@ -512,15 +572,12 @@ async def push_cached_to_hydrus(
             progress.tick(skipped=1)
             continue
 
-        tag_records = extract_tags(
-            cached,
-            prefix_mapping=config.tag_prefix_mapping,
-            output_categories=inf_cfg.output_categories,
-        )
+        eff = config.resolved_output_filter(model_cfg)
+        tag_records = extract_tags(cached, output_filter=eff)
         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
         try:
-            for svc in hydrus_cfg.output_tag_services:
+            for svc in config.resolved_output_tag_services(model_cfg):
                 hydrus.add_tags(
                     hashes=[file_hash],
                     service_key=svc.key,
