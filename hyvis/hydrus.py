@@ -195,26 +195,50 @@ class HydrusClient:
         progress_callback: Any | None = None,
     ) -> list[FileInfo]:
         """
-        Resolve local file paths for each FileInfo in-place.
-
-        Files whose path cannot be resolved are kept but with local_path=None.
+        Resolve local file paths for each FileInfo in-place concurrently using a thread pool.
         """
-        for idx, info in enumerate(file_infos):
-            try:
-                data = self._client.get_file_path(hash_=info.file_hash)
-                info.local_path = data.get("path")
-            except hydrus_api.APIError as exc:
-                if exc.response.status_code == 404:
-                    logger.debug("No local path for %s (404)", info.file_hash)
-                else:
-                    logger.warning("Unexpected error resolving path for %s: %s", info.file_hash, exc)
-            except hydrus_api.HydrusAPIException as exc:
-                logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
+        import concurrent.futures
+        import threading
 
-            if progress_callback is not None and idx % _PATH_LOG_INTERVAL == 0:
-                progress_callback(idx, len(file_infos))
+        # Use up to 16 concurrent threads for fast local parallel queries
+        max_workers = min(8, len(file_infos))
+        if max_workers <= 1:
+            for idx, info in enumerate(file_infos):
+                self._resolve_single_path(info)
+                if progress_callback is not None and idx % _PATH_LOG_INTERVAL == 0:
+                    progress_callback(idx, len(file_infos))
+            return file_infos
+
+        resolved_count = 0
+        lock = threading.Lock()
+
+        def worker(info: FileInfo) -> None:
+            nonlocal resolved_count
+            self._resolve_single_path(info)
+            if progress_callback is not None:
+                with lock:
+                    resolved_count += 1
+                    if resolved_count % _PATH_LOG_INTERVAL == 0 or resolved_count == len(file_infos):
+                        progress_callback(resolved_count, len(file_infos))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Consume the map iterator to block until all workers complete
+            list(executor.map(worker, file_infos))
 
         return file_infos
+
+    def _resolve_single_path(self, info: FileInfo) -> None:
+        """Helper to resolve a single file path synchronously."""
+        try:
+            data = self._client.get_file_path(hash_=info.file_hash)
+            info.local_path = data.get("path")
+        except hydrus_api.APIError as exc:
+            if exc.response.status_code == 404:
+                logger.debug("No local path for %s (404)", info.file_hash)
+            else:
+                logger.warning("Unexpected error resolving path for %s: %s", info.file_hash, exc)
+        except hydrus_api.HydrusAPIException as exc:
+            logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
 
     def add_tags(
         self,
