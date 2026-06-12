@@ -30,54 +30,19 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-# region ANSI helpers
-
-_RESET = "\033[0m"
-_BOLD = "\033[1m"
-_GREEN = "\033[92m"
-_CYAN = "\033[96m"
-_YELLOW = "\033[93m"
-_RED = "\033[91m"
-_DIM = "\033[2m"
-_MAGENTA = "\033[95m"
-
-
-class ColorFormatter(logging.Formatter):
-    COLORS = {
-        logging.DEBUG: _DIM,
-        logging.INFO: None,
-        logging.WARNING: _YELLOW,
-        logging.ERROR: _RED,
-        logging.CRITICAL: _RED + _BOLD,
-    }
-
-    def format(self, record):
-        color = self.COLORS.get(record.levelno)
-
-        # Save original values
-        orig_msg = record.msg
-        orig_lvl = record.levelname
-        orig_name = record.name
-
-        # Apply color to all parts if not INFO
-        if color:
-            record.levelname = f"{color}{orig_lvl:<8}{_RESET}"
-            record.name = f"{color}{orig_name}{_RESET}"
-            record.msg = f"{color}{orig_msg}{_RESET}"
-        else:
-            record.levelname = f"{orig_lvl:<8}"
-
-        formatted = super().format(record)
-
-        # Restore values
-        record.msg = orig_msg
-        record.levelname = orig_lvl
-        record.name = orig_name
-        return formatted
-
-
-def _c(text: str, *codes: str) -> str:
-    return "".join(codes) + text + _RESET
+from hyvis.logging_utils import (  # noqa: F401
+    _BOLD,
+    _CYAN,
+    _DIM,
+    _GREEN,
+    _MAGENTA,
+    _RED,
+    _RESET,
+    _YELLOW,
+    ColorFormatter,
+    _c,
+    setup_logging,
+)
 
 
 def _parse_version_number(value: str) -> int | None:
@@ -142,7 +107,7 @@ def _connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, 
         sys.exit(1)
 
     hydrus_version = api_version = boot_time = "unknown"
-    logger = logging.getLogger("main")
+    logger = logging.getLogger(__name__)
 
     try:
         version_info = hydrus.get_version_info()
@@ -344,22 +309,9 @@ async def main() -> int:
         return 1
 
     # Logging
-    effective_log_level = args.log_level or cfg.hyvis.log_level
-
     # todo: treat differently, maybe add -v/--verbose cli arg to make this debug, otherwise PIL log spam
-    handler = logging.StreamHandler()
-    handler.setFormatter(ColorFormatter("%(asctime)s  %(levelname)s %(name)s  %(message)s", datefmt="%H:%M:%S"))
-
-    logging.basicConfig(level=logging.WARN, handlers=[handler])
-    logging.getLogger().setLevel(getattr(logging, effective_log_level))
-    logging.getLogger("vibe").setLevel(getattr(logging, effective_log_level))
-
-    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-        logger = logging.getLogger("test")
-        logger.debug("This is a DEBUG message")
-        logger.info("This is an INFO message")
-        logger.warning("This is a WARNING message")
-        logger.error("This is an ERROR message")
+    effective_log_level = args.log_level or cfg.hyvis.log_level
+    setup_logging(effective_log_level)
 
     # CLI overrides for Hydrus connection
     if args.api_url or args.api_key:
