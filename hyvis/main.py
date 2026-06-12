@@ -44,6 +44,8 @@ from hyvis.logging_utils import (  # noqa: F401
     setup_logging,
 )
 
+from .bg_imports import start_imports, wait_for_imports
+
 
 def _parse_version_number(value: str) -> int | None:
     try:
@@ -301,6 +303,10 @@ async def main() -> int:
         print(_c(f"ERROR: Failed to parse config: {exc}", RED), file=sys.stderr)
         return 1
 
+    # preload heavy imports in background
+    backends = [m.backend for m in cfg.inference.models]
+    start_imports(backends)
+
     errors = cfg.validate()
     if errors:
         print(_c("ERROR: Invalid configuration:", RED), file=sys.stderr)
@@ -507,6 +513,9 @@ async def main() -> int:
                 signal.signal(signal.SIGINT, previous_sigint_handler)
 
     print()
+
+    # Wait for the background libraries to finish loading before starting database work
+    wait_for_imports()
 
     # Database
     from .db import Database
