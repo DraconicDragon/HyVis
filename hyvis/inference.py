@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .main import _MAGENTA, _c
+from .main import MAGENTA, _c
 
 if TYPE_CHECKING:
     from .config import AppConfig, ModelConfig, OutputFilterConfig
@@ -354,7 +354,7 @@ async def infer_files(
         return stats
 
     print()
-    print(_c("  Press c to cancel", _MAGENTA))
+    print(_c("  Press c to cancel", MAGENTA))
     print(f"  {stats.skipped} items already cached")
     print()
 

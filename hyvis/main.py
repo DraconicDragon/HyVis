@@ -31,14 +31,14 @@ from pathlib import Path
 from typing import Any
 
 from hyvis.logging_utils import (  # noqa: F401
-    _BOLD,
-    _CYAN,
-    _DIM,
-    _GREEN,
-    _MAGENTA,
-    _RED,
-    _RESET,
-    _YELLOW,
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    MAGENTA,
+    RED,
+    RESET,
+    YELLOW,
     ColorFormatter,
     _c,
     setup_logging,
@@ -96,14 +96,14 @@ def _connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, 
 
     hydrus = HydrusClient(cfg.hydrus.api_url, cfg.hydrus.api_key)
 
-    print(_c("Connecting to Hydrus...", _DIM), end="\r", flush=True)
+    print(_c("Connecting to Hydrus...", DIM), end="\r", flush=True)
     try:
         hydrus.verify_connection()
     except HydrusConnectionError as exc:
-        print(_c(f"\nERROR: Cannot connect to Hydrus: {exc}", _RED), file=sys.stderr)
+        print(_c(f"\nERROR: Cannot connect to Hydrus: {exc}", RED), file=sys.stderr)
         sys.exit(1)
     except HydrusError as exc:
-        print(_c(f"\nERROR: Hydrus API error: {exc}", _RED), file=sys.stderr)
+        print(_c(f"\nERROR: Hydrus API error: {exc}", RED), file=sys.stderr)
         sys.exit(1)
 
     hydrus_version = api_version = boot_time = "unknown"
@@ -169,60 +169,60 @@ def _print_confirmation(
     }.get(mode, mode)
 
     print()
-    print(_c("  ═══ HyVis | Operation Confirmation ════════════════════════════════", _BOLD, _CYAN))
+    print(_c("  ═══ HyVis | Operation Confirmation ════════════════════════════════", BOLD, CYAN))
     print()
-    print(_c("  Mode", _BOLD) + f"  {_c(mode_label, _YELLOW, _BOLD)}")
+    print(_c("  Mode", BOLD) + f"  {_c(mode_label, YELLOW, BOLD)}")
     print()
 
     # Hydrus
-    print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", _BOLD))
-    print(f"    URL        {_c(hydrus.api_url, _CYAN)}")
-    print(f"    Boot time  {_c(boot_time, _GREEN)}")
+    print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", BOLD))
+    print(f"    URL        {_c(hydrus.api_url, CYAN)}")
+    print(f"    Boot time  {_c(boot_time, GREEN)}")
     print()
 
     if mode != "push_only":
         # Queries
-        print(_c("  File Queries", _BOLD))
+        print(_c("  File Queries", BOLD))
         for q in hydrus.file_queries:
             if q.tag_service_keys:
                 names = []
                 for key in q.tag_service_keys:
                     name = service_name_by_key.get(key, "(unknown service)")
-                    names.append(f"{_c(name, _BOLD, _CYAN)} {_c(key, _DIM)}")
+                    names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
                 svc = ", ".join(names)
             else:
-                svc = _c("(all known tags)", _DIM)
+                svc = _c("(all known tags)", DIM)
             print(f"    service  {svc}")
             for tag in q.tags:
                 print(f"      tag    {tag}")
         print()
 
         # File count
-        count_col = _YELLOW if file_count == 0 else _GREEN
+        count_col = YELLOW if file_count == 0 else GREEN
         forced_note = "  (--force: cache bypassed)" if force else ""
         extra_note = (
             f"  (+{extra_hash_count} extra hash{'es' if extra_hash_count != 1 else ''})" if extra_hash_count else ""
         )
         print(
-            f"  {_c('Files to process', _BOLD)}  {_c(str(file_count), count_col, _BOLD)}"
-            f"{_c(extra_note, _DIM)}{_c(forced_note, _DIM)}"
+            f"  {_c('Files to process', BOLD)}  {_c(str(file_count), count_col, BOLD)}"
+            f"{_c(extra_note, DIM)}{_c(forced_note, DIM)}"
         )
         print()
 
     if mode != "infer_only":
         if mode == "push_only":
             # Output services
-            print(_c("  Output Tag Services (global)", _BOLD))
+            print(_c("  Output Tag Services (global)", BOLD))
             for svc in hydrus.output_tag_services:
                 name = service_name_by_key.get(svc.key, "(unknown service)")
-                print(f"    {_c(name, _BOLD, _CYAN)} {_c(svc.key, _DIM)}")
+                print(f"    {_c(name, BOLD, CYAN)} {_c(svc.key, DIM)}")
             print()
 
     if mode != "push_only":
         # Models
-        print(_c("  Models", _BOLD))
+        print(_c("  Models", BOLD))
         for i, m in enumerate(inf.models, 1):
-            print(f"    {i}. {_c(m.model_id, _BOLD)}")
+            print(f"    {i}. {_c(m.model_id, BOLD)}")
             print(f"       source           {m.source}")
             print(
                 f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
@@ -231,45 +231,45 @@ def _print_confirmation(
             print("       output services")
             for s in eff_svcs:
                 name = service_name_by_key.get(s.key, s.key)
-                print(f"         {_c(name, _BOLD, _CYAN)} {_c(s.key, _DIM)}")
+                print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
             if m.output_filter is not None:
                 print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
         print()
 
         # Output Filter
         of = config.output_filter
-        print(_c("  Output Filter (global)", _BOLD))
+        print(_c("  Output Filter (global)", BOLD))
         print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
         print(f"    TLT offset          {of.tag_level_threshold_relative_offset}")
         print(f"    default threshold   {of.default_threshold}")
         if of.category_thresholds:
             print("    category thresholds")
             for cat, cfg_ in of.category_thresholds.items():
-                tlt_note = _c(" [overrides TLT]", _DIM) if cfg_.override_tlt else ""
+                tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
                 print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
         cats = of.output_categories
         print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
         # tag inclusions/exclusions
         if of.include_tags:
-            print(_c(f"    include tags        {', '.join(of.include_tags)}", _GREEN))
+            print(_c(f"    include tags        {', '.join(of.include_tags)}", GREEN))
         if of.exclude_tags:
-            print(_c(f"    exclude tags        {', '.join(of.exclude_tags)}", _RED))
+            print(_c(f"    exclude tags        {', '.join(of.exclude_tags)}", RED))
 
         print()
 
         if of.tag_prefix_mapping:
             print("    tag prefix mapping")
             for cat, prefix in of.tag_prefix_mapping.items():
-                display_prefix = f"'{prefix}'" if prefix else _c("(none)", _DIM)
+                display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
                 print(f"      {cat:<14} → {display_prefix}")
         if of.max_tags_per_category:
             print(f"    max tags / category  {of.max_tags_per_category}")
-        print(f"\n    log level           {_c(config.hyvis.log_level, _YELLOW, _BOLD)}")
+        print(f"\n    log level           {_c(config.hyvis.log_level, YELLOW, BOLD)}")
         print()
 
     # Backup Reminder
-    print(_c("      It is strongly recommended to create/update your Hydrus backup.", _RED))
+    print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED))
     print()
 
 
@@ -280,14 +280,14 @@ async def main() -> int:
     args = _parse_args()
 
     if args.infer_only and args.push_only:
-        print(_c("ERROR: --infer-only and --push-only are mutually exclusive.", _RED), file=sys.stderr)
+        print(_c("ERROR: --infer-only and --push-only are mutually exclusive.", RED), file=sys.stderr)
         return 1
 
     mode = "infer_only" if args.infer_only else "push_only" if args.push_only else "default"
 
     # Load + validate config
     if not args.config.exists():
-        print(_c(f"ERROR: Config file not found: {args.config}", _RED), file=sys.stderr)
+        print(_c(f"ERROR: Config file not found: {args.config}", RED), file=sys.stderr)
         return 1
 
     from .config import AppConfig
@@ -298,12 +298,12 @@ async def main() -> int:
         import traceback
 
         traceback.print_exc()
-        print(_c(f"ERROR: Failed to parse config: {exc}", _RED), file=sys.stderr)
+        print(_c(f"ERROR: Failed to parse config: {exc}", RED), file=sys.stderr)
         return 1
 
     errors = cfg.validate()
     if errors:
-        print(_c("ERROR: Invalid configuration:", _RED), file=sys.stderr)
+        print(_c("ERROR: Invalid configuration:", RED), file=sys.stderr)
         for e in errors:
             print(f"  • {e}", file=sys.stderr)
         return 1
@@ -329,7 +329,7 @@ async def main() -> int:
 
     if mode != "push_only" and cfg.hydrus.file_queries and not any(q.tags for q in cfg.hydrus.file_queries):
         print(
-            _c("  Warning: all configured Hydrus file queries are empty; only extra hashes can produce files.", _YELLOW)
+            _c("  Warning: all configured Hydrus file queries are empty; only extra hashes can produce files.", YELLOW)
         )
 
     # For push-only we don't need to collect files from Hydrus.
@@ -343,22 +343,22 @@ async def main() -> int:
         # Collect candidate files
         from .hydrus import HydrusConnectionError
 
-        print(_c("Collecting candidate files...           ", _DIM), end="\r", flush=True)
+        print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
         try:
             raw_hashes = hydrus.collect_candidate_hashes(cfg.hydrus.file_queries)
         except HydrusConnectionError as exc:
-            print(_c(f"\nERROR: Hydrus connection lost while fetching files: {exc}", _RED), file=sys.stderr)
+            print(_c(f"\nERROR: Hydrus connection lost while fetching files: {exc}", RED), file=sys.stderr)
             return 1
 
         # Filter by MIME
         hash_list = sorted(raw_hashes)
         total_raw = len(hash_list)
         if total_raw:
-            print(_c(f"Fetching metadata for {total_raw} candidates...  ", _DIM), end="\r", flush=True)
+            print(_c(f"Fetching metadata for {total_raw} candidates...  ", DIM), end="\r", flush=True)
 
         def _inline_progress(label: str, done: int, total: int) -> None:
             pct = done / max(total, 1) * 100
-            line = _c(f"  {label}: {done}/{total} ({pct:.0f}%)", _DIM)
+            line = _c(f"  {label}: {done}/{total} ({pct:.0f}%)", DIM)
             sys.stdout.write(f"\r{line}   ")
             sys.stdout.flush()
 
@@ -373,7 +373,7 @@ async def main() -> int:
                     progress_callback=lambda d, t: _inline_progress("Filtering metadata", d, t),
                 )
             except HydrusConnectionError as exc:
-                print(_c(f"\nERROR: Hydrus connection lost during metadata fetch: {exc}", _RED), file=sys.stderr)
+                print(_c(f"\nERROR: Hydrus connection lost during metadata fetch: {exc}", RED), file=sys.stderr)
                 return 1
 
             _clear_line()
@@ -381,10 +381,10 @@ async def main() -> int:
             mime_rejected = total_raw - len(file_infos)
             if mime_rejected:
                 rejected_list = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
-                print(_c(f"  Rejected {mime_rejected} files with unsupported MIME types: {rejected_list}", _DIM))
+                print(_c(f"  Rejected {mime_rejected} files with unsupported MIME types: {rejected_list}", DIM))
 
             if not file_infos and args.extra_hash_file is None:
-                print(_c("\nAll files were filtered by MIME type. Nothing to do.", _YELLOW))
+                print(_c("\nAll files were filtered by MIME type. Nothing to do.", YELLOW))
                 return 0
 
             try:
@@ -393,14 +393,14 @@ async def main() -> int:
                     progress_callback=lambda d, t: _inline_progress("Resolving paths", d, t),
                 )
             except HydrusConnectionError as exc:
-                print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", _RED), file=sys.stderr)
+                print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", RED), file=sys.stderr)
                 return 1
 
             _clear_line()
 
             no_path_count = sum(1 for fi in file_infos if not fi.local_path)
             if no_path_count:
-                print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', _YELLOW)}")
+                print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', YELLOW)}")
 
             actionable_count = sum(1 for fi in file_infos if fi.local_path)
 
@@ -408,47 +408,47 @@ async def main() -> int:
             try:
                 extra_hash_values = load_extra_hashes(args.extra_hash_file)
             except OSError as exc:
-                print(_c(f"ERROR: Failed to read extra hash file: {exc}", _RED), file=sys.stderr)
+                print(_c(f"ERROR: Failed to read extra hash file: {exc}", RED), file=sys.stderr)
                 return 1
             except ValueError as exc:
-                print(_c(f"ERROR: Invalid extra hash file: {exc}", _RED), file=sys.stderr)
+                print(_c(f"ERROR: Invalid extra hash file: {exc}", RED), file=sys.stderr)
                 return 1
 
             if extra_hash_values:
                 print(
-                    _c(f"Fetching metadata for {len(extra_hash_values)} extra hashes...  ", _DIM), end="\r", flush=True
+                    _c(f"Fetching metadata for {len(extra_hash_values)} extra hashes...  ", DIM), end="\r", flush=True
                 )
                 try:
                     extra_infos, extra_rejected_mimes = hydrus.filter_by_mime(extra_hash_values)
                     extra_infos = hydrus.resolve_paths(extra_infos)
                 except HydrusConnectionError as exc:
                     print(
-                        _c(f"\nERROR: Hydrus connection lost while fetching extra hashes: {exc}", _RED), file=sys.stderr
+                        _c(f"\nERROR: Hydrus connection lost while fetching extra hashes: {exc}", RED), file=sys.stderr
                     )
                     return 1
 
                 extra_count = len(extra_infos)
                 if extra_rejected_mimes:
                     rejected_list = ", ".join(sorted(extra_rejected_mimes))
-                    print(f"\r{_c(f'  Rejected extra hashes with unsupported MIME types: {rejected_list}', _DIM)}  ")
+                    print(f"\r{_c(f'  Rejected extra hashes with unsupported MIME types: {rejected_list}', DIM)}  ")
 
                 missing_extra = len(extra_hash_values) - extra_count
                 if missing_extra:
                     print(
-                        f"\n  {_c(f'Warning: {missing_extra} extra hash(es) were not found or have no usable local path', _YELLOW)}"
+                        f"\n  {_c(f'Warning: {missing_extra} extra hash(es) were not found or have no usable local path', YELLOW)}"
                     )
 
                 if extra_infos:
                     file_infos.extend(extra_infos)
                     actionable_count = sum(1 for fi in file_infos if fi.local_path)
             else:
-                print(_c("  Warning: extra hash file was empty.", _YELLOW))
+                print(_c("  Warning: extra hash file was empty.", YELLOW))
 
         if not file_infos:
             if args.extra_hash_file is not None:
-                print(_c("\nNo files matched the configured queries or extra-hash list. Nothing to do.", _YELLOW))
+                print(_c("\nNo files matched the configured queries or extra-hash list. Nothing to do.", YELLOW))
             else:
-                print(_c("\nNo files matched the configured queries. Nothing to do.", _YELLOW))
+                print(_c("\nNo files matched the configured queries. Nothing to do.", YELLOW))
             return 0
 
     # Confirmation screen
@@ -465,7 +465,7 @@ async def main() -> int:
     )
 
     if mode != "push_only" and actionable_count == 0:
-        print(_c("No actionable files. Exiting.", _YELLOW))
+        print(_c("No actionable files. Exiting.", YELLOW))
         return 0
 
     if not args.yes:
@@ -474,7 +474,7 @@ async def main() -> int:
         try:
             input("  Press ENTER to start, or Ctrl+C to abort: ")
         except (KeyboardInterrupt, EOFError):
-            print(_c("\n\nAborted.", _YELLOW))
+            print(_c("\n\nAborted.", YELLOW))
             return 0
         finally:
             signal.signal(signal.SIGINT, previous_sigint_handler)
@@ -482,15 +482,15 @@ async def main() -> int:
     # Prompt to close Hydrus (free up RAM for the model).
     if mode in ("infer_only", "default"):
         print()
-        print(_c("  File paths have been collected from Hydrus.", _GREEN))
+        print(_c("  File paths have been collected from Hydrus.", GREEN))
         if mode == "infer_only":
-            print(_c("  You may now close Hydrus to free memory before inference begins.", _YELLOW))
+            print(_c("  You may now close Hydrus to free memory before inference begins.", YELLOW))
             prompt_text = "  Press ENTER when ready to start inference: "
         else:
             print(
                 _c(
                     "  You may now close Hydrus to free memory | inference will cache results and retry pushes if needed.",
-                    _YELLOW,
+                    YELLOW,
                 )
             )
             prompt_text = "  Press ENTER to start inference: "
@@ -501,7 +501,7 @@ async def main() -> int:
             try:
                 input(prompt_text)
             except (KeyboardInterrupt, EOFError):
-                print(_c("\n\nAborted.", _YELLOW))
+                print(_c("\n\nAborted.", YELLOW))
                 return 0
             finally:
                 signal.signal(signal.SIGINT, previous_sigint_handler)
@@ -515,7 +515,7 @@ async def main() -> int:
     try:
         config_toml = args.config.read_text()
     except OSError as exc:
-        print(_c(f"ERROR: Failed to read config file: {exc}", _RED), file=sys.stderr)
+        print(_c(f"ERROR: Failed to read config file: {exc}", RED), file=sys.stderr)
         return 1
 
     db_path = Path(cfg.database.path)
@@ -534,14 +534,14 @@ async def main() -> int:
         db.start_run(run_id=run_id, config_toml=config_toml)
 
         for model_cfg in cfg.inference.models:
-            print(_c(f"  Using model: {model_cfg.model_id}", _BOLD, _CYAN))
+            print(_c(f"  Using model: {model_cfg.model_id}", BOLD, CYAN))
             print()
 
             # --- Step 0: push previously-inferred-but-not-pushed ---
             if mode in ("default", "push_only"):
                 pending_hashes = db.bulk_push_pending(model_cfg.model_id)
                 if pending_hashes and mode == "default":
-                    print(_c(f"  Pushing {len(pending_hashes)} previously cached result(s) to Hydrus...", _DIM))
+                    print(_c(f"  Pushing {len(pending_hashes)} previously cached result(s) to Hydrus...", DIM))
                     progress = Progress(total=len(pending_hashes))
                     catchup_stats = await push_cached_to_hydrus(
                         model_cfg,
@@ -579,7 +579,7 @@ async def main() -> int:
                 total_push_ok += infer_stats.push_ok
                 # Note: we don't add infer_stats.push_errors yet; Phase 2 will account for them.
 
-                print(f"\n  {_c('Inference summary:', _BOLD)}")
+                print(f"\n  {_c('Inference summary:', BOLD)}")
                 print(f"    Cached OK : {infer_stats.ok}")
                 print(f"    Errors    : {infer_stats.errors}")
                 print(f"    Skipped   : {infer_stats.skipped}")
@@ -587,7 +587,7 @@ async def main() -> int:
 
                 if infer_stats.aborted_early:
                     run_status = "aborted"
-                    print(_c(f"\n  ABORTED: {infer_stats.abort_reason}", _RED))
+                    print(_c(f"\n  ABORTED: {infer_stats.abort_reason}", RED))
                     break
 
             # --- Phase 2: Push to Hydrus ---
@@ -610,22 +610,22 @@ async def main() -> int:
                     push_total = len(pending_after)
 
                 if push_total == 0 and mode == "push_only":
-                    print(_c("  No cached results pending push for this model.", _YELLOW))
+                    print(_c("  No cached results pending push for this model.", YELLOW))
                     continue
 
                 if infer_stats is not None and infer_stats.hydrus_suspended:
                     print(
                         _c(
                             f"\n  Hydrus became unreachable during inference. Retrying {push_total} pending pushes...",
-                            _YELLOW,
+                            YELLOW,
                         )
                     )
                 elif mode == "default" and push_total > 0:
-                    print(_c(f"\n  {push_total} result(s) still pending push. Retrying...", _YELLOW))
+                    print(_c(f"\n  {push_total} result(s) still pending push. Retrying...", YELLOW))
                 else:
                     print()
 
-                print(_c("  Pushing to Hydrus...", _DIM))
+                print(_c("  Pushing to Hydrus...", DIM))
                 progress = Progress(total=max(push_total, 1))
                 push_stats = await push_cached_to_hydrus(
                     model_cfg,
@@ -640,7 +640,7 @@ async def main() -> int:
                 total_push_ok += push_stats.push_ok
                 total_push_err += push_stats.push_errors
 
-                print(f"\n  {_c('Push summary:', _BOLD)}")
+                print(f"\n  {_c('Push summary:', BOLD)}")
                 print(f"    Pushed OK : {push_stats.push_ok}")
                 print(f"    Errors    : {push_stats.push_errors}")
                 print(f"    Tags sent : {push_stats.total_tags_pushed}")
@@ -649,13 +649,13 @@ async def main() -> int:
                     print(
                         _c(
                             f"  {push_stats.push_errors} file(s) failed to push. Run again or use --push-only to retry.",
-                            _YELLOW,
+                            YELLOW,
                         )
                     )
 
                 if push_stats.aborted_early:
                     run_status = "aborted"
-                    print(_c(f"\n  ABORTED: {push_stats.abort_reason}", _RED))
+                    print(_c(f"\n  ABORTED: {push_stats.abort_reason}", RED))
                     break
 
             # Account for push errors if Phase 2 was skipped (meaning everything succeeded
@@ -666,15 +666,15 @@ async def main() -> int:
 
     # Final stats
     print()
-    print(_c("  ══ Run Complete ══════════════════════════════", _BOLD))
-    print(f"  Status    : {_c(run_status, _GREEN if run_status == 'done' else _YELLOW)}")
-    print(f"  Run ID    : {_c(run_id, _DIM)}")
+    print(_c("  ══ Run Complete ══════════════════════════════", BOLD))
+    print(f"  Status    : {_c(run_status, GREEN if run_status == 'done' else YELLOW)}")
+    print(f"  Run ID    : {_c(run_id, DIM)}")
     if mode in ("default", "infer_only"):
         print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped")
     if mode in ("default", "push_only"):
         print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
         if total_push_err:
-            print(_c("  Tip: run with --push-only to retry failed pushes.", _DIM))
+            print(_c("  Tip: run with --push-only to retry failed pushes.", DIM))
     print()
 
     return 0 if run_status == "done" else 1

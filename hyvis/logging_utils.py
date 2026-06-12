@@ -2,27 +2,27 @@ from __future__ import annotations
 
 import logging
 
-_RESET = "\033[0m"
-_BOLD = "\033[1m"
-_GREEN = "\033[92m"
-_CYAN = "\033[96m"
-_YELLOW = "\033[93m"
-_RED = "\033[91m"
-_DIM = "\033[2m"
-_MAGENTA = "\033[95m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[92m"
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+DIM = "\033[2m"
+MAGENTA = "\033[95m"
 
 
 def _c(text: str, *codes: str) -> str:
-    return "".join(codes) + text + _RESET
+    return "".join(codes) + text + RESET
 
 
 class ColorFormatter(logging.Formatter):
     COLORS = {
-        logging.DEBUG: _DIM,
+        logging.DEBUG: DIM,
         logging.INFO: None,
-        logging.WARNING: _YELLOW,
-        logging.ERROR: _RED,
-        logging.CRITICAL: _RED + _BOLD,
+        logging.WARNING: YELLOW,
+        logging.ERROR: RED,
+        logging.CRITICAL: RED + BOLD,
     }
 
     def format(self, record):
@@ -35,9 +35,9 @@ class ColorFormatter(logging.Formatter):
 
         # Apply color to all parts if not INFO
         if color:
-            record.levelname = f"{color}{orig_lvl:<8}{_RESET}"
-            record.name = f"{color}{orig_name}{_RESET}"
-            record.msg = f"{color}{orig_msg}{_RESET}"
+            record.levelname = f"{color}{orig_lvl:<8}{RESET}"
+            record.name = f"{color}{orig_name}{RESET}"
+            record.msg = f"{color}{orig_msg}{RESET}"
         else:
             record.levelname = f"{orig_lvl:<8}"
 
@@ -49,10 +49,11 @@ class ColorFormatter(logging.Formatter):
         record.name = orig_name
         return formatted
 
+
 def setup_logging(level: str) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(ColorFormatter("%(asctime)s  %(levelname)s %(name)s  %(message)s", datefmt="%H:%M:%S"))
-    
+
     logging.basicConfig(level=logging.WARNING, handlers=[handler])
     logging.getLogger().setLevel(getattr(logging, level.upper()))
     logging.getLogger("vibe").setLevel(getattr(logging, level.upper()))
