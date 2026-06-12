@@ -40,7 +40,7 @@ class Progress:
 
         self._samples = deque()  # (timestamp, active_items)
         self._recent_active = 0
-        self._window_seconds = 10.0
+        self._window_seconds = 25.0
 
     def reset_start_time(self) -> None:
         """Reset the start timer to the current time (e.g. after model loading completes)."""
