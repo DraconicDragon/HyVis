@@ -1,0 +1,63 @@
+[hyvis]
+log_level = "INFO"
+
+[hydrus]
+api_url = "http://127.0.0.1:45678"
+api_key = "f8699964164b28603321f12ae7dcd06d69e541d49e42c0147be845282519ce9a"
+
+[[hydrus.file_queries]]
+tags = [
+    "-rating:general",
+    "-rating:sensitive",
+    "-rating:questionable",
+    "-rating:explicit",
+]
+tag_service_keys = [] # empty == "all known tags"
+
+[hydrus.output_tag_services]
+keys = ["1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464"]
+
+
+# *** Output filter  (global) ***
+
+[output_filter]
+prefer_tag_level_thresholds = true
+tag_level_threshold_relative_offset = 0.1
+default_threshold = 0.4
+# *** Output selection ***
+
+output_categories = []
+include_tags = [
+    "explicit",
+    "general",
+]
+exclude_tags = ["1girl"]
+
+
+# *** Tag prefix mapping ***
+
+[output_filter.tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+"contributor" = ""
+
+
+# *** Models ***
+
+[[inference.models]]
+model_id = "wdv4-convnextv2-huge-dbv4-full"
+source = "/home/drac/dev/models/hf/convnextv2_huge.dbv4-full"
+device = "gpu"
+batch_size = 3
+# backend  = "pytorch"   # "pytorch" | "onnx" | "auto"
+precision = "fp16" # "fp16" | "bf16" | "fp32" | "auto"
+
+
+[database]
+path = "data/hyvis.db"

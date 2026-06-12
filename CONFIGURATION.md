@@ -3,7 +3,7 @@
 
 # Configuration Guide
 
-This document outlines all available settings in your `configuration.toml` file.
+This document outlines all available settings in your configuration TOML files.
 
 If you see any parameter's *Description* column prefixed with "**S2C**", it means subject to change in future updates.
 
@@ -103,7 +103,7 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 | `prefer_tag_level_thresholds` | Boolean | `true` | When `true`, uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* |
 | `tag_level_threshold_relative_offset` | Float | `0.0` | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. |
 | `default_threshold` | Float | `0.4` | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. |
-| `output_categories` | Array of Strings | `[]` | Limit output tags to specified categories. Empty list outputs all categories. <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`* |
+| `output_categories` | Array of Strings | `[]` | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`* |
 | `include_tags` | Array of Strings | `[]` | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). |
 | `exclude_tags` | Array of Strings | `[]` | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. |
 

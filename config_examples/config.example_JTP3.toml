@@ -48,7 +48,9 @@ default_threshold = 0.6
 
 # *** Output selection ***
 
-# Only emit tags from these categories. Empty list → all categories.
+# Only emit tags from these categories.  
+# Empty list -> no categories -> you should probably look at using include_tags
+# For a list of available categories please check https://github.com/DraconicDragon/HyVis/blob/main/CONFIGURATION.md#available-categories
 output_categories = [
     "rating",
     "general",
