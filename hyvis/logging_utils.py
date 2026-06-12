@@ -55,5 +55,15 @@ def setup_logging(level: str) -> None:
     handler.setFormatter(ColorFormatter("%(asctime)s  %(levelname)s %(name)s  %(message)s", datefmt="%H:%M:%S"))
 
     logging.basicConfig(level=logging.WARNING, handlers=[handler])
-    logging.getLogger().setLevel(getattr(logging, level.upper()))
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper()))
     logging.getLogger("vibe").setLevel(getattr(logging, level.upper()))
+
+    # testing log messages, only log if loglevel is debug
+    if level.upper() == "DEBUG":
+        logger = logging.getLogger("hyvis")
+        logger.debug("Logging initialized successfully")
+        logger.info("Logging initialized successfully")
+        logger.warning("Logging initialized successfully")
+        logger.error("Logging initialized successfully")
+        logger.critical("Logging initialized successfully")
