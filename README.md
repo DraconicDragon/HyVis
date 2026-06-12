@@ -1,4 +1,6 @@
-> This README is still a work in progress, there will be some missing information towards the end
+> This README is still a work in progress, there is missing information in this readme
+> Things are subject to change, some work is going on in the dev branch (+v0.10.x) which has changed the output filtering control part in the toml without backwards compatibility for current configs (v0.9.x)
+> Similar things may or may not happen, but I think the output filter control is the only major one
 
 # HyVis - Hydrus Tagger
 
