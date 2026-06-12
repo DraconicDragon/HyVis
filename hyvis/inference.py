@@ -132,7 +132,7 @@ def extract_tags(
 
             # 3. Check Categories: If not explicitly included, fallback to standard category checks
             if not is_allowed:
-                if categories and category not in categories:
+                if not categories or category not in categories:
                     continue
 
             cat_records.append(

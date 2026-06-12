@@ -445,6 +445,13 @@ def _validate_output_filter(f: OutputFilterConfig, prefix: str) -> list[str]:
         if not (0.0 <= cfg.threshold <= 1.0):
             errors.append(f"{prefix} tag_thresholds '{tag}': threshold must be in [0.0, 1.0]")
 
+    # Error if both output_categories and include_tags are empty
+    if not f.output_categories and not f.include_tags:
+        errors.append(
+            f"{prefix}: Both 'output_categories' and 'include_tags' are empty. "
+            "No tags will ever be emitted under this configuration."
+        )
+
     for cat, limit in f.max_tags_per_category.items():
         if limit < 1:
             errors.append(f"{prefix} max_tags_per_category '{cat}': must be ≥ 1")
