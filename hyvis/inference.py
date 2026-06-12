@@ -29,6 +29,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from hyvis.logging_utils import BOLD
+
 from .main import MAGENTA, _c
 
 if TYPE_CHECKING:
@@ -354,9 +356,11 @@ async def infer_files(
         return stats
 
     print()
-    print(_c("  Press c to cancel", MAGENTA))
-    print(f"  {stats.skipped} items already cached")
+    print(_c("  Press Ctrl+C to cancel", MAGENTA, BOLD))
     print()
+    if stats.skipped != 0:
+        print(f"  {stats.skipped} items already cached")
+        print()
 
     eff = config.resolved_output_filter(model_cfg)
     processors = build_result_processors(
@@ -666,8 +670,9 @@ def _start_cancel_listener(
                 char = sys.stdin.read(1)
                 if stop_event.is_set():
                     break
-                if char.lower() == "c":
-                    logger.warning("Cancel requested for model %s (c key)", model_id)
+                # \x03 is the control character sent by Ctrl+C
+                if char == "\x03":
+                    logger.warning("Cancel requested for model %s (Ctrl+C key)", model_id)
                     session.cancel_current_inference()
                     break
         except Exception:
