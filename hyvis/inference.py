@@ -393,6 +393,8 @@ async def infer_files(
 
     try:
         with vibe.load(model_cfg.model_id, **load_kwargs) as session:
+            progress.reset_start_time()
+
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
             async for chunk in session.infer_async(
                 inputs,
