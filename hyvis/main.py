@@ -290,6 +290,9 @@ async def main() -> int:
     try:
         cfg = AppConfig.from_file(args.config)
     except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
         print(_c(f"ERROR: Failed to parse config: {exc}", _RED), file=sys.stderr)
         return 1
 
