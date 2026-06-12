@@ -134,7 +134,7 @@ def _connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, 
         except Exception as exc:
             logger.warning("Hydrus client info lookup failed: %s", exc)
     else:
-        boot_time = "requires Hydrus v672+"
+        boot_time = "(requires Hydrus v672+ / API v92+)"
 
     try:
         services = hydrus.get_services().get("services", {})
@@ -176,10 +176,8 @@ def _print_confirmation(
     print()
 
     # Hydrus
-    print(_c("  Hydrus API", _BOLD))
+    print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", _BOLD))
     print(f"    URL        {_c(hydrus.api_url, _CYAN)}")
-    print(f"    Hydrus     {_c(hydrus_version, _YELLOW, _BOLD)}")
-    print(f"    API        {_c(api_version, _YELLOW, _BOLD)}")
     print(f"    Boot time  {_c(boot_time, _GREEN)}")
     print()
 
@@ -224,43 +222,51 @@ def _print_confirmation(
     if mode != "push_only":
         # Models
         print(_c("  Models", _BOLD))
-        for m in inf.models:
-            print(f"    {_c(m.model_id, _BOLD)}")
-            print(f"      source    {m.source}")
+        for i, m in enumerate(inf.models, 1):
+            print(f"    {i}. {_c(m.model_id, _BOLD)}")
+            print(f"       source           {m.source}")
             print(
-                f"      device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
+                f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
             )
             eff_svcs = config.resolved_output_tag_services(m)
-            svc_names = [service_name_by_key.get(s.key, s.key) for s in eff_svcs]
-            print(f"      output services  {', '.join(svc_names)}")
+            print("       output services")
+            for s in eff_svcs:
+                name = service_name_by_key.get(s.key, s.key)
+                print(f"         {_c(name, _BOLD, _CYAN)} {_c(s.key, _DIM)}")
             if m.output_filter is not None:
-                print(f"      output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
+                print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
         print()
 
         # Output Filter
         of = config.output_filter
         print(_c("  Output Filter (global)", _BOLD))
-        print(f"    prefer TLT         {of.prefer_tag_level_thresholds}")
-        print(f"    TLT offset         {of.tag_level_threshold_relative_offset}")
-        print(f"    default threshold  {of.default_threshold}")
+        print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
+        print(f"    TLT offset          {of.tag_level_threshold_relative_offset}")
+        print(f"    default threshold   {of.default_threshold}")
         if of.category_thresholds:
+            print("    category thresholds")
             for cat, cfg_ in of.category_thresholds.items():
-                tlt_note = "  (override TLT)" if cfg_.override_tlt else ""
-                print(f"      {cat}: {cfg_.threshold}{tlt_note}")
+                tlt_note = _c(" [overrides TLT]", _DIM) if cfg_.override_tlt else ""
+                print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
         cats = of.output_categories
-        print(f"    output categories  {', '.join(cats) if cats else '(all)'}")
+        print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
         # tag inclusions/exclusions
         if of.include_tags:
-            print(f"    include tags       {', '.join(of.include_tags)}")
+            print(_c(f"    include tags        {', '.join(of.include_tags)}", _GREEN))
         if of.exclude_tags:
-            print(f"    exclude tags       {', '.join(of.exclude_tags)}")
+            print(_c(f"    exclude tags        {', '.join(of.exclude_tags)}", _RED))
+
+        print()
 
         if of.tag_prefix_mapping:
-            print(f"    tag prefix mapping {of.tag_prefix_mapping}")
+            print("    tag prefix mapping")
+            for cat, prefix in of.tag_prefix_mapping.items():
+                display_prefix = f"'{prefix}'" if prefix else _c("(none)", _DIM)
+                print(f"      {cat:<14} → {display_prefix}")
         if of.max_tags_per_category:
-            print(f"    max tags / category {of.max_tags_per_category}")
-        print(f"    log level          {_c(config.hyvis.log_level, _YELLOW, _BOLD)}")
+            print(f"    max tags / category  {of.max_tags_per_category}")
+        print(f"\n    log level           {_c(config.hyvis.log_level, _YELLOW, _BOLD)}")
         print()
 
     # Backup Reminder
