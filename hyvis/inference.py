@@ -356,7 +356,7 @@ async def infer_files(
         return stats
 
     print()
-    print(_c("  Press Ctrl+C to cancel", MAGENTA, BOLD))
+    print(_c("  Press 'q' to cancel current model", MAGENTA, BOLD))
     print()
     if stats.skipped != 0:
         print(f"  {stats.skipped} items already cached")
@@ -670,9 +670,9 @@ def _start_cancel_listener(
                 char = sys.stdin.read(1)
                 if stop_event.is_set():
                     break
-                # \x03 is the control character sent by Ctrl+C
-                if char == "\x03":
-                    logger.warning("Cancel requested for model %s (Ctrl+C key)", model_id)
+
+                if char in ("q", "Q"):
+                    logger.warning("Cancel requested for model %s ('q' key)", model_id)
                     session.cancel_current_inference()
                     break
         except Exception:
