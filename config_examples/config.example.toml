@@ -47,6 +47,35 @@ tag_level_threshold_relative_offset = 0.0
 # TLT uses this if it has missing data.
 default_threshold = 0.4
 
+
+# *** Output selection ***
+
+# Only emit tags from these categories.  Empty list → all categories.
+# For a list of available categories please check https://github.com/DraconicDragon/HyVis/blob/main/CONFIGURATION.md#available-categories
+output_categories = [
+    "rating",
+    "general",
+    #"artist",
+    "contributor",
+    "copyright",
+    "character",
+    "meta",
+    "species",
+    "lore",
+]
+
+# Explicitly include these specific tags, regardless of output_categories setting
+include_tags = [
+    # "some_unlisted_meta_tag",
+    # "particular_artist_tag",
+]
+
+# Explicitly drop these specific tags, regardless of output_categories setting
+exclude_tags = [
+    # "generic_background",
+]
+
+
 # Per-category threshold overrides.
 # Two forms are accepted:
 #   category = 0.7                                        plain threshold, override_tlt is false by default
@@ -74,7 +103,7 @@ default_threshold = 0.4
 # [output_filter.max_tags_per_category]
 # "rating" = 1
 
-# --- Tag prefix mapping ---
+# *** Tag prefix mapping ***
 
 # Maps category name → prefix prepended to each tag before writing to Hydrus.
 # Empty string = no prefix.
@@ -89,35 +118,6 @@ default_threshold = 0.4
 "species" = "species:"
 "lore" = "lore:"
 "contributor" = ""
-
-
-# *** Output selection ***
-
-# Only emit tags from these categories.  Empty list → all categories.
-# todo
-# For a list of available categories please check https://github.com/DraconicDragon/HyVis/blob/main/CONFIGURATION.md#available-categories
-output_categories = [
-    "rating",
-    "general",
-    #"artist",
-    "contributor",
-    "copyright",
-    "character",
-    "meta",
-    "species",
-    "lore",
-]
-
-# Explicitly include these specific tags, regardless of output_categories setting
-include_tags = [
-    # "some_unlisted_meta_tag",
-    # "particular_artist_tag",
-]
-
-# Explicitly drop these specific tags, regardless of output_categories setting
-exclude_tags = [
-    # "generic_background",
-]
 
 
 # *** Models ***

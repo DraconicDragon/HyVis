@@ -45,31 +45,6 @@ tag_level_threshold_relative_offset = 0.0
 # TLT uses this if it has missing data.
 default_threshold = 0.6
 
-# Per-category threshold overrides.
-# Two forms are accepted:
-#   category = 0.7                                        plain threshold, override_tlt is false by default
-#   category = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
-#
-# Tag names with special characters must be quoted.
-[output_filter.category_thresholds]
-"character" = 0.7
-"artist" = 0.9    # most models don't support it anyway and when they do, have low artist accuracy
-
-# --- Tag prefix mapping ---
-
-# Maps category name → prefix prepended to each tag before writing to Hydrus.
-# Empty string = no prefix.
-[output_filter.tag_prefix_mapping]
-"rating" = "rating:"
-"general" = ""
-"artist" = "creator:"
-"copyright" = "series:"
-"character" = "character:"
-"meta" = "meta:"
-"species" = "species:"
-"lore" = "lore:"
-"contributor" = ""
-
 
 # *** Output selection ***
 
@@ -91,6 +66,32 @@ include_tags = []
 
 # Explicitly drop these specific tags, regardless of output_categories setting
 exclude_tags = []
+
+
+# Per-category threshold overrides.
+# Two forms are accepted:
+#   category = 0.7                                        plain threshold, override_tlt is false by default
+#   category = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
+#
+# Tag names with special characters must be quoted.
+[output_filter.category_thresholds]
+"character" = 0.7
+"artist" = 0.9    # most models don't support it anyway and when they do, have low artist accuracy
+
+# *** Tag prefix mapping ***
+
+# Maps category name → prefix prepended to each tag before writing to Hydrus.
+# Empty string = no prefix.
+[output_filter.tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+"contributor" = ""
 
 
 # *** Models ***

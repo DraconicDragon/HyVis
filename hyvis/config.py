@@ -108,6 +108,15 @@ class OutputFilterConfig:
     default_threshold: float = 0.4
     """Global fallback score threshold."""
 
+    output_categories: list[str] = field(default_factory=list)
+    """Only emit tags from these categories. Empty → all categories."""
+
+    include_tags: list[str] = field(default_factory=list)
+    """Tags that are always included, bypassing output_categories."""
+
+    exclude_tags: list[str] = field(default_factory=list)
+    """Tags that are always excluded, even if their category is allowed."""
+
     category_thresholds: dict[str, CategoryThresholdConfig] = field(default_factory=dict)
     """Per-category threshold overrides. Keys are category names."""
 
@@ -124,15 +133,6 @@ class OutputFilterConfig:
     Maximum number of tags to emit per category.
     Tags are selected by descending score.  Omitted categories → no limit.
     """
-
-    output_categories: list[str] = field(default_factory=list)
-    """Only emit tags from these categories. Empty → all categories."""
-
-    include_tags: list[str] = field(default_factory=list)
-    """Tags that are always included, bypassing output_categories."""
-
-    exclude_tags: list[str] = field(default_factory=list)
-    """Tags that are always excluded, even if their category is allowed."""
 
     # Internal: raw keys present in TOML for this section.
     # Used by resolved_output_filter() to distinguish "not set" from
@@ -239,13 +239,13 @@ class AppConfig:
                 g.tag_level_threshold_relative_offset,
             ),
             default_threshold=_pick("default_threshold", m.default_threshold, g.default_threshold),
+            output_categories=_pick("output_categories", m.output_categories, g.output_categories),
+            include_tags=_pick("include_tags", m.include_tags, g.include_tags),
+            exclude_tags=_pick("exclude_tags", m.exclude_tags, g.exclude_tags),
             category_thresholds=_pick("category_thresholds", m.category_thresholds, g.category_thresholds),
             tag_thresholds=_pick("tag_thresholds", m.tag_thresholds, g.tag_thresholds),
             tag_prefix_mapping=_pick("tag_prefix_mapping", m.tag_prefix_mapping, g.tag_prefix_mapping),
             max_tags_per_category=_pick("max_tags_per_category", m.max_tags_per_category, g.max_tags_per_category),
-            output_categories=_pick("output_categories", m.output_categories, g.output_categories),
-            include_tags=_pick("include_tags", m.include_tags, g.include_tags),
-            exclude_tags=_pick("exclude_tags", m.exclude_tags, g.exclude_tags),
         )
 
     def resolved_output_tag_services(self, model_cfg: ModelConfig) -> list[OutputTagService]:
@@ -377,13 +377,13 @@ def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
         prefer_tag_level_thresholds=bool(raw.get("prefer_tag_level_thresholds", True)),
         tag_level_threshold_relative_offset=float(raw.get("tag_level_threshold_relative_offset", 0.0)),
         default_threshold=float(raw.get("default_threshold", 0.4)),
+        output_categories=list(raw.get("output_categories", [])),
+        include_tags=list(raw.get("include_tags", [])),
+        exclude_tags=list(raw.get("exclude_tags", [])),
         category_thresholds=category_thresholds,
         tag_thresholds=tag_thresholds,
         tag_prefix_mapping={str(k): str(v) for k, v in raw.get("tag_prefix_mapping", {}).items()},
         max_tags_per_category=max_tags,
-        output_categories=list(raw.get("output_categories", [])),
-        include_tags=list(raw.get("include_tags", [])),
-        exclude_tags=list(raw.get("exclude_tags", [])),
         _raw_keys=frozenset(raw.keys()),
     )
 
