@@ -272,6 +272,8 @@ def _print_confirmation(
 
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED))
+    if mode in ("infer_only", "default"):
+        print(_c("      Tip: File paths are resolved. You can safely close Hydrus now to free up memory.", YELLOW))
     print()
 
 
@@ -484,33 +486,6 @@ async def main() -> int:
             return 0
         finally:
             signal.signal(signal.SIGINT, previous_sigint_handler)
-
-    # Prompt to close Hydrus (free up RAM for the model).
-    if mode in ("infer_only", "default"):
-        print()
-        print(_c("  File paths have been collected from Hydrus.", GREEN))
-        if mode == "infer_only":
-            print(_c("  You may now close Hydrus to free memory before inference begins.", YELLOW))
-            prompt_text = "  Press ENTER when ready to start inference: "
-        else:
-            print(
-                _c(
-                    "  You may now close Hydrus to free memory | inference will cache results and retry pushes if needed.",
-                    YELLOW,
-                )
-            )
-            prompt_text = "  Press ENTER to start inference: "
-
-        if not args.yes:
-            previous_sigint_handler = signal.getsignal(signal.SIGINT)
-            signal.signal(signal.SIGINT, signal.default_int_handler)
-            try:
-                input(prompt_text)
-            except (KeyboardInterrupt, EOFError):
-                print(_c("\n\nAborted.", YELLOW))
-                return 0
-            finally:
-                signal.signal(signal.SIGINT, previous_sigint_handler)
 
     print()
 
