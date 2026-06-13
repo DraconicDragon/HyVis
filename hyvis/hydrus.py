@@ -28,10 +28,33 @@ class HydrusConnectionError(HydrusError):
 
     @staticmethod
     def _extract_message(exc: hydrus_api.ConnectionError) -> str:
-        """Extract a useful error message from hydrus_api.ConnectionError."""
-        if exc.__cause__ is not None:
-            return str(exc.__cause__)
-        return "Connection error (no details available)"
+        """Extract raw details and append clean user-friendly suggestions."""
+        cause = exc.__cause__
+        raw_detail = str(cause) if cause is not None else str(exc)
+
+        msg = f"Connection failed: {raw_detail}\n"
+
+        if cause is not None and any(
+            term in str(cause) for term in ("Connection refused", "Failed to establish", "timeout")
+        ):
+            msg += (
+                "\nSuggestions:\n"
+                "  1. Check if Hydrus is running.\n"
+                "  2. Verify that the Client API is enabled in Hydrus settings (services -> Manage services -> client api).\n"
+                "  3. Check that the port in api_url matches Hydrus."
+            )
+        elif cause is not None and any(
+            term in str(cause) for term in ("Name or service not known", "getaddrinfo failed")
+        ):
+            msg += (
+                "\nSuggestions:\n"
+                "  1. Verify your network connection.\n"
+                "  2. Check that api_url in your config is correct."
+            )
+        else:
+            msg += "\nSuggestions:\n  • Check your Hydrus network connection, port settings or other related settings."
+
+        return msg
 
     @classmethod
     def from_hydrus_api(cls, exc: hydrus_api.ConnectionError) -> "HydrusConnectionError":

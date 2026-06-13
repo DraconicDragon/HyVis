@@ -46,6 +46,8 @@ from hyvis.logging_utils import (  # noqa: F401
 
 from .bg_imports import start_imports, wait_for_imports
 
+logger = logging.getLogger(__name__)
+
 
 def _parse_version_number(value: str) -> int | None:
     try:
@@ -102,14 +104,29 @@ def _connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, 
     try:
         hydrus.verify_connection()
     except HydrusConnectionError as exc:
-        print(_c(f"\nERROR: Cannot connect to Hydrus: {exc}", RED), file=sys.stderr)
+        original_exc: Exception = exc.original
+        logger.debug("Hydrus connection verification failed", exc_info=original_exc)
+        print(" " * 40, end="\r")
+        print(_c(f"ERROR: {exc}", RED), file=sys.stderr)
         sys.exit(1)
     except HydrusError as exc:
-        print(_c(f"\nERROR: Hydrus API error: {exc}", RED), file=sys.stderr)
+        original_exc: Exception | bool = getattr(exc, "original", True)
+        logger.debug("Hydrus API validation failed", exc_info=original_exc)
+        print(" " * 40, end="\r")
+
+        if hasattr(exc, "status_code") and exc.status_code in (401, 403):
+            print(
+                _c(
+                    f"ERROR: {exc}\n\nSuggestions:\n  • Your api_key appears to be unauthorized. Check your Hydrus API key settings.",
+                    RED,
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(_c(f"ERROR: Hydrus API error: {exc}", RED), file=sys.stderr)
         sys.exit(1)
 
     hydrus_version = api_version = boot_time = "unknown"
-    logger = logging.getLogger(__name__)
 
     try:
         version_info = hydrus.get_version_info()
