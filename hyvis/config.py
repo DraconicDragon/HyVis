@@ -188,7 +188,7 @@ class HydrusConfig:
     api_key: str
     file_queries: list[FileQueryConfig]
     output_tag_services: list[OutputTagService]  # Global output tag services.
-    remove_tags: list[RemoveTagConfig] = field(default_factory=list)
+    remove_tags: RemoveTagConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -294,13 +294,13 @@ class AppConfig:
         ]
 
         # Parse remove_tags
-        remove_tags = [
-            RemoveTagConfig(
-                tags=list(r["tags"]),
+        remove_tags = None
+        if "remove_tags" in h:
+            r = h["remove_tags"]
+            remove_tags = RemoveTagConfig(
+                tags=list(r.get("tags", [])),
                 tag_service_keys=list(r.get("tag_service_keys", [])),
             )
-            for r in h.get("remove_tags", [])
-        ]
 
         ots_data = h.get("output_tag_services", {})
         global_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []

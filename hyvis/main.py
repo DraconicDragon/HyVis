@@ -218,18 +218,18 @@ def _print_confirmation(
 
         if hydrus.remove_tags and mode in ("default", "push_only"):
             print(_c("  Cleanup Tags (removed after successful run)", BOLD))
-            for r in hydrus.remove_tags:
-                if r.tag_service_keys:
-                    names = []
-                    for key in r.tag_service_keys:
-                        name = service_name_by_key.get(key, "(unknown service)")
-                        names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-                    svc = ", ".join(names)
-                else:
-                    svc = _c("(all tag services)", DIM)
-                print(f"    service  {svc}")
-                for tag in r.tags:
-                    print(f"      tag    {_c(tag, RED)}")
+            r = hydrus.remove_tags
+            if r.tag_service_keys:
+                names = []
+                for key in r.tag_service_keys:
+                    name = service_name_by_key.get(key, "(unknown service)")
+                    names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+                svc = ", ".join(names)
+            else:
+                svc = _c("(all tag services)", DIM)
+            print(f"    service  {svc}")
+            for tag in r.tags:
+                print(f"      tag    {_c(tag, RED)}")
             print()
 
         # File count
@@ -682,7 +682,7 @@ async def main() -> int:
                     print(_c(f"\n  ABORTED: {push_stats.abort_reason}", RED))
                     break
 
-            # Account for push errors if Phase 2 was skipped 
+            # Account for push errors if Phase 2 was skipped
             # (meaning everything succeeded or nothing was tried).
             if mode == "default" and not run_push_pass:
                 if infer_stats is not None:
@@ -698,21 +698,17 @@ async def main() -> int:
 
             if successful_hashes:
                 print(_c(f"  Cleaning up search tags for {len(successful_hashes)} fully processed file(s)...", DIM))
-                cleanup_errors = 0
-                for r_cfg in cfg.hydrus.remove_tags:
-                    try:
-                        hydrus.delete_tags(
-                            hashes=successful_hashes,
-                            service_keys=r_cfg.tag_service_keys,
-                            tags=r_cfg.tags,
-                        )
-                    except Exception as exc:
-                        logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
-                        cleanup_errors += 1
-                if cleanup_errors == 0:
+                r_cfg = cfg.hydrus.remove_tags
+                try:
+                    hydrus.delete_tags(
+                        hashes=successful_hashes,
+                        service_keys=r_cfg.tag_service_keys,
+                        tags=r_cfg.tags,
+                    )
                     print(_c("  Cleanup completed successfully.", GREEN))
-                else:
-                    print(_c("  Cleanup completed with some errors.", YELLOW))
+                except Exception as exc:
+                    logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
+                    print(_c("  Cleanup completed with errors.", RED))
                 print()
 
     # Final stats
