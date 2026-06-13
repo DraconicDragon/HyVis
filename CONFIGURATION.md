@@ -5,16 +5,14 @@
 
 This document outlines all available settings in your configuration TOML files.
 
-If you see any parameter's *Description* column prefixed with "**S2C**", it means subject to change in future updates.
-
----
+<!-- If you see any parameter's *Description* column prefixed with "**S2C**", it means subject to change in future updates. -->
 
 ## Basics
 
 ### Structure
 
 - **Single brackets `[section]`**: Defines a single configuration group.
-- **Double brackets `[[section]]`**: Defines an array of tables. You can specify multiple of these sections in a row (for example, to query multiple sets of tags or run multiple models).
+- **Double brackets `[[section]]`**: Defines an array of tables. You can specify multiple of these sections in the config (for example, run multiple models).
 
 ---
 
@@ -88,6 +86,28 @@ Defines the Hydrus tag services where the inferred tags will be written.
 ```toml
 [hydrus.output_tag_services]
 keys = ["your_service_key_here", "another_service_key_here"]
+```
+
+</details>
+
+### `[hydrus.remove_tags]`
+
+Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only** after all configured models have successfully processed them (both inference and pushing succeeded).
+
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the heavy model execution using the local database cache, and retry the cleanup phase.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `tags` | Array of Strings | No | List of tags to remove from successfully processed files (e.g., temporary processing or queue tags). |
+| `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to remove the tags from. If empty, defaults to removing from all writeable local and repository tag services. |
+
+<details>
+<summary>💡 View <code>[hydrus.remove_tags]</code> Example</summary>
+
+```toml
+[hydrus.remove_tags]
+tags = ["temp:tagme", "queue:ai processing"]
+tag_service_keys = []  # empty -> removes from all local and repository tag services
 ```
 
 </details>
