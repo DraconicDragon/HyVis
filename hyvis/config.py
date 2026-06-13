@@ -58,6 +58,14 @@ class OutputTagService:
 
 
 @dataclass(frozen=True)
+class RemoveTagConfig:
+    """Rule specifying tags to remove from successful files."""
+
+    tags: list[str]
+    tag_service_keys: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CategoryThresholdConfig:
     """
     Threshold settings for one output category.
@@ -179,8 +187,8 @@ class HydrusConfig:
     api_url: str
     api_key: str
     file_queries: list[FileQueryConfig]
-    output_tag_services: list[OutputTagService]
-    """Global output tag services."""
+    output_tag_services: list[OutputTagService]  # Global output tag services.
+    remove_tags: list[RemoveTagConfig] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -284,14 +292,26 @@ class AppConfig:
             )
             for q in h.get("file_queries", [])
         ]
+
+        # Parse remove_tags
+        remove_tags = [
+            RemoveTagConfig(
+                tags=list(r["tags"]),
+                tag_service_keys=list(r.get("tag_service_keys", [])),
+            )
+            for r in h.get("remove_tags", [])
+        ]
+
         ots_data = h.get("output_tag_services", {})
         global_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []
         global_output_services = [OutputTagService(key=str(k)) for k in global_keys]
+
         hydrus = HydrusConfig(
             api_url=str(h.get("api_url", "")).rstrip("/"),
             api_key=str(h.get("api_key", "")),
             file_queries=file_queries,
             output_tag_services=global_output_services,
+            remove_tags=remove_tags,
         )
 
         # --- [output_filter] ---

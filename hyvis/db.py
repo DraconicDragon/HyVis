@@ -174,6 +174,35 @@ class Database:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def bulk_fully_completed(self, file_hashes: list[str], model_ids: list[str]) -> set[str]:
+        """Return the subset of file_hashes that have successful inference and push across all specified models."""
+        if not file_hashes or not model_ids:
+            return set()
+
+        completed: set[str] = set()
+        chunk_size = 900
+        unique_models = list(set(model_ids))
+        for start in range(0, len(file_hashes), chunk_size):
+            chunk = file_hashes[start : start + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            model_placeholders = ",".join("?" * len(unique_models))
+
+            rows = self.conn.execute(
+                f"""
+                SELECT file_hash, COUNT(*) FROM file_model_results
+                 WHERE model_id IN ({model_placeholders})
+                   AND infer_success = 1 AND push_success = 1
+                   AND file_hash IN ({placeholders})
+                 GROUP BY file_hash
+                """,
+                [*unique_models, *chunk],
+            ).fetchall()
+
+            for file_hash, count in rows:
+                if count == len(unique_models):
+                    completed.add(file_hash)
+        return completed
+
     def get_cached_inference(self, file_hash: str, model_id: str) -> dict[str, Any] | None:
         """Return the cached TagResult dict, or None if not cached."""
         row = self.conn.execute(

@@ -20,11 +20,18 @@ tag_service_keys = [] # empty == "all known tags"
 # tags = ["source:pixiv", "my namespace:some value"]
 # tag_service_keys = ["abcdef1234567890"]
 
+
 # Output services: where tags will be written/added to.
 # This setting applies globally to all models.
 # It can be overriden per-model (see model section below)
 [hydrus.output_tag_services]
 keys = ["your_service_key_here"]
+
+
+# Tags to be removed from files, in case you used added any to files for use with file_queries
+# [[hydrus.remove_tags]]
+# tags = ["temp:tagme"]
+# tag_service_keys = [] # empty == all tag services
 
 
 # *** Output filter  (global) ***

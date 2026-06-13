@@ -216,6 +216,22 @@ def _print_confirmation(
                 print(f"      tag    {tag}")
         print()
 
+        if hydrus.remove_tags and mode in ("default", "push_only"):
+            print(_c("  Cleanup Tags (removed after successful run)", BOLD))
+            for r in hydrus.remove_tags:
+                if r.tag_service_keys:
+                    names = []
+                    for key in r.tag_service_keys:
+                        name = service_name_by_key.get(key, "(unknown service)")
+                        names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+                    svc = ", ".join(names)
+                else:
+                    svc = _c("(all tag services)", DIM)
+                print(f"    service  {svc}")
+                for tag in r.tags:
+                    print(f"      tag    {_c(tag, RED)}")
+            print()
+
         # File count
         count_col = YELLOW if file_count == 0 else GREEN
         forced_note = "  (--force: cache bypassed)" if force else ""
@@ -305,6 +321,9 @@ async def main() -> int:
         return 1
 
     mode = "infer_only" if args.infer_only else "push_only" if args.push_only else "default"
+
+    # Every file hash processed/targeted during entire script run used for tag removal at the end
+    touched_hashes: set[str] = set()
 
     # Load + validate config
     if not args.config.exists():
@@ -428,6 +447,7 @@ async def main() -> int:
                 print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', YELLOW)}")
 
             actionable_count = sum(1 for fi in file_infos if fi.local_path)
+            touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
 
         if args.extra_hash_file is not None:
             try:
@@ -466,6 +486,7 @@ async def main() -> int:
                 if extra_infos:
                     file_infos.extend(extra_infos)
                     actionable_count = sum(1 for fi in file_infos if fi.local_path)
+                    touched_hashes.update(fi.file_hash for fi in extra_infos if fi.local_path)
             else:
                 print(_c("  Warning: extra hash file was empty.", YELLOW))
 
@@ -541,6 +562,8 @@ async def main() -> int:
             # --- Step 0: push previously-inferred-but-not-pushed ---
             if mode in ("default", "push_only"):
                 pending_hashes = db.bulk_push_pending(model_cfg.model_id)
+                touched_hashes.update(pending_hashes)
+
                 if pending_hashes and mode == "default":
                     print(_c(f"  Pushing {len(pending_hashes)} previously cached result(s) to Hydrus...", DIM))
                     progress = Progress(total=len(pending_hashes))
@@ -659,11 +682,38 @@ async def main() -> int:
                     print(_c(f"\n  ABORTED: {push_stats.abort_reason}", RED))
                     break
 
-            # Account for push errors if Phase 2 was skipped (meaning everything succeeded
-            # or nothing was tried).
+            # Account for push errors if Phase 2 was skipped 
+            # (meaning everything succeeded or nothing was tried).
             if mode == "default" and not run_push_pass:
                 if infer_stats is not None:
                     total_push_err += infer_stats.push_errors
+
+        # Tag removal/cleanup
+        # NOTE: We don't remove tags alongside pushing others because multi-model configurations may fail for one model
+        if mode in ("default", "push_only") and cfg.hydrus.remove_tags and touched_hashes:
+            model_ids = [m.model_id for m in cfg.inference.models]
+
+            # Check which files fully completed all models
+            successful_hashes = list(db.bulk_fully_completed(list(touched_hashes), model_ids))
+
+            if successful_hashes:
+                print(_c(f"  Cleaning up search tags for {len(successful_hashes)} fully processed file(s)...", DIM))
+                cleanup_errors = 0
+                for r_cfg in cfg.hydrus.remove_tags:
+                    try:
+                        hydrus.delete_tags(
+                            hashes=successful_hashes,
+                            service_keys=r_cfg.tag_service_keys,
+                            tags=r_cfg.tags,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
+                        cleanup_errors += 1
+                if cleanup_errors == 0:
+                    print(_c("  Cleanup completed successfully.", GREEN))
+                else:
+                    print(_c("  Cleanup completed with some errors.", YELLOW))
+                print()
 
     # Final stats
     print()
