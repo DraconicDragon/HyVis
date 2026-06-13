@@ -1,9 +1,9 @@
 [hyvis]
-log_level = "INFO"
+log_level = "WARNING"
 
 [hydrus]
 api_url = "http://127.0.0.1:45678"
-api_key = "f8699964164b28603321f12ae7dcd06d69e541d49e42c0147be845282519ce9a"
+api_key = "api key here"
 
 [[hydrus.file_queries]]
 tags = [
@@ -27,10 +27,7 @@ default_threshold = 0.4
 # *** Output selection ***
 
 output_categories = []
-include_tags = [
-    "explicit",
-    "general",
-]
+include_tags = ["explicit", "general"]
 exclude_tags = ["1girl"]
 
 
