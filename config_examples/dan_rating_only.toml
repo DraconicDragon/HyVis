@@ -24,25 +24,20 @@ keys = ["1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464"]
 prefer_tag_level_thresholds = true
 tag_level_threshold_relative_offset = 0.1
 default_threshold = 0.4
+
+
 # *** Output selection ***
 
-output_categories = []
-include_tags = ["explicit", "general"]
-exclude_tags = ["1girl"]
+output_categories = ["rating"]
+
+[output_filter.max_tags_per_category]
+"rating" = 1
 
 
 # *** Tag prefix mapping ***
 
 [output_filter.tag_prefix_mapping]
 "rating" = "rating:"
-"general" = ""
-"artist" = "creator:"
-"copyright" = "series:"
-"character" = "character:"
-"meta" = "meta:"
-"species" = "species:"
-"lore" = "lore:"
-"contributor" = ""
 
 
 # *** Models ***
@@ -50,7 +45,7 @@ exclude_tags = ["1girl"]
 [[inference.models]]
 model_id = "wdv4-convnextv2-huge-dbv4-full"
 source = "/home/drac/dev/models/hf/convnextv2_huge.dbv4-full"
-device = "gpu"
+device = "auto"
 batch_size = 3
 # backend  = "pytorch"   # "pytorch" | "onnx" | "auto"
 precision = "fp16" # "fp16" | "bf16" | "fp32" | "auto"
