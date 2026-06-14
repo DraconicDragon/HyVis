@@ -138,7 +138,7 @@ class HydrusClient:
     def get_tag_services(self) -> list[str]:
         """Return all local and repository tag service keys."""
         # NOTE: Needed for tag deletion/removal since "all known tags" virt domain not usable for this purpose
-        # But I want to keep behaviour parity in config for [[hydrus.file_queries]] and [[hydrus.remove_tags]] on empty tag service key list
+        # But I want to keep behaviour parity in config for [[hydrus.file_queries]] and [hydrus.remove_tags] on empty tag service key list
         try:
             services = self.get_services().get("services", {})
         except hydrus_api.ConnectionError as exc:

@@ -26,7 +26,7 @@ keys = ["1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464"]
 
 
 # Tags to be removed from files, in case you used added any to files for use with file_queries
-# [[hydrus.remove_tags]]
+# [hydrus.remove_tags]
 # tags = ["temp:tagme"]
 # tag_service_keys = [] # empty == all tag services
 
