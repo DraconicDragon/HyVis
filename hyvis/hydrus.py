@@ -7,7 +7,7 @@ from typing import Any
 import hydrus_api
 import hydrus_api.utils
 
-from .config import ALLOWED_MIMES, FileQueryConfig
+from hyvis.config import ALLOWED_MIMES, FileQueryConfig
 
 logger = logging.getLogger(__name__)
 

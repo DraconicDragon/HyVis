@@ -31,13 +31,13 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from hyvis.logging_utils import BOLD
 
-from .main import MAGENTA, _c
+from hyvis.main import MAGENTA, _c
 
 if TYPE_CHECKING:
-    from .config import AppConfig, ModelConfig, OutputFilterConfig
-    from .db import Database
-    from .hydrus import FileInfo, HydrusClient
-    from .progress import Progress
+    from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig
+    from hyvis.db import Database
+    from hyvis.hydrus import FileInfo, HydrusClient
+    from hyvis.progress import Progress
 
 logger = logging.getLogger(__name__)
 

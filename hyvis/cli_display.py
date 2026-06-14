@@ -24,7 +24,7 @@ def connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, s
         (hydrus_client, service_name_by_key, hydrus_version, api_version, boot_time)
     Exits on connection failure.
     """
-    from .hydrus import HydrusClient, HydrusConnectionError, HydrusError
+    from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
 
     hydrus = HydrusClient(cfg.hydrus.api_url, cfg.hydrus.api_key)
 
@@ -74,7 +74,7 @@ def connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, s
             client_info = hydrus.get_client_info()
             boot_time_value = client_info.get("boot_time")
             if isinstance(boot_time_value, (int, float)):
-                from .hydrus import format_boot_time
+                from hyvis.hydrus import format_boot_time
 
                 boot_time = format_boot_time(float(boot_time_value))
         except Exception as exc:

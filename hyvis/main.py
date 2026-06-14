@@ -42,10 +42,10 @@ from hyvis.logging_utils import (  # noqa: F401
     setup_logging,
 )
 
-from .bg_imports import start_imports, wait_for_imports
-from .cli import parse_args
-from .cli_display import connect_hydrus, print_confirmation, print_run_summary
-from .progress import Progress, clear_line, inline_progress
+from hyvis.bg_imports import start_imports, wait_for_imports
+from hyvis.cli import parse_args
+from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
+from hyvis.progress import Progress, clear_line, inline_progress
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def main() -> int:
         print(_c(f"ERROR: Config file not found: {args.config}", RED), file=sys.stderr)
         return 1
 
-    from .config import AppConfig
+    from hyvis.config import AppConfig
 
     try:
         cfg = AppConfig.from_file(args.config)
@@ -122,10 +122,10 @@ async def main() -> int:
     extra_count = 0
 
     if mode != "push_only":
-        from .extra_hashes import load_extra_hashes
+        from hyvis.extra_hashes import load_extra_hashes
 
         # Collect candidate files
-        from .hydrus import HydrusConnectionError
+        from hyvis.hydrus import HydrusConnectionError
 
         print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
         try:
@@ -262,7 +262,7 @@ async def main() -> int:
     wait_for_imports()
 
     # region Database
-    from .db import Database
+    from hyvis.db import Database
 
     run_id = str(uuid.uuid4())
     try:
@@ -275,7 +275,7 @@ async def main() -> int:
     if not db_path.is_absolute():
         db_path = Path.cwd() / db_path
 
-    from .inference import PhaseStats, infer_files, push_cached_to_hydrus
+    from hyvis.inference import PhaseStats, infer_files, push_cached_to_hydrus
 
     total_infer_ok = total_infer_err = 0
     total_push_ok = total_push_err = 0
