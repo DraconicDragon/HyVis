@@ -8,6 +8,8 @@ import sys
 import time
 from collections import deque
 
+from hyvis.logging_utils import DIM, _c
+
 
 def _fmt_duration(seconds: float) -> str:
     """Format seconds as HH:MM:SS (or MM:SS for < 1 hour)."""
@@ -151,3 +153,15 @@ class Progress:
             f"  Avg throughput  : {avg_rate:.1f} files/s",
         ]
         return "\n".join(lines)
+
+
+def inline_progress(label: str, done: int, total: int) -> None:
+    pct = done / max(total, 1) * 100
+    line = _c(f"  {label}: {done}/{total} ({pct:.0f}%)", DIM)
+    sys.stdout.write(f"\r{line}   ")
+    sys.stdout.flush()
+
+
+def clear_line() -> None:
+    sys.stdout.write("\r" + " " * 80 + "\r")
+    sys.stdout.flush()
