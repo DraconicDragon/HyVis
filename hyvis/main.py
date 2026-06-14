@@ -92,7 +92,7 @@ async def main() -> int:
             print(f"  • {e}", file=sys.stderr)
         return 1
 
-    # Logging
+    # region Logging setup
     # todo: treat differently, maybe add -v/--verbose cli arg to make this debug, otherwise PIL log spam
     effective_log_level = args.log_level or cfg.hyvis.log_level
     setup_logging(effective_log_level)
@@ -179,6 +179,7 @@ async def main() -> int:
             actionable_count = sum(1 for fi in file_infos if fi.local_path)
             touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
 
+        # region Extra hashes file
         if args.extra_hash_file is not None:
             try:
                 extra_hash_values = load_extra_hashes(args.extra_hash_file)
@@ -227,7 +228,7 @@ async def main() -> int:
                 print(_c("\nNo files matched the configured queries. Nothing to do.", YELLOW))
             return 0
 
-    # Confirmation screen
+    # region Confirmation print
     print_confirmation(
         cfg,
         actionable_count,
@@ -260,7 +261,7 @@ async def main() -> int:
     # Wait for the background libraries to finish loading before starting database work
     wait_for_imports()
 
-    # Database
+    # region Database
     from .db import Database
 
     run_id = str(uuid.uuid4())
@@ -310,7 +311,7 @@ async def main() -> int:
                     # will retry them and report the final outcome.
                     print()
 
-            # --- Phase 1: Inference ---
+            # region P1: Inference
             infer_stats: PhaseStats | None = None
             if mode in ("default", "infer_only"):
                 progress = Progress(total=actionable_count)
@@ -343,7 +344,7 @@ async def main() -> int:
                     print(_c(f"\n  ABORTED: {infer_stats.abort_reason}", RED))
                     break
 
-            # --- Phase 2: Push to Hydrus ---
+            # region P2: Push to Hydrus
             # In default mode push happens interleaved inside infer_files.
             # We only run a separate push pass here if:
             #   a) push_only mode, or
@@ -417,7 +418,7 @@ async def main() -> int:
                 if infer_stats is not None:
                     total_push_err += infer_stats.push_errors
 
-        # Tag removal/cleanup
+        # region Tag removal/cleanup
         # NOTE: We don't remove tags alongside pushing others because multi-model configurations may fail for one model
         if mode in ("default", "push_only") and cfg.hydrus.remove_tags and touched_hashes:
             model_ids = [m.model_id for m in cfg.inference.models]
