@@ -43,8 +43,8 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
 class FileQueryConfig:
     """One search query issued to Hydrus to collect candidate files."""
 
-    tags: list[str]
-    """Each tag is a separate string (Hydrus tags can contain commas/spaces)."""
+    tags: list[Any]
+    """Each tag is a separate string. Nested lists evaluate as OR predicates."""
 
     tag_service_keys: list[str] = field(default_factory=list)
     """Tag service keys to search within. Empty → Hydrus default (all known tags)."""

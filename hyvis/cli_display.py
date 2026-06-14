@@ -140,8 +140,18 @@ def print_confirmation(
             else:
                 svc = _c("(all known tags)", DIM)
             print(f"    service  {svc}")
+            
+            def _format_tag(t: Any) -> str:
+                if isinstance(t, list):
+                    return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
+                return str(t)
+
             for tag in q.tags:
-                print(f"      tag    {tag}")
+                if isinstance(tag, list):
+                    # Top-level nested list; no need for outer parentheses
+                    print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
+                else:
+                    print(f"      tag    {tag}")
         print()
 
         if hydrus.remove_tags and mode in ("default", "push_only"):
