@@ -1,183 +1,146 @@
-> This README is still a work in progress, there is missing information in this readme
-> Things are subject to change, some work is going on in the dev branch (+v0.10.x) which has changed the output filtering control part in the toml without backwards compatibility for current configs (v0.9.x)
-> Similar things may or may not happen, but I think the output filter control is the only major one
+> HyVis is currently in a development phase where one or two breaking changes may be made (on the config side). 
 
 # HyVis - Hydrus Tagger
 
 HyVis is a vibecoded project that uses a vibecoded inference backend to let you tag files from Hydrus using a small variety of vision transformers.  
 
-Currently it's expected that Hydrus and Hyvis run on the same machine (or at least Hydrus' file source is on the same machine as HyVis) - HyVis doesn't download actual files from Hydrus over API (yet, or maybe never) and instead gathers the file path from the file metadata and uses that to read files directly.  
-While the files are expected to be local, I don't have a NAS setup or similar to tell you if that works or not
+HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/) using a vibecoded vision transformer inference backend (to run WD Taggers or JTP).
 
-I mainly only tested HyVis with workloads that are for my own usecases so if there's any problem please open an issue. Also ***don't forget to make or update Hydrus backups.***
+HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  
+Support for downloading the files remotely over API and processing them that way may or may not be added in the future - if there is need/demand for it, it may be added sooner rather than later
+
+---
 
 ## Installation
 
-### Clone the repository
+### 1. Prerequisites
+
+- **Python 3.11 or higher** (Python 3.12 is recommended and tested; Python 3.10 may work but is not officially supported).
+- Local Hydrus client to connect to.
+
+### 2. Clone the Repository
 
 ```bash
 git clone https://github.com/DraconicDragon/HyVis.git
 cd HyVis
 ```
 
-### Create a virtual environment (recommended)
-
-(install python if you haven't yet. Recommended is 3.11 or higher, I developed and tested with 3.12; 3.10 might work but mind that it reaches end of life end of 2026)
+### 3. Create and Activate a Virtual Environment
 
 ```bash
 python -m venv .venv
 ```
 
-Activate it:
+- **Linux/macOS:** `source .venv/bin/activate`
+- **Windows (CMD):** `.venv\Scripts\activate.bat`
+- **Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
 
-- Linux/macOS - `source .venv/bin/activate`
-- Windows - `.venv\Scripts\activate`
+### 4. Install HyVis
 
-### Install dependencies
-
-**Main:**
+This installs the main utility and its core dependencies:
 
 ```bash
 pip install .
 ```
 
-**Backend:**
+### 5. Install an Inference Backend
 
-HyVis supports PyTorch and ONNX as backend (through vibe, the inference backend library). You can install either both or only one of them. PyTorch is recommended since there's more models with pytorch support than ONNX, but it is likely you may already have models downloaded that are in ONNX, and if you don't want to redownload them in PyTorch format (.safetensors/.pth etc) then you may want to install ONNX backend instead/too.  
-PyTorch may or may not also come with less issues for the installation but your experience may vary.
+HyVis supports PyTorch and ONNX backends. You do not need to install both; choose the one that matches the models you plan to run if you want to save space. PyTorch is recommended for broader model compatibility.
 
-***todo*** | Install instructions for ONNX/PyTorch using CPU and Nvidia GPUs (other GPU types may work if you know your way around that, however I unfortunately don't have amd/intel GPUs to test with. Expect to need to change a few lines of code in worst case)
+> **Hardware Support Note:** HyVis is made and tested on Nvidia hardware. AMD ROCm and Intel GPU configurations are untested since I don't have the respective hardware. If you run HyVis on these platforms, you may need to install the corresponding backend packages manually (e.g., `onnxruntime-rocm`). It is possible that a few-line code change may or may not be needed to support other hardware-specific libraries.  
+Feedback on alternative hardware configurations is welcome.
 
-<ins>PyTorch</ins>
+#### Option A: PyTorch Backend (Recommended)
 
-- CPU:
+- **CPU Only:**
 
-```bash
-pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops"
-```
+  ```bash
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops"
+  ```
 
-- Nvidia GPU:
+- **NVIDIA GPU (CUDA):**
 
-```bash
-pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
-```
+  ```bash
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+  ```
 
-<ins>ONNX</ins>
+> NOTE: If you have a Maxwell (eg: GTX 9xx), Pascal (GTX 10xx/Tesla P100/P40) or Volta (V100) GPU (or older), then you **MUST** switch out `cu128` in the install command above to `cu126` or `cu124`.  
+`cu128` dropped support for sm_50, sm_60 and sm_70.
+Otherwise your GPU should support cu128 and you may even increase value to `cu130` or `cu132` - if your drivers are up to date (I don't know about any practical differences)
 
-> Note: Only install one onnxruntime package at a time - if you choose to switch, then uninstall the old one first using eg `pip uninstall onnxruntime-gpu`
+#### Option B: ONNX Backend
 
-> Note for linux users and onnxruntime-gpu: You may need to install cuda/cudnn from your system package manager for it to work, otherwise it will fallback to CPU
+*Note: Some models, such as [JTP-3](https://huggingface.co/RedRocket/JTP-3) or [animetimm's dbv4 ConvNeXt v2 Huge](https://huggingface.co/animetimm/convnextv2_huge.dbv4-full), are not available in ONNX format.*
 
-- CPU: `pip install onnxruntime`
-- Nvidia GPU: `pip install onnxruntime-gpu`
-- May or may not just work:
-  - AMD: `pip install onnxruntime-rocm`
+- **CPU Only:**
 
-#### Updating
+  ```bash
+  pip install onnxruntime
+  ```
 
-1. Open a terminal in the top level HyVis folder (not the hyvis subfolder) and do `git pull`
-2. Activate venv
-3. Lastly `pip install .`
+- **NVIDIA GPU:**
 
-### Usage
-
-For any questions you can create a new discussion thread on GitHub or ask me on the Hydrus Discord/Matrix server.  
-
-Some info first: HyVis relies on toml files for it's main configurations. You can find example ones in the [config_examples folder](/config_examples/) to get started with (make a copy and edit the copy instead of editing directly), they also include comments that describe their respective settings a bit. They are pretty much all the same besides a few value changes.  
-
-- [config.example.toml](/config_examples/config.example.toml) - the main example toml file, doesn't have some values set.
-- [config.example_eva02.toml](/config_examples/config.example_eva02.toml) - example using the WD eva 02 tagger by SmilingWolf; outputs danbooru tags
-- [config.example_JTP3.toml](/config_examples/config.example_JTP3.toml) - example using the JTP-3 Hydra model by RedRocket
-  - > Note: 1. JTP-3 is not available in ONNX format. 2. It has no `rating` category but does output rating tags to `meta` category (there's no tag prefix filter support for tags yet, only categories)
+  ```bash
+  pip install onnxruntime-gpu
+  ```
 
 ---
 
-There is also some CLI args you can pass, though usually there isn't much need to use them besides maybe `--infer-only` / `--push-only`. HyVis also provides `--extra-hash-file` with which you can use old [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) text files with if you ever wanted to I guess (one sha256 hash per line)
+## Updating
 
-`hyvis --help` / `python -m hyvis --help` output:
+You can update HyVis by using the commands below *or* use the update\.sh script (Linux/macOS) or update.bat (Windows) in the repository root.
 
 ```bash
-Tag files from Hydrus using image tagging models.
+cd HyVis
+source .venv/bin/activate   # Linux/macOS
+# or: .venv\Scripts\activate.bat      # Windows CMD
+# or: .venv\Scripts\Activate.ps1      # Windows PowerShell
 
-positional arguments:
-  CONFIG_PATH           Path to the TOML configuration file.
-
-options:
-  -h, --help            show this help message and exit
-  --api-url API_URL     Override hydrus.api_url from config.
-  --api-key API_KEY     Override hydrus.api_key from config.
-  --extra-hash-file EXTRA_HASH_FILE
-                        Path to a text file containing one sha256 hash per line. (for wd-e621-hydrus-tagger parity)
-  --yes, -y             Skip all confirmation prompts.
-  --force, -f           Ignore the DB cache; re-process all matched files.
-  --infer-only          Run inference only; do not push results to Hydrus.
-  --push-only           Push cached results to Hydrus; skip inference.
-  --log-level {DEBUG,INFO,WARNING,ERROR}
-                        Logging verbosity (default: config or WARNING).
+git pull
+pip install .
 ```
 
-#### Configuration Setup
+---
 
-***todo***
+## Configuration
 
-If you for some reason liked the way [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) required you to add files or you have old files you'd like to reuse, you should be able to do the same here too by using `--extra-hash-file` cli arg. Unfortunately I haven't really tested this yet
+HyVis requires a TOML configuration file to define your Hydrus API connection, search rules, models and output filtering.  
 
-**Supported Models** (will be nicer in future, but for now here full list, ignore the aesthetic scoring models, hyvis does not support them yet): <https://github.com/DraconicDragon/vibe/blob/main/SUPPORTED_MODELS.md>
+To get started you can:
 
-- Recommended: (todo, recommended thresholds, average of 0.4 default_threshold in toml should be fine for all of them for many tags but without trying to get false positives (range 0.3-0.5+), for JTP3 you might want to increase to 0.5-0.6+)
-  - Danbooru Tags (ONNX & PyTorch compatible):
-    - Good ol' reliable, but old regardless: `wd-eva02-large-v3`
-    - Lighter alternative, also good ol' reliable: `wd-swinv2-v3`
-    - newer and similarly lighter alternative: `wdv4-caformer-b36-dbv4-full`
-    - newer, as heavy as wd-eva02: `wdv4-eva02-large-patch14-448-dbv4-full`
-    - newer, even heavier (6gb memory minimum required, PyTorch only): `wdv4-convnextv2-huge-dbv4-full`
-  - E621 Tags: `jtp-3` (PyTorch only)
+1. Copy one of the templates in the `config_examples/` directory.
+2. Edit your copy to insert your Hydrus `api_url` and `api_key`.
+3. Configure your search parameters and output target services.
 
-> **Note**: A caveat of the animetimm models (wdv4-\*/dbv4-full) is that they will require a HuggingFace API key *and also* require you to request access on the models' HF repositories because they are "gated". The request should be automatically accepted, but you will have to fork over your email - If you don't feel like doing that you could maybe ask a kind soul to reupload the models.
+For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md).
 
-<details><summary>HuggingFace API Key Usage</summary>
+---
 
-To use the API key, set the `HF_TOKEN` environment variable when running hyvis.
+## Usage
 
-Windows CMD: `set HF_TOKEN=hf_abcdefg1234567890 && hyvis path/to/config.toml`
-Windows Powershell:
-
-```pwsh
-$env:HF_TOKEN="hf_abcdefg1234567890"
-
-hyvis path/to/config.toml
-```
-
-Most Linux shells: `HF_TOKEN=hf_abcdefg1234567890 hyvis path/to/config.toml`  
-
-</details>
-
-#### Running an operation
-
-***Remember to make backups***
+Run HyVis by passing the path to your configured TOML file:
 
 ```bash
 hyvis path/to/config.toml
 ```
 
-Showcase on how a run looks like using `jtp-3` as model
+### Useful CLI Flags
 
-![jtp-3 operation confirmation](.assets/image.jpg)
-![jtp-3 inference](.assets/image-1.jpg)
+- `-y`, `--yes`
+  Skip all interactive confirmation prompts.
+- `-f`, `--force`
+  Ignore the local database cache and re-process all matching files.
+- `--infer-only`
+  Run model inference and save results to the database cache, but do not send any tags to Hydrus.
+- `--push-only`
+  Read cached results from the local database and push them to Hydrus, skipping the inference step.
+- `--api-url` / `--api-key`
+  Override the connection parameters specified in your TOML config.
+- `--extra-hash-file PATH`
+  Process a text file containing one SHA256 hash per line (useful if you have files from [Garbevoir/wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) that you want to reuse).
 
-<details><summary>JTP-3 Tag outputs + linked images</summary>
+---
 
-(ignore the rating:general and source:hydrus main tags, i added those)
+### Supported and Recommended Models
 
-also you can see in second image that JTP 3 will put rating tags (safe, questionable, explicit) in meta category; In the future there might be a better way to prefix tags instead of doing it by category only, its in the todo.md already
-
-![mischief](.assets/image-2.jpg)
-
-![lucario](.assets/image-3.jpg)
-</details>
-
-### Todo
-
-See [TODO.md](TODO.md)
-
-Contributions are welcome
+[TODO]

@@ -7,7 +7,7 @@ from typing import Any
 import hydrus_api
 import hydrus_api.utils
 
-from .config import ALLOWED_MIMES, FileQueryConfig
+from hyvis.config import ALLOWED_MIMES, FileQueryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,33 @@ class HydrusConnectionError(HydrusError):
 
     @staticmethod
     def _extract_message(exc: hydrus_api.ConnectionError) -> str:
-        """Extract a useful error message from hydrus_api.ConnectionError."""
-        if exc.__cause__ is not None:
-            return str(exc.__cause__)
-        return "Connection error (no details available)"
+        """Extract raw details and append clean user-friendly suggestions."""
+        cause = exc.__cause__
+        raw_detail = str(cause) if cause is not None else str(exc)
+
+        msg = f"Connection failed: {raw_detail}\n"
+
+        if cause is not None and any(
+            term in str(cause) for term in ("Connection refused", "Failed to establish", "timeout")
+        ):
+            msg += (
+                "\nSuggestions:\n"
+                "  1. Check if Hydrus is running.\n"
+                "  2. Verify that the Client API is enabled in Hydrus settings (services -> Manage services -> client api).\n"
+                "  3. Check that the port in api_url matches Hydrus."
+            )
+        elif cause is not None and any(
+            term in str(cause) for term in ("Name or service not known", "getaddrinfo failed")
+        ):
+            msg += (
+                "\nSuggestions:\n"
+                "  1. Verify your network connection.\n"
+                "  2. Check that api_url in your config is correct."
+            )
+        else:
+            msg += "\nSuggestions:\n  • Check your Hydrus network connection, port settings or other related settings."
+
+        return msg
 
     @classmethod
     def from_hydrus_api(cls, exc: hydrus_api.ConnectionError) -> "HydrusConnectionError":
@@ -112,6 +135,28 @@ class HydrusClient:
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
 
+    def get_tag_services(self) -> list[str]:
+        """Return all local and repository tag service keys."""
+        # NOTE: Needed for tag deletion/removal since "all known tags" virt domain not usable for this purpose
+        # But I want to keep behaviour parity in config for [[hydrus.file_queries]] and [[hydrus.remove_tags]] on empty tag service key list
+        try:
+            services = self.get_services().get("services", {})
+        except hydrus_api.ConnectionError as exc:
+            raise HydrusConnectionError.from_hydrus_api(exc) from exc
+        except hydrus_api.APIError as exc:
+            raise HydrusAPIError(exc) from exc
+
+        tag_services = [
+            key
+            for key, info in services.items()
+            if info.get("type") in (0, 5)  # 0: tag repository, 5: local tag domain
+        ]
+
+        if not tag_services:
+            raise HydrusError("No writeable local or repository tag services found in Hydrus.")
+
+        return tag_services
+
     def search_files(self, query: FileQueryConfig) -> set[str]:
         """
         Execute one file query and return the set of matching hashes.
@@ -165,9 +210,13 @@ class HydrusClient:
             try:
                 data = self._client.get_file_metadata(hashes=batch)
                 metas: list[dict[str, Any]] = data.get("metadata", [])
+            except hydrus_api.ConnectionError as exc:
+                raise HydrusConnectionError.from_hydrus_api(exc) from exc
+            except hydrus_api.APIError as exc:
+                raise HydrusAPIError(exc) from exc
             except hydrus_api.HydrusAPIException as exc:
                 logger.error("Metadata fetch error for batch starting %d: %s", start, exc)
-                raise HydrusAPIError from exc
+                raise HydrusError(f"Hydrus API Exception: {exc}") from exc
 
             for meta in metas:
                 mime: str = meta.get("mime", "")
@@ -195,26 +244,53 @@ class HydrusClient:
         progress_callback: Any | None = None,
     ) -> list[FileInfo]:
         """
-        Resolve local file paths for each FileInfo in-place.
-
-        Files whose path cannot be resolved are kept but with local_path=None.
+        Resolve local file paths for each FileInfo in-place concurrently using a thread pool.
         """
-        for idx, info in enumerate(file_infos):
-            try:
-                data = self._client.get_file_path(hash_=info.file_hash)
-                info.local_path = data.get("path")
-            except hydrus_api.APIError as exc:
-                if exc.response.status_code == 404:
-                    logger.debug("No local path for %s (404)", info.file_hash)
-                else:
-                    logger.warning("Unexpected error resolving path for %s: %s", info.file_hash, exc)
-            except hydrus_api.HydrusAPIException as exc:
-                logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
+        import concurrent.futures
+        import threading
 
-            if progress_callback is not None and idx % _PATH_LOG_INTERVAL == 0:
-                progress_callback(idx, len(file_infos))
+        # Use up to 16 concurrent threads for fast local parallel queries
+        max_workers = min(8, len(file_infos))
+        if max_workers <= 1:
+            for idx, info in enumerate(file_infos):
+                self._resolve_single_path(info)
+                if progress_callback is not None and idx % _PATH_LOG_INTERVAL == 0:
+                    progress_callback(idx, len(file_infos))
+            return file_infos
+
+        resolved_count = 0
+        lock = threading.Lock()
+
+        def worker(info: FileInfo) -> None:
+            nonlocal resolved_count
+            self._resolve_single_path(info)
+            if progress_callback is not None:
+                with lock:
+                    resolved_count += 1
+                    if resolved_count % _PATH_LOG_INTERVAL == 0 or resolved_count == len(file_infos):
+                        progress_callback(resolved_count, len(file_infos))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Consume the map iterator to block until all workers complete
+            list(executor.map(worker, file_infos))
 
         return file_infos
+
+    def _resolve_single_path(self, info: FileInfo) -> None:
+        """Helper to resolve a single file path synchronously."""
+        try:
+            data = self._client.get_file_path(hash_=info.file_hash)
+            info.local_path = data.get("path")
+        except hydrus_api.ConnectionError as exc:
+            # Raise immediately to stop the thread pool if the server goes offline
+            raise HydrusConnectionError.from_hydrus_api(exc) from exc
+        except hydrus_api.APIError as exc:
+            if exc.response.status_code == 404:
+                logger.debug("No local path for %s (404)", info.file_hash)
+            else:
+                logger.warning("Unexpected API error resolving path for %s: %s", info.file_hash, exc)
+        except hydrus_api.HydrusAPIException as exc:
+            logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
 
     def add_tags(
         self,
@@ -234,6 +310,33 @@ class HydrusClient:
             raise HydrusConnectionError.from_hydrus_api(exc) from exc
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
+
+    def delete_tags(
+        self,
+        hashes: list[str],
+        service_keys: list[str],
+        tags: list[str],
+    ) -> None:
+        """Remove tags from hashes across the specified service keys."""
+        if not tags or not hashes:
+            return
+
+        if not service_keys:
+            service_keys = self.get_tag_services()
+            if not service_keys:
+                logger.warning("No tag services found to delete tags from")
+                return
+
+        for key in service_keys:
+            try:
+                self._client.add_tags(
+                    hashes=hashes,
+                    service_keys_to_actions_to_tags={key: {hydrus_api.TagAction.DELETE: tags}},
+                )
+            except hydrus_api.ConnectionError as exc:
+                raise HydrusConnectionError.from_hydrus_api(exc) from exc
+            except hydrus_api.APIError as exc:
+                raise HydrusAPIError(exc) from exc
 
 
 def format_boot_time(timestamp: float) -> str:
