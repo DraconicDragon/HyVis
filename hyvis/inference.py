@@ -501,7 +501,7 @@ async def infer_files(
 
     except InferenceCancelled:
         stats.aborted_early = True
-        stats.abort_reason = "Inference cancelled by user (press 'c')"
+        stats.abort_reason = "Inference cancelled by user (press 'q')"
         logger.info("Inference cancelled for model %s", model_cfg.model_id)
 
     except KeyboardInterrupt:
