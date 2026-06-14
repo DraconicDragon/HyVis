@@ -29,9 +29,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from hyvis.logging_utils import BOLD
-
-from hyvis.main import MAGENTA, _c
+from hyvis.logging_utils import BOLD, MAGENTA, _c
 
 if TYPE_CHECKING:
     from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig
