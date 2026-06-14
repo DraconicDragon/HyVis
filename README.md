@@ -2,8 +2,6 @@
 
 # HyVis - Hydrus Tagger
 
-HyVis is a vibecoded project that uses a vibecoded inference backend to let you tag files from Hydrus using a small variety of vision transformers.  
-
 HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/) using a vibecoded vision transformer inference backend (to run WD Taggers or JTP).
 
 HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  

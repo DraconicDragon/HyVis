@@ -1,21 +1,5 @@
 """
 main.py Entry point.
-
-Usage:
-    python3 main.py CONFIG_PATH [--yes] [--force] [...etc...]
-
-Arguments:
-    CONFIG_PATH     Path to the TOML configuration file.
-
-Options:
-    --api-url       Override hydrus.api_url from config.
-    --api-key       Override hydrus.api_key from config.
-    --extra-hash-file  Path to a text file containing one sha256 hash per line. (for wd-e621-hydrus-tagger parity)
-    --yes           Skip all interactive confirmation prompts.
-    --force         Re-process files even if already cached (infer + push).
-    --infer-only    Run inference and cache results; do not push to Hydrus.
-    --push-only     Push cached results to Hydrus; do not run inference.
-    --log-level     DEBUG, INFO, WARNING, ERROR (default: config or WARNING).
 """
 
 from __future__ import annotations
