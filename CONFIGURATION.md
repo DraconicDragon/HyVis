@@ -53,21 +53,24 @@ Configuration for connecting to your Hydrus Network client and defining input/ou
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | **Yes** | List of tags to query. Only supports basic Hydrus search syntax. |
+| `tags` | Array of (Strings or Arrays) | **Yes** | List of tags to query.  Nested arrays are joined by **OR**. |
 | `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to limit the query to. If empty, defaults to `all known tags`. |
 
 <details>
 <summary>💡 View <code>[[hydrus.file_queries]]</code> Example</summary>
 
 ```toml
+# Simple search: (system:untagged AND class:illustration)
 [[hydrus.file_queries]]
 tags = ["system:untagged", "class:illustration"]
 tag_service_keys = [] # empty -> all known tags
 
-# You can add a second query block to fetch other files
+# A second (option) query block with OR search using nested arrays: (dog OR cat) AND type:photo
 [[hydrus.file_queries]]
-tags = ["source:pixiv", "my namespace:some value"]
-tag_service_keys = ["abcdef1234567890"]
+tags = [
+    ["dog", "cat"], 
+    "type:photo",
+]
 ```
 
 </details>
