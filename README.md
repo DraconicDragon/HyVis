@@ -1,4 +1,4 @@
-> HyVis is currently in a development phase where one or two breaking changes may be made (on the config side). 
+> HyVis is currently in a development phase where one or two breaking changes may be made (on the config side).
 
 # HyVis - Hydrus Tagger
 
@@ -13,8 +13,9 @@ Support for downloading the files remotely over API and processing them that way
 
 ### 1. Prerequisites
 
-- **Python 3.11 or higher** (Python 3.12 is recommended and tested; Python 3.10 may work but is not officially supported).
-- Local Hydrus client to connect to.
+- **git** | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+- **Python 3.11** ***or higher*** | Python 3.12 is recommended and tested (Python 3.10 may work but is not officially supported; 3.10 is also EOL after October 2026)
+- Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with Client API enabled in: services > manager services > client api > "run the client api?:" - yes/checked
 
 ### 2. Clone the Repository
 
@@ -82,6 +83,8 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
   pip install onnxruntime-gpu
   ```
 
+> On Linux you may need to install CUDA and cuDNN manually through your package manager or whatever the correct method is for your distro.
+
 ---
 
 ## Updating
@@ -91,8 +94,8 @@ You can update HyVis by using the commands below *or* use the update\.sh script 
 ```bash
 cd HyVis
 source .venv/bin/activate   # Linux/macOS
-# or: .venv\Scripts\activate.bat      # Windows CMD
-# or: .venv\Scripts\Activate.ps1      # Windows PowerShell
+# .venv\Scripts\activate.bat      # Windows CMD
+# .venv\Scripts\Activate.ps1      # Windows PowerShell
 
 git pull
 pip install .
@@ -111,6 +114,10 @@ To get started you can:
 3. Configure your search parameters and output target services.
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md).
+
+### Supported and Recommended Models
+
+Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
 
 ---
 
@@ -136,9 +143,3 @@ hyvis path/to/config.toml
   Override the connection parameters specified in your TOML config.
 - `--extra-hash-file PATH`
   Process a text file containing one SHA256 hash per line (useful if you have files from [Garbevoir/wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) that you want to reuse).
-
----
-
-### Supported and Recommended Models
-
-[TODO]
