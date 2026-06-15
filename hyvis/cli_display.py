@@ -140,7 +140,7 @@ def print_confirmation(
             else:
                 svc = _c("(all known tags)", DIM)
             print(f"    service  {svc}")
-            
+
             def _format_tag(t: Any) -> str:
                 if isinstance(t, list):
                     return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
@@ -244,7 +244,14 @@ def print_confirmation(
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED))
     if mode in ("infer_only", "default"):
-        print(_c("      Tip: File paths are resolved. You can safely close Hydrus now to free up memory.", YELLOW))
+        print(
+            _c(
+                "      Tip: File paths are resolved. You may close Hydrus now to free up memory if needed.\n"
+                + "             While Hydrus is closed/unreachable, no tags can be pushed to Hydrus, but inference will continue.\n"
+                + "             After run completion you may run hyvis again with --push-only to push any pending tags to Hydrus.",
+                YELLOW,
+            )
+        )
     print()
 
 
