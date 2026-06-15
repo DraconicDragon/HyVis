@@ -4,29 +4,38 @@ import subprocess
 from pathlib import Path
 
 
+def get_version() -> str:
+    try:
+        version = importlib.metadata.version("hyvis")
+    except importlib.metadata.PackageNotFoundError:
+        version = "source"
+
+    try:
+        git_hash = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        version = f"{version} (git-{git_hash})"
+    except Exception:
+        pass
+
+    return version
+
+
 class _VersionAction(argparse.Action):
     """Prints the version (installed or source) and git hash, then exits."""
 
     def __init__(self, option_strings, dest, **kwargs):
-        super().__init__(option_strings=option_strings, dest=dest, nargs=0, **kwargs)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=0,
+            **kwargs,
+        )
 
     def __call__(self, parser, namespace, values, option_string=None):
-        # 1. Try to get the installed package version
-        try:
-            version = importlib.metadata.version("hyvis")
-        except importlib.metadata.PackageNotFoundError:
-            version = "source"
-
-        # 2. Try to append the git commit hash
-        try:
-            git_hash = subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL, text=True
-            ).strip()
-            version = f"{version} (git-{git_hash})"
-        except Exception:
-            pass
-
-        print(f"hyvis {version}")
+        print(f"hyvis {get_version()}")
         parser.exit()
 
 
