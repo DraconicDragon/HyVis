@@ -1,6 +1,3 @@
-> WIP, doc changes needed for
-`[[hydrus.file_queries]] -> tags` find out what ACTUALLY doesn't work
-
 # Configuration Guide
 
 This document outlines all available settings in your HyVis configuration TOML files.
@@ -53,9 +50,11 @@ Configuration for connecting to your Hydrus client and defining file query and o
 
 *Array of tables (Can be defined multiple times).* Specifies what to use/search for to collect files from Hydrus.
 
+> You can also use almost all system predicates (eg `system:limit is 100`) too. For more (technical) information as well as a list of a lot of system predicates see [here](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_files_search_files).
+
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of (Strings or Arrays) | **Yes** | List of tags to query.  Nested arrays are joined by **OR**. |
+| `tags` | Array of (Strings or Arrays) | **Yes** | List of tags to query. Nested arrays are joined by **OR**. |
 | `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to limit the query to. If empty, defaults to `all known tags`. |
 
 <details>
