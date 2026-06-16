@@ -157,7 +157,7 @@ class ModelConfig:
     device: str = "auto"
     backend: str | None = None  # None → auto-select
     precision: str = "auto"
-    batch_size: int = 4
+    batch_size: int = 1
 
     output_filter: OutputFilterConfig | None = None
     """
@@ -441,7 +441,7 @@ def _parse_model_config(raw: dict[str, Any]) -> ModelConfig:
         device=str(raw.get("device", "auto")),
         backend=str(raw["backend"]) if "backend" in raw else None,
         precision=str(raw.get("precision", "auto")),
-        batch_size=int(raw.get("batch_size", 4)),
+        batch_size=int(raw.get("batch_size", 1)),
         output_filter=per_model_filter,
         output_tag_services=per_model_services,
     )
