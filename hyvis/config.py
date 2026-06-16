@@ -193,7 +193,7 @@ class HydrusConfig:
 
 @dataclass(frozen=True)
 class DatabaseConfig:
-    path: str = "hyvis.db"
+    path: str = "data/hyvis.db"
 
 
 @dataclass(frozen=True)
@@ -324,7 +324,7 @@ class AppConfig:
 
         # --- [database] ---
         db_data = data.get("database", {})
-        database = DatabaseConfig(path=str(db_data.get("path", "hyvis.db")))
+        database = DatabaseConfig(path=str(db_data.get("path", "data/hyvis.db")))
 
         return cls(
             hydrus=hydrus,
