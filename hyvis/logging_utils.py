@@ -16,34 +16,31 @@ def _c(text: str, *codes: str) -> str:
     return "".join(codes) + text + RESET
 
 
+LEVEL_COLORS = {
+    logging.DEBUG: (DIM,),
+    logging.INFO: (),
+    logging.WARNING: (YELLOW,),
+    logging.ERROR: (RED,),
+    logging.CRITICAL: (RED, BOLD),
+}
+
+
+def colorize_level(text: str, level: int) -> str:
+    return _c(text, *LEVEL_COLORS.get(level, ()))
+
+
 class ColorFormatter(logging.Formatter):
-    COLORS = {
-        logging.DEBUG: DIM,
-        logging.INFO: None,
-        logging.WARNING: YELLOW,
-        logging.ERROR: RED,
-        logging.CRITICAL: RED + BOLD,
-    }
-
     def format(self, record):
-        color: str | None = self.COLORS.get(record.levelno)
-
-        # Save original values
         orig_msg = record.msg
         orig_lvl = record.levelname
         orig_name = record.name
 
-        # Apply color to all parts if not INFO
-        if color:
-            record.levelname = f"{color}{orig_lvl:<8}{RESET}"
-            record.name = f"{color}{orig_name}{RESET}"
-            record.msg = f"{color}{orig_msg}{RESET}"
-        else:
-            record.levelname = f"{orig_lvl:<8}"
+        record.levelname = colorize_level(f"{orig_lvl:<8}", record.levelno)
+        record.name = colorize_level(orig_name, record.levelno)
+        record.msg = colorize_level(str(orig_msg), record.levelno)
 
         formatted = super().format(record)
 
-        # Restore values
         record.msg = orig_msg
         record.levelname = orig_lvl
         record.name = orig_name
