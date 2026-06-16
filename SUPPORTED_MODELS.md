@@ -11,6 +11,9 @@ Please open an issue if you know of any models and want HyVis to support them.
 ## Table of Contents
 
 - [Recommended Models](#recommended-models)
+  - [Danbooru Taggers](#danbooru-taggers)
+  - [e621 Taggers](#e621-taggers)
+  - [Hugging Face Gated Repositories (AnimeTimm Models)](#hugging-face-gated-repositories-animetimm-models)
 - [AnimeTimm Taggers (dbv4-full) (20 models)](#animetimm-taggers-dbv4-full)
 - [RedRocket JTP-3 Hydra Tagger (1 models)](#redrocket-jtp-3-hydra-tagger)
 - [SmilingWolf WD Taggers (4 models)](#smilingwolf-wd-taggers)
@@ -29,7 +32,7 @@ Please open an issue if you know of any models and want HyVis to support them.
 | **AnimeTimm Eva02 Large Patch14 448** | [`at-eva02-large-patch14-448-dbv4-full`](#at-eva02-large-patch14-448-dbv4-full) | As heavy as WD Eva02 Large v3, but with updated data. |
 | **AnimeTimm ConvNeXtV2 Huge** | [`at-convnextv2-huge-dbv4-full`](#at-convnextv2-huge-dbv4-full) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only.|
 
-> Newer or larger models do not automatically guarantee better accuracy. Personally I'm in favour of the AnimeTimm models.
+> Newer and/or larger models do not automatically guarantee better accuracy.
 
 ### e621 Taggers
 

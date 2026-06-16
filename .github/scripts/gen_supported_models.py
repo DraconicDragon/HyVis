@@ -108,6 +108,9 @@ def build_markdown() -> str:
         "## Table of Contents",
         "",
         "- [Recommended Models](#recommended-models)",
+        "  - [Danbooru Taggers](#danbooru-taggers)",
+        "  - [e621 Taggers](#e621-taggers)",
+        "  - [Hugging Face Gated Repositories (AnimeTimm Models)](#hugging-face-gated-repositories-animetimm-models)",
     ]
 
     for family_name in sorted_families:
@@ -134,7 +137,7 @@ def build_markdown() -> str:
             f"| **AnimeTimm Eva02 Large Patch14 448** | [{_code('at-eva02-large-patch14-448-dbv4-full')}](#{_slugify('at-eva02-large-patch14-448-dbv4-full')}) | As heavy as WD Eva02 Large v3, but with updated data. |",
             f"| **AnimeTimm ConvNeXtV2 Huge** | [{_code('at-convnextv2-huge-dbv4-full')}](#{_slugify('at-convnextv2-huge-dbv4-full')}) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only.|",
             "",
-            "> Newer or larger models do not automatically guarantee better accuracy. Personally I'm in favour of the AnimeTimm models.",
+            "> Newer and/or larger models do not automatically guarantee better accuracy.",
             "",
             "### e621 Taggers",
             "",
