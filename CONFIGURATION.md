@@ -3,7 +3,7 @@
 
 # Configuration Guide
 
-This document outlines all available settings in your configuration TOML files.
+This document outlines all available settings in your HyVis configuration TOML files.
 
 <!-- If you see any parameter's *Description* column prefixed with "**S2C**", it means subject to change in future updates. -->
 
@@ -18,7 +18,9 @@ This document outlines all available settings in your configuration TOML files.
 
 ## `[hyvis]`
 
-Global application-level settings.
+HyVis application settings.
+
+> Log level can be overwritten using the `--log-level` flag .
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -38,9 +40,9 @@ log_level = "WARNING"
 
 ## `[hydrus]`
 
-Configuration for connecting to your Hydrus Network client and defining input/output rules.
+Configuration for connecting to your Hydrus client and defining file query and output rules.
 
-> Both connection settings can be overridden using `--api-url` and `--api-key` CLI args.
+> Both connection settings can be overridden using `--api-url` and `--api-key` flags.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -49,7 +51,7 @@ Configuration for connecting to your Hydrus Network client and defining input/ou
 
 ### `[[hydrus.file_queries]]`
 
-*Array of tables (Can be defined multiple times).* Specifies which tags to search for when collecting target files from Hydrus.
+*Array of tables (Can be defined multiple times).* Specifies what to use/search for to collect files from Hydrus.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -77,11 +79,11 @@ tags = [
 
 ### `[hydrus.output_tag_services]`
 
-Defines the Hydrus tag services where the inferred tags will be written.
+Defines the Hydrus tag services where the inferred tags will be written/pushed to.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `keys` | Array of Strings | **Yes** | A list of Hydrus service keys representing the destination service(s) to push tags to. |
+| `keys` | Array of Strings | **Yes** | A list of Hydrus tag service keys representing the destination service(s) to push tags to. |
 
 <details>
 <summary>💡 View <code>[hydrus.output_tag_services]</code> Example</summary>
@@ -95,14 +97,14 @@ keys = ["your_service_key_here", "another_service_key_here"]
 
 ### `[hydrus.remove_tags]`
 
-Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only** after all configured models have successfully processed them (both inference and pushing succeeded).
+Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the heavy model execution using the local database cache, and retry the cleanup phase.
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun with the `--push-only` flag.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | No | List of tags to remove from successfully processed files (e.g., temporary processing or queue tags). |
-| `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to remove the tags from. If empty, defaults to removing from all writeable local and repository tag services. |
+| `tags` | Array of Strings | No | List of tags to remove from successfully processed files. |
+| `tag_service_keys` | Array of Strings | Yes* | Hydrus tag service keys to remove the tags from. *Only required if `tags` is specified. |
 
 <details>
 <summary>💡 View <code>[hydrus.remove_tags]</code> Example</summary>
@@ -110,7 +112,7 @@ If tag removal fails for any reason, the tags remain in Hydrus. On the next run,
 ```toml
 [hydrus.remove_tags]
 tags = ["temp:tagme", "queue:ai processing"]
-tag_service_keys = []  # empty -> removes from all local and repository tag services
+tag_service_keys = []
 ```
 
 </details>
@@ -123,12 +125,12 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `prefer_tag_level_thresholds` | Boolean | `true` | When `true`, uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* |
-| `tag_level_threshold_relative_offset` | Float | `0.0` | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. |
-| `default_threshold` | Float | `0.4` | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. |
-| `output_categories` | Array of Strings | `[]` | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`* |
-| `include_tags` | Array of Strings | `[]` | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). |
-| `exclude_tags` | Array of Strings | `[]` | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. |
+| `prefer_tag_level_thresholds` | Boolean | No | Uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* Defaults to `true`. |
+| `tag_level_threshold_relative_offset` | Float | No | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. Defaults to `0.0`. |
+| `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. Defaults to `0.4`. |
+| `output_categories` | Array of Strings | No | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. Defaults to `[]`. |
+| `include_tags` | Array of Strings | No | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). Defaults to `[]`. |
+| `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. Defaults to `[]`. |
 
 <details>
 <summary>💡 View <code>[output_filter]</code> Example</summary>
@@ -250,11 +252,11 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). |
-| `source` | String / Null | `""` (Null) | Path to a local folder containing model files. If empty/omitted, the application attempts to download the model from HuggingFace. |
-| `device` | String | `"auto"` | Hardware to run execution on (e.g., `"auto"`, `"cuda"`, `"cpu"`). |
-| `backend` | String / Null | `""` (Null) | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. |
-| `precision` | String | `"auto"` | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. |
-| `batch_size` | Integer | `4` | Number of files processed in a single batch (must be $\ge 1$). Higher values speed up processing on GPU but require more memory. |
+| `source` | String / Null | No | Path to a local folder containing model files. If omitted, the application attempts to download the model from HuggingFace. Defaults to `null`. |
+| `device` | String | No | Hardware to run execution on (e.g., `"auto"`, `"cuda"`, `"cpu"`). Defaults to `"auto"`. |
+| `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. Defaults to `null` (auto-detect). |
+| `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory Defaults to `"auto"`. |
+| `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if only running on CPU. Defaults to `1`. |
 
 Each model block can also contain per-model overrides for tag processing and output targets:
 
@@ -302,7 +304,7 @@ Settings for the application's local state and cache storage.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `path` | String | `"hyvis.db"` | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. |
+| `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. Defaults to `"data/hyvis.db"`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
