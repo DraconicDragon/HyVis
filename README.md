@@ -7,6 +7,16 @@ HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https:/
 HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  
 Support for downloading the files remotely over API and processing them that way may or may not be added in the future - if there is need/demand for it, it may be added sooner rather than later
 
+## Table of Contents
+
+- [HyVis - Hydrus Tagger](#hyvis---hydrus-tagger)
+- [Installation](#installation)
+- [Updating](#updating)
+- [Configuration](#configuration)
+  - [Supported and Recommended Models](#supported-and-recommended-models)
+- [Usage](#usage)
+  - [Useful CLI Flags](#useful-cli-flags)
+
 ---
 
 ## Installation
@@ -69,7 +79,7 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
 
 #### Option B: ONNX Backend
 
-*Note: Some models, such as [JTP-3](https://huggingface.co/RedRocket/JTP-3) or [animetimm's dbv4 ConvNeXt v2 Huge](https://huggingface.co/animetimm/convnextv2_huge.dbv4-full), are not available in ONNX format.*
+*Note: Some models, such as [JTP-3](SUPPORTED_MODELS.md#jtp-3) or [animetimm's dbv4 ConvNeXt v2 Huge](SUPPORTED_MODELS.md#at-convnextv2-huge-dbv4-full), are not available in ONNX format.*
 
 - **CPU Only:**
 
@@ -105,13 +115,9 @@ pip install .
 
 ## Configuration
 
-HyVis requires a TOML configuration file to define your Hydrus API connection, search rules, models and output filtering.  
+HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
-To get started you can:
-
-1. Copy one of the templates in the `config_examples/` directory.
-2. Edit your copy to insert your Hydrus `api_url` and `api_key`.
-3. Configure your search parameters and output target services.
+To get started you can copy one of the examples in the `config_examples/` directory and modify your copy to your liking.
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md).
 
