@@ -27,6 +27,12 @@
     - animetimm models already have info available on their readmes but not the rest
     - No, jtp3 is not 400m params, thats the siglip2 naflex base, jtp3's hydra head and other custom stuff makes it 501m params
 
+- its gonna be weird but: video/animation support, could support multiple modes
+  - every frame (too heavy but an option, maybe for gifs/very short vids)
+  - every nth frame
+  - keyframes only (if possible)
+  - do analysis and find frames with cuts or scene changes
+
 - configurable metadata fetch batch size (currently 256 hardcoded)
 
 - hydrus file download to memory for remote clients/file locations
