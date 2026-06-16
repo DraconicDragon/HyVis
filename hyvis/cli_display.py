@@ -241,16 +241,16 @@ def print_confirmation(
 
         print()
 
+        if of.max_tags_per_category:
+            print("    max tags / category")
+            for cat, max_ in of.max_tags_per_category.items():
+                print(f"      {cat:<14} {max_}")
+                print()
         if of.tag_prefix_mapping:
             print("    tag prefix mapping")
             for cat, prefix in of.tag_prefix_mapping.items():
                 display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
                 print(f"      {cat:<14} → {display_prefix}")
-                print()
-        if of.max_tags_per_category:
-            print("    max tags / category")
-            for cat, max_ in of.max_tags_per_category.items():
-                print(f"      {cat:<14} {max_}")
                 print()
 
     # Backup Reminder
