@@ -12,6 +12,9 @@ import sys
 import uuid
 from pathlib import Path
 
+from hyvis.bg_imports import start_imports, wait_for_imports
+from hyvis.cli import parse_args
+from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
 from hyvis.logging_utils import (  # noqa: F401
     BOLD,
     CYAN,
@@ -25,10 +28,6 @@ from hyvis.logging_utils import (  # noqa: F401
     _c,
     setup_logging,
 )
-
-from hyvis.bg_imports import start_imports, wait_for_imports
-from hyvis.cli import parse_args
-from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
 from hyvis.progress import Progress, clear_line, inline_progress
 
 logger = logging.getLogger(__name__)
