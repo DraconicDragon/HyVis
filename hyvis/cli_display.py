@@ -3,7 +3,8 @@ import logging
 import sys
 from typing import Any
 
-from hyvis.logging_utils import BOLD, CYAN, DIM, GREEN, RED, YELLOW, _c
+from hyvis.cli import get_version
+from hyvis.logging_utils import BOLD, CYAN, DIM, GREEN, RED, YELLOW, _c, colorize_level
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,15 @@ def print_confirmation(
     print(_c("  Mode", BOLD) + f"  {_c(mode_label, YELLOW, BOLD)}")
     print()
 
+    print(
+        _c(
+            f"  HyVis v{get_version()} | Log level: ",
+            BOLD,
+        )
+        + f"{colorize_level(config.hyvis.log_level, getattr(logging, config.hyvis.log_level.upper()))}"
+    )
+    print()
+
     # Hydrus
     print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", BOLD))
     print(f"    URL        {_c(hydrus.api_url, CYAN)}")
@@ -236,13 +246,15 @@ def print_confirmation(
             for cat, prefix in of.tag_prefix_mapping.items():
                 display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
                 print(f"      {cat:<14} → {display_prefix}")
+                print()
         if of.max_tags_per_category:
-            print(f"    max tags / category  {of.max_tags_per_category}")
-        print(f"\n    log level           {_c(config.hyvis.log_level, YELLOW, BOLD)}")
-        print()
+            print("    max tags / category")
+            for cat, max_ in of.max_tags_per_category.items():
+                print(f"      {cat:<14} {max_}")
+                print()
 
     # Backup Reminder
-    print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED))
+    print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED, BOLD))
     if mode in ("infer_only", "default"):
         print(
             _c(
