@@ -200,7 +200,7 @@ def print_confirmation(
         # region File / Rejected count
         if mime_rejected:
             mimes_str = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
-            print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)} {_c(f'({mimes_str})', DIM)}")
+            print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)}  {_c(f'({mimes_str})', DIM)}")
 
         count_col = YELLOW if file_count == 0 else GREEN
         forced_note = "  (--force: cache bypassed)" if force else ""
