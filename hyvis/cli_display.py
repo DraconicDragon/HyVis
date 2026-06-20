@@ -108,6 +108,8 @@ def print_confirmation(
     boot_time: str,
     file_query_counts: list[int],
     page_query_counts: list[int],
+    mime_rejected: int = 0,
+    rejected_mimes: set[str] | None = None,
 ) -> None:
     inf = config.inference
     hydrus = config.hydrus
@@ -194,7 +196,11 @@ def print_confirmation(
                 print(f"      tag    {_c(tag, RED)}")
             print()
 
-        # File count
+        # File / Rejected count
+        if mime_rejected:
+            mimes_str = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
+            print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)} {_c(f'({mimes_str})', DIM)}")
+
         count_col = YELLOW if file_count == 0 else GREEN
         forced_note = "  (--force: cache bypassed)" if force else ""
         extra_note = (

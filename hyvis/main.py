@@ -110,6 +110,10 @@ async def main() -> int:
     file_query_counts: list[int] = []
     page_query_counts: list[int] = []
 
+    # Rejections tracking init
+    mime_rejected = 0
+    rejected_mimes: set[str] = set()
+
     if mode != "push_only":
         from hyvis.extra_hashes import load_extra_hashes
 
@@ -142,10 +146,12 @@ async def main() -> int:
 
         if total_raw:
             try:
-                file_infos, rejected_mimes = hydrus.filter_by_mime(
+                # Collect main query rejections
+                file_infos, r_mimes = hydrus.filter_by_mime(
                     hash_list,
                     progress_callback=lambda d, t: inline_progress("Filtering metadata", d, t),
                 )
+                rejected_mimes.update(r_mimes)
             except HydrusConnectionError as exc:
                 print(_c(f"\nERROR: Hydrus connection lost during metadata fetch: {exc}", RED), file=sys.stderr)
                 return 1
@@ -156,7 +162,6 @@ async def main() -> int:
             if mime_rejected:
                 rejected_list = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
                 print(_c(f"  Rejected {mime_rejected} files with unsupported MIME types: {rejected_list}", DIM))
-
             if not file_infos and args.extra_hash_file is None:
                 print(_c("\nAll files were filtered by MIME type. Nothing to do.", YELLOW))
                 return 0
@@ -195,7 +200,12 @@ async def main() -> int:
                     _c(f"Fetching metadata for {len(extra_hash_values)} extra hashes...  ", DIM), end="\r", flush=True
                 )
                 try:
-                    extra_infos, extra_rejected_mimes = hydrus.filter_by_mime(extra_hash_values)
+                    # Collect extra hash file rejections
+                    extra_infos, extra_r_mimes = hydrus.filter_by_mime(extra_hash_values)
+                    extra_mime_rejected = len(extra_hash_values) - len(extra_infos)
+                    mime_rejected += extra_mime_rejected
+                    rejected_mimes.update(extra_r_mimes)
+
                     extra_infos = hydrus.resolve_paths(extra_infos)
                 except HydrusConnectionError as exc:
                     print(
@@ -204,8 +214,8 @@ async def main() -> int:
                     return 1
 
                 extra_count = len(extra_infos)
-                if extra_rejected_mimes:
-                    rejected_list = ", ".join(sorted(extra_rejected_mimes))
+                if extra_r_mimes:
+                    rejected_list = ", ".join(sorted(extra_r_mimes))
                     print(f"\r{_c(f'  Rejected extra hashes with unsupported MIME types: {rejected_list}', DIM)}  ")
 
                 missing_extra = len(extra_hash_values) - extra_count
@@ -241,6 +251,8 @@ async def main() -> int:
         boot_time=boot_time,
         file_query_counts=file_query_counts,
         page_query_counts=page_query_counts,
+        mime_rejected=mime_rejected,
+        rejected_mimes=rejected_mimes,
     )
 
     if mode != "push_only" and actionable_count == 0:
