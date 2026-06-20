@@ -76,6 +76,30 @@ tags = [
 
 </details>
 
+### `[[hydrus.page_queries]]`
+
+*Array of tables (Can be defined multiple times).* Allows you to target specific open tabs/pages in your Hydrus client to retrieve files from.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `name` | String | **Yes** | The exact name of the page tab in your Hydrus client. |
+| `index` | integer | Yes* | A `0`-based index used to disambiguate which tab to use if you have multiple open pages with the exact same name. If duplicate names exist and this is unset, HyVis will error. *Only required if multiple pages exist with the same name. |
+
+<details>
+<summary>💡 View <code>[[hydrus.page_queries]]</code> Example</summary>
+
+```toml
+[[hydrus.page_queries]]
+name = "memes"
+
+# Example of disambiguating duplicate tab names using 'index'
+[[hydrus.page_queries]]
+name = "files"
+index = 1
+```
+
+</details>
+
 ### `[hydrus.output_tag_services]`
 
 Defines the Hydrus tag services where the inferred tags will be written/pushed to.
