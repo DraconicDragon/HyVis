@@ -7,7 +7,7 @@ from typing import Any
 import hydrus_api
 import hydrus_api.utils
 
-from hyvis.config import ALLOWED_MIMES, FileQueryConfig
+from hyvis.config import ALLOWED_MIMES, FileQueryConfig, PageQueryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,22 @@ class HydrusClient:
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
 
+    def get_pages(self) -> dict[str, Any]:
+        try:
+            return self._client.get_pages()
+        except hydrus_api.ConnectionError as exc:
+            raise HydrusConnectionError.from_hydrus_api(exc) from exc
+        except hydrus_api.APIError as exc:
+            raise HydrusAPIError(exc) from exc
+
+    def get_page_info(self, page_key: str, simple: bool = False) -> dict[str, Any]:
+        try:
+            return self._client.get_page_info(page_key=page_key, simple=simple)
+        except hydrus_api.ConnectionError as exc:
+            raise HydrusConnectionError.from_hydrus_api(exc) from exc
+        except hydrus_api.APIError as exc:
+            raise HydrusAPIError(exc) from exc
+
     def search_files(self, query: FileQueryConfig) -> set[str]:
         """
         Execute one file query and return the set of matching hashes.
@@ -162,12 +178,64 @@ class HydrusClient:
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
 
-    def collect_candidate_hashes(self, queries: list[FileQueryConfig]) -> set[str]:
-        """Union results from all configured queries."""
+    def _find_pages_by_name(self, node: dict[str, Any], target_name: str) -> list[str]:
+        keys = []
+        if node.get("name") == target_name and node.get("is_media_page") is True:
+            keys.append(node["page_key"])
+        for child in node.get("pages", []):
+            keys.extend(self._find_pages_by_name(child, target_name))
+        return keys
+
+    def search_page(self, query: PageQueryConfig) -> set[str]:
+        """Execute one page query by name/index and return matching hashes."""
+        root_data = self.get_pages()
+        keys = self._find_pages_by_name(root_data.get("pages", {}), query.name)
+
+        if not keys:
+            raise HydrusError(f"No media page found with name '{query.name}'.")
+
+        if len(keys) > 1:
+            if query.index is None:
+                raise HydrusError(
+                    f"Found {len(keys)} pages named '{query.name}'. "
+                    f"Please specify an 'index' (0 to {len(keys) - 1}) in config or rename the target page in Hydrus."
+                )
+            if query.index < 0 or query.index >= len(keys):
+                raise HydrusError(
+                    f"Page index {query.index} out of bounds for '{query.name}' (found {len(keys)} instances)."
+                )
+            target_key = keys[query.index]
+        else:
+            if query.index is not None and query.index != 0:
+                raise HydrusError(
+                    f"Found only 1 page named '{query.name}', but index {query.index} was requested. "
+                    "Set index to 0 or remove it."
+                )
+            target_key = keys[0]
+
+        info_data = self.get_page_info(target_key, simple=False)
+        hashes = info_data.get("page_info", {}).get("media", {}).get("hashes", [])
+        return set(hashes)
+
+    def collect_candidate_hashes(self, queries: list[FileQueryConfig]) -> tuple[set[str], list[int]]:
+        """Union results from all configured file queries. Returns (union_hashes, list_of_counts)."""
         result: set[str] = set()
+        counts: list[int] = []
         for query in queries:
-            result |= self.search_files(query)
-        return result
+            hashes = self.search_files(query)
+            counts.append(len(hashes))
+            result |= hashes
+        return result, counts
+
+    def collect_page_hashes(self, queries: list[PageQueryConfig]) -> tuple[set[str], list[int]]:
+        """Union results from all configured page queries. Returns (union_hashes, list_of_counts)."""
+        result: set[str] = set()
+        counts: list[int] = []
+        for query in queries:
+            hashes = self.search_page(query)
+            counts.append(len(hashes))
+            result |= hashes
+        return result, counts
 
     def filter_by_mime(
         self,

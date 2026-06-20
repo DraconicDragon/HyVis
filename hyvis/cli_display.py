@@ -106,6 +106,8 @@ def print_confirmation(
     hydrus_version: str,
     api_version: str,
     boot_time: str,
+    file_query_counts: list[int],
+    page_query_counts: list[int],
 ) -> None:
     inf = config.inference
     hydrus = config.hydrus
@@ -138,31 +140,45 @@ def print_confirmation(
     print()
 
     if mode != "push_only":
-        # Queries
-        print(_c("  File Queries", BOLD))
-        for q in hydrus.file_queries:
-            if q.tag_service_keys:
-                names = []
-                for key in q.tag_service_keys:
-                    name = service_name_by_key.get(key, "(unknown service)")
-                    names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-                svc = ", ".join(names)
-            else:
-                svc = _c("(all known tags)", DIM)
-            print(f"    service  {svc}")
+        # File Queries
+        if hydrus.file_queries:
+            print(_c("  File Queries", BOLD))
+            for idx, q in enumerate(hydrus.file_queries):
+                count = file_query_counts[idx] if idx < len(file_query_counts) else 0
+                count_str = _c(f"[{count} files]", DIM)
 
-            def _format_tag(t: Any) -> str:
-                if isinstance(t, list):
-                    return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
-                return str(t)
-
-            for tag in q.tags:
-                if isinstance(tag, list):
-                    # Top-level nested list; no need for outer parentheses
-                    print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
+                if q.tag_service_keys:
+                    names = []
+                    for key in q.tag_service_keys:
+                        name = service_name_by_key.get(key, "(unknown service)")
+                        names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+                    svc = ", ".join(names)
                 else:
-                    print(f"      tag    {tag}")
-        print()
+                    svc = _c("(all known tags)", DIM)
+                print(f"    service  {svc} {count_str}")
+
+                def _format_tag(t: Any) -> str:
+                    if isinstance(t, list):
+                        return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
+                    return str(t)
+
+                for tag in q.tags:
+                    if isinstance(tag, list):
+                        # Top-level nested list; no need for outer parentheses
+                        print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
+                    else:
+                        print(f"      tag    {tag}")
+            print()
+
+        # Page Queries
+        if hydrus.page_queries:
+            print(_c("  Page Queries", BOLD))
+            for idx, pq in enumerate(hydrus.page_queries):
+                count = page_query_counts[idx] if idx < len(page_query_counts) else 0
+                count_str = _c(f"[{count} files]", DIM)
+                idx_str = f" (index: {pq.index})" if pq.index is not None else ""
+                print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
+            print()
 
         if hydrus.remove_tags and mode in ("default", "push_only"):
             print(_c("  Cleanup Tags (removed after successful run)", BOLD))

@@ -51,6 +51,17 @@ class FileQueryConfig:
 
 
 @dataclass(frozen=True)
+class PageQueryConfig:
+    """Target a specific open page in the Hydrus client."""
+
+    name: str
+    """The exact name of the page tab in Hydrus."""
+
+    index: int | None = None
+    """Optional index (0-based) to disambiguate if multiple pages share the same name."""
+
+
+@dataclass(frozen=True)
 class OutputTagService:
     """A Hydrus tag service where inference results will be written."""
 
@@ -187,6 +198,7 @@ class HydrusConfig:
     api_url: str
     api_key: str
     file_queries: list[FileQueryConfig]
+    page_queries: list[PageQueryConfig]
     output_tag_services: list[OutputTagService]  # Global output tag services.
     remove_tags: RemoveTagConfig | None = None
 
@@ -293,6 +305,14 @@ class AppConfig:
             for q in h.get("file_queries", [])
         ]
 
+        page_queries = [
+            PageQueryConfig(
+                name=str(q["name"]),
+                index=int(q["index"]) if "index" in q else None,
+            )
+            for q in h.get("page_queries", [])
+        ]
+
         # Parse remove_tags
         remove_tags = None
         if "remove_tags" in h:
@@ -310,6 +330,7 @@ class AppConfig:
             api_url=str(h.get("api_url", "")).rstrip("/"),
             api_key=str(h.get("api_key", "")),
             file_queries=file_queries,
+            page_queries=page_queries,
             output_tag_services=global_output_services,
             remove_tags=remove_tags,
         )
@@ -344,8 +365,14 @@ class AppConfig:
             errors.append("[hydrus] api_url is required")
         if not self.hydrus.api_key:
             errors.append("[hydrus] api_key is required")
-        if not self.hydrus.file_queries:
-            errors.append("[hydrus] At least one [[hydrus.file_queries]] entry is required")
+        if not self.hydrus.file_queries and not self.hydrus.page_queries:
+            errors.append("[hydrus] At least one [[hydrus.file_queries]] or [[hydrus.page_queries]] entry is required")
+
+        for i, pq in enumerate(self.hydrus.page_queries):
+            if not pq.name:
+                errors.append(f"[[hydrus.page_queries]][{i}]: 'name' must be provided and cannot be empty")
+            if pq.index is not None and pq.index < 0:
+                errors.append(f"[[hydrus.page_queries]][{i}]: 'index' cannot be negative")
 
         all_models_override = bool(self.inference.models) and all(
             m.output_tag_services is not None for m in self.inference.models

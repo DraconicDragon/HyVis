@@ -96,7 +96,10 @@ async def main() -> int:
 
     if mode != "push_only" and cfg.hydrus.file_queries and not any(q.tags for q in cfg.hydrus.file_queries):
         print(
-            _c("  Warning: all configured Hydrus file queries are empty; only extra hashes can produce files.", YELLOW)
+            _c(
+                "  Warning: all configured Hydrus file queries are empty; only extra hashes or page queries can produce files.",
+                YELLOW,
+            )
         )
 
     # For push-only we don't need to collect files from Hydrus.
@@ -104,17 +107,31 @@ async def main() -> int:
     actionable_count = 0
     extra_count = 0
 
+    file_query_counts: list[int] = []
+    page_query_counts: list[int] = []
+
     if mode != "push_only":
         from hyvis.extra_hashes import load_extra_hashes
 
         # Collect candidate files
-        from hyvis.hydrus import HydrusConnectionError
+        from hyvis.hydrus import HydrusConnectionError, HydrusError
 
         print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
+        raw_hashes = set()
+
         try:
-            raw_hashes = hydrus.collect_candidate_hashes(cfg.hydrus.file_queries)
+            if cfg.hydrus.file_queries:
+                fq_hashes, file_query_counts = hydrus.collect_candidate_hashes(cfg.hydrus.file_queries)
+                raw_hashes |= fq_hashes
+
+            if cfg.hydrus.page_queries:
+                pq_hashes, page_query_counts = hydrus.collect_page_hashes(cfg.hydrus.page_queries)
+                raw_hashes |= pq_hashes
         except HydrusConnectionError as exc:
             print(_c(f"\nERROR: Hydrus connection lost while fetching files: {exc}", RED), file=sys.stderr)
+            return 1
+        except HydrusError as exc:
+            print(_c(f"\nERROR: Hydrus query failed: {exc}", RED), file=sys.stderr)
             return 1
 
         # Filter by MIME
@@ -222,6 +239,8 @@ async def main() -> int:
         hydrus_version=hydrus_version,
         api_version=api_version,
         boot_time=boot_time,
+        file_query_counts=file_query_counts,
+        page_query_counts=page_query_counts,
     )
 
     if mode != "push_only" and actionable_count == 0:
