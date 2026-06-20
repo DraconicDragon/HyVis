@@ -142,6 +142,7 @@ def print_confirmation(
     print()
 
     if mode != "push_only":
+        # region File / Page Queries
         # File Queries
         if hydrus.file_queries:
             print(_c("  File Queries", BOLD))
@@ -196,7 +197,7 @@ def print_confirmation(
                 print(f"      tag    {_c(tag, RED)}")
             print()
 
-        # File / Rejected count
+        # region File / Rejected count
         if mime_rejected:
             mimes_str = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
             print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)} {_c(f'({mimes_str})', DIM)}")
@@ -222,7 +223,7 @@ def print_confirmation(
             print()
 
     if mode != "push_only":
-        # Models
+        # region Models
         print(_c("  Models", BOLD))
         for i, m in enumerate(inf.models, 1):
             print(f"    {i}. {_c(m.model_id, BOLD)}")
@@ -239,7 +240,7 @@ def print_confirmation(
                 print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
         print()
 
-        # Output Filter
+        # region Output Filter
         of = config.output_filter
         print(_c("  Output Filter (global)", BOLD))
         print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
@@ -253,7 +254,7 @@ def print_confirmation(
         cats = of.output_categories
         print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
-        # tag inclusions/exclusions
+        # region tag incl. / excl.
         if of.include_tags:
             print(_c(f"    include tags        {', '.join(of.include_tags)}", GREEN))
         if of.exclude_tags:
