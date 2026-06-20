@@ -43,8 +43,8 @@ output_categories = ["rating"]
 # *** Models ***
 
 [[inference.models]]
-model_id = "wdv4-convnextv2-huge-dbv4-full"
-source = "/home/drac/dev/models/hf/convnextv2_huge.dbv4-full"
+model_id = "at-convnextv2-huge-dbv4-full"
+#source = ""
 device = "auto"
 batch_size = 3
 # backend  = "pytorch"   # "pytorch" | "onnx" | "auto"
