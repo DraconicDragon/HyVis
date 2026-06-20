@@ -7,6 +7,7 @@ from pathlib import Path
 def get_version() -> str:
     try:
         version = importlib.metadata.version("hyvis")
+        version = "v" + version
     except importlib.metadata.PackageNotFoundError:
         version = "source"
 

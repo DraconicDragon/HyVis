@@ -126,7 +126,7 @@ def print_confirmation(
 
     print(
         _c(
-            f"  HyVis v{get_version()} | Log level: ",
+            f"  HyVis {get_version()} | Log level: ",
             BOLD,
         )
         + f"{colorize_level(config.hyvis.log_level, getattr(logging, config.hyvis.log_level.upper()))}"
