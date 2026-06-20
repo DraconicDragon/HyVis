@@ -357,7 +357,7 @@ class AppConfig:
 
     # region Validation
 
-    def validate(self) -> list[str]:
+    def validate(self, *, has_extra_hashes: bool = False) -> list[str]:
         """Return a list of human-readable validation errors (empty → OK)."""
         errors: list[str] = []
 
@@ -365,8 +365,12 @@ class AppConfig:
             errors.append("[hydrus] api_url is required")
         if not self.hydrus.api_key:
             errors.append("[hydrus] api_key is required")
-        if not self.hydrus.file_queries and not self.hydrus.page_queries:
-            errors.append("[hydrus] At least one [[hydrus.file_queries]] or [[hydrus.page_queries]] entry is required")
+
+        if not self.hydrus.file_queries and not self.hydrus.page_queries and not has_extra_hashes:
+            errors.append(
+                "[hydrus] At least one [[hydrus.file_queries]] or [[hydrus.page_queries]] entry is required, "
+                "or an extra hash file must be supplied via --extra-hash-file CLI flag."
+            )
 
         for i, pq in enumerate(self.hydrus.page_queries):
             if not pq.name:
