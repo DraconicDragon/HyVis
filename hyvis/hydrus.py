@@ -135,28 +135,6 @@ class HydrusClient:
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
 
-    def get_tag_services(self) -> list[str]:
-        """Return all local and repository tag service keys."""
-        # NOTE: Needed for tag deletion/removal since "all known tags" virt domain not usable for this purpose
-        # But I want to keep behaviour parity in config for [[hydrus.file_queries]] and [hydrus.remove_tags] on empty tag service key list
-        try:
-            services = self.get_services().get("services", {})
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
-
-        tag_services = [
-            key
-            for key, info in services.items()
-            if info.get("type") in (0, 5)  # 0: tag repository, 5: local tag domain
-        ]
-
-        if not tag_services:
-            raise HydrusError("No writeable local or repository tag services found in Hydrus.")
-
-        return tag_services
-
     def search_files(self, query: FileQueryConfig) -> set[str]:
         """
         Execute one file query and return the set of matching hashes.
@@ -318,14 +296,8 @@ class HydrusClient:
         tags: list[str],
     ) -> None:
         """Remove tags from hashes across the specified service keys."""
-        if not tags or not hashes:
+        if not tags or not hashes or not service_keys:
             return
-
-        if not service_keys:
-            service_keys = self.get_tag_services()
-            if not service_keys:
-                logger.warning("No tag services found to delete tags from")
-                return
 
         for key in service_keys:
             try:
