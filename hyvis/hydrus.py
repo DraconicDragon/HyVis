@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import functools
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import hydrus_api
 import hydrus_api.utils
@@ -70,7 +71,28 @@ class HydrusAPIError(HydrusError):
         super().__init__(f"HTTP {self.status_code}: {original.response.text[:200]}")
 
 
-# region FileInfo  (lightweight metadata record)
+# region Error Handling Decorator
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _handle_hydrus_errors(func: F) -> F:
+    """
+    Decorator that translates hydrus_api exceptions into local HydrusError subclasses."""
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except hydrus_api.ConnectionError as exc:
+            raise HydrusConnectionError.from_hydrus_api(exc) from exc
+        except hydrus_api.APIError as exc:
+            raise HydrusAPIError(exc) from exc
+
+    return wrapper  # type: ignore[return-value]
+
+
+# region FileInfo (lightweight metadata record)
 
 
 class FileInfo:
@@ -103,54 +125,31 @@ class HydrusClient:
 
     # region Public API
 
+    @_handle_hydrus_errors
     def verify_connection(self) -> dict[str, Any]:
-        try:
-            return self._client.verify_access_key()
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.verify_access_key()
 
+    @_handle_hydrus_errors
     def get_services(self) -> dict[str, Any]:
-        try:
-            return self._client.get_services()
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.get_services()
 
+    @_handle_hydrus_errors
     def get_client_info(self) -> dict[str, Any]:
-        try:
-            return self._client.get_client_info()
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.get_client_info()
 
+    @_handle_hydrus_errors
     def get_version_info(self) -> dict[str, Any]:
-        try:
-            return self._client.get_api_version()
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.get_api_version()
 
+    @_handle_hydrus_errors
     def get_pages(self) -> dict[str, Any]:
-        try:
-            return self._client.get_pages()
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.get_pages()
 
+    @_handle_hydrus_errors
     def get_page_info(self, page_key: str, simple: bool = False) -> dict[str, Any]:
-        try:
-            return self._client.get_page_info(page_key=page_key, simple=simple)
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        return self._client.get_page_info(page_key=page_key, simple=simple)
 
+    @_handle_hydrus_errors
     def search_files(self, query: FileQueryConfig) -> set[str]:
         """
         Execute one file query and return the set of matching hashes.
@@ -166,17 +165,12 @@ class HydrusClient:
             return hashes
 
         tag_service_key = query.tag_service_keys[0] if query.tag_service_keys else None
-        try:
-            data = self._client.search_files(
-                tags=query.tags,
-                tag_service_key=tag_service_key,
-                return_hashes=True,
-            )
-            return set(data.get("hashes", []))
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        data = self._client.search_files(
+            tags=query.tags,
+            tag_service_key=tag_service_key,
+            return_hashes=True,
+        )
+        return set(data.get("hashes", []))
 
     def _find_pages_by_name(self, node: dict[str, Any], target_name: str) -> list[str]:
         keys = []
@@ -186,6 +180,7 @@ class HydrusClient:
             keys.extend(self._find_pages_by_name(child, target_name))
         return keys
 
+    @_handle_hydrus_errors
     def search_page(self, query: PageQueryConfig) -> set[str]:
         """Execute one page query by name/index and return matching hashes."""
         root_data = self.get_pages()
@@ -237,6 +232,7 @@ class HydrusClient:
             result |= hashes
         return result, counts
 
+    @_handle_hydrus_errors
     def filter_by_mime(
         self,
         hashes: list[str],
@@ -256,11 +252,8 @@ class HydrusClient:
             try:
                 data = self._client.get_file_metadata(hashes=batch)
                 metas: list[dict[str, Any]] = data.get("metadata", [])
-            except hydrus_api.ConnectionError as exc:
-                raise HydrusConnectionError.from_hydrus_api(exc) from exc
-            except hydrus_api.APIError as exc:
-                raise HydrusAPIError(exc) from exc
             except hydrus_api.HydrusAPIException as exc:
+                # Non-connection/API errors still need explicit handling
                 logger.error("Metadata fetch error for batch starting %d: %s", start, exc)
                 raise HydrusError(f"Hydrus API Exception: {exc}") from exc
 
@@ -295,7 +288,7 @@ class HydrusClient:
         import concurrent.futures
         import threading
 
-        # Use up to 16 concurrent threads for fast local parallel queries
+        # Use up to 8 concurrent threads for fast local parallel queries
         max_workers = min(8, len(file_infos))
         if max_workers <= 1:
             for idx, info in enumerate(file_infos):
@@ -322,22 +315,22 @@ class HydrusClient:
 
         return file_infos
 
+    @_handle_hydrus_errors
     def _resolve_single_path(self, info: FileInfo) -> None:
         """Helper to resolve a single file path synchronously."""
         try:
             data = self._client.get_file_path(hash_=info.file_hash)
             info.local_path = data.get("path")
-        except hydrus_api.ConnectionError as exc:
-            # Raise immediately to stop the thread pool if the server goes offline
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
         except hydrus_api.APIError as exc:
+            # 404 is expected for files without local paths; re-raise others to decorator
             if exc.response.status_code == 404:
                 logger.debug("No local path for %s (404)", info.file_hash)
             else:
-                logger.warning("Unexpected API error resolving path for %s: %s", info.file_hash, exc)
+                raise
         except hydrus_api.HydrusAPIException as exc:
             logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
 
+    @_handle_hydrus_errors
     def add_tags(
         self,
         hashes: list[str],
@@ -347,16 +340,12 @@ class HydrusClient:
         """Apply tags to hashes on service_key using action ADD."""
         if not tags or not hashes:
             return
-        try:
-            self._client.add_tags(
-                hashes=hashes,
-                service_keys_to_actions_to_tags={service_key: {hydrus_api.TagAction.ADD: tags}},
-            )
-        except hydrus_api.ConnectionError as exc:
-            raise HydrusConnectionError.from_hydrus_api(exc) from exc
-        except hydrus_api.APIError as exc:
-            raise HydrusAPIError(exc) from exc
+        self._client.add_tags(
+            hashes=hashes,
+            service_keys_to_actions_to_tags={service_key: {hydrus_api.TagAction.ADD: tags}},
+        )
 
+    @_handle_hydrus_errors
     def delete_tags(
         self,
         hashes: list[str],
@@ -368,15 +357,10 @@ class HydrusClient:
             return
 
         for key in service_keys:
-            try:
-                self._client.add_tags(
-                    hashes=hashes,
-                    service_keys_to_actions_to_tags={key: {hydrus_api.TagAction.DELETE: tags}},
-                )
-            except hydrus_api.ConnectionError as exc:
-                raise HydrusConnectionError.from_hydrus_api(exc) from exc
-            except hydrus_api.APIError as exc:
-                raise HydrusAPIError(exc) from exc
+            self._client.add_tags(
+                hashes=hashes,
+                service_keys_to_actions_to_tags={key: {hydrus_api.TagAction.DELETE: tags}},
+            )
 
 
 def format_boot_time(timestamp: float) -> str:
