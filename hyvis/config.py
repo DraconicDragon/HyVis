@@ -356,6 +356,16 @@ class AppConfig:
                 "(or every [[inference.models]] entry must define its own output_tag_services)"
             )
 
+        if self.hydrus.remove_tags:
+            r = self.hydrus.remove_tags
+            if not r.tags:
+                errors.append("[hydrus.remove_tags] tags list cannot be empty if remove_tags is specified")
+            if not r.tag_service_keys:
+                errors.append(
+                    "[hydrus.remove_tags] tag_service_keys cannot be empty. "
+                    "You must specify at least one service key because virtual domains cannot be used for tag removal."
+                )
+
         if not self.inference.models:
             errors.append("[inference] At least one [[inference.models]] entry is required")
         for i, m in enumerate(self.inference.models):
