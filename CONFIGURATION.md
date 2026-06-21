@@ -9,12 +9,17 @@ This document outlines all available settings for your HyVis configuration TOML 
 - **Single brackets `[section]`**: Defines a single configuration group.
 - **Double brackets `[[section]]`**: Defines an array of tables. You can specify multiple of these sections in the config (for example, run/specify multiple models in the same config file).
 
+- **Conditional Requirements**: Some settings will have "**Yes***" / "No\*" in the "Required" column. This means that the setting is only required if certain conditions are met. The specific conditions is explained in the "Description" column for that setting.
+  - "**Yes**\*" indicates that the setting is usually required but becomes optional if conditions are met.
+  - "No\*" indicates that the setting is not required unless the condition(s) are met.
+
 ---
 
 ## `[hyvis]`
 
 HyVis application settings.
 
+> [!TIP]
 > Log level can be overwritten using the `--log-level` flag .
 
 | Parameter | Type | Required | Description |
@@ -37,23 +42,40 @@ log_level = "WARNING"
 
 Configuration for connecting to your Hydrus client and defining file query and output rules.
 
-> Both connection settings can be overridden using `--api-url` and `--api-key` flags.
+> [!TIP]
+> Both connection settings can be overridden at runtime using the `--api-url` and `--api-key` command-line flags.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `api_url` | String | **Yes** | The base URL of your Hydrus client API (e.g., `http://127.0.0.1:45869`). |
+| `api_url` | String | **Yes** | The base URL of your Hydrus client API |
 | `api_key` | String | **Yes** | Your Hydrus API key with appropriate permissions to read files and write tags. |
+
+<details>
+<summary>💡 View <code>[hydrus]</code> Example</summary>
+
+```toml
+[hydrus]
+api_url = "http://127.0.0.1:45869"
+api_key = "your_api_key_here"
+```
+
+</details>
+
+### File Collection Settings
+
+> [!IMPORTANT]
+> To run a processing pass, HyVis needs to find files. You must configure at least one file collection method: **either** a `[[hydrus.file_queries]]` block, a `[[hydrus.page_queries]]` block, **or** provide a `.txt` file containing a list of hashes via the `--extra-hash-file` CLI flag.
 
 ### `[[hydrus.file_queries]]`
 
-*Array of tables (Can be defined multiple times).* Specifies what to use/search for to collect files from Hydrus.
+*Array of tables (Can be defined multiple times).* Specifies what search parameters to use to collect candidate files from Hydrus.
 
 > [!TIP]
-> You can also use almost all system predicates (eg `system:limit is 100`) too. For more (technical) information as well as a list of a lot of system predicates see [here](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_files_search_files).
+> You can use almost all Hydrus system predicates (e.g., `system:limit is 100`). For a technical breakdown and complete list of system predicates, see the [Hydrus Developer API Reference](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_files_search_files) (You may need to scroll down a bit until you see a purple-ish expandable section).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of (Strings or Arrays) | **Yes** | List of tags to query. Nested arrays are joined by **OR**. |
+| `tags` | Array of (Strings or Arrays) | **Yes*** | List of tags to query. Nested arrays are evaluated as **OR** queries. <br> **Check [this](#file-collection-settings) for the conditional requirement*. |
 | `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to limit the query to. If empty, defaults to `all known tags`. |
 
 <details>
@@ -84,8 +106,8 @@ tags = [
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `name` | String | **Yes** | The exact name of the page tab in your Hydrus client. |
-| `index` | integer | Yes* | A `0`-based index used to disambiguate which tab to use if you have multiple open pages with the exact same name. If duplicate names exist and this is unset, HyVis will error. *Only required if multiple pages exist with the same name. |
+| `name` | String | **Yes*** | The exact name of the page tab in your Hydrus client. <br> **Check [this](#file-collection-settings) for the conditional requirement*. |
+| `index` | integer | No* | A `0`-based index used to disambiguate which tab to use if you have multiple open pages with the exact same name. If duplicate names exist and this is unset, HyVis will error. <br> **Only required if multiple pages exist with the same name*. |
 
 <details>
 <summary>💡 View <code>[[hydrus.page_queries]]</code> Example</summary>
@@ -116,10 +138,10 @@ Optional setting to send the final to be processed files (and/or rejected files)
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `page_name` | String | **Yes** | Target page to preview the files that will be processed. |
-| `page_index` | Integer | No | Disambiguation index if multiple pages share the same `page_name`. |
+| `page_name` | String | No | Target page to preview the files that will be processed. |
+| `page_index` | Integer | No* | Disambiguation index if multiple pages share the same `page_name`. <br> **Only required if multiple pages exist with the same name*. |
 | `rejected_page_name` | String | No | Target page to preview files that were rejected (e.g., unsupported MIME type). |
-| `rejected_page_index` | Integer | No | Disambiguation index for the rejected page. |
+| `rejected_page_index` | Integer | No* | Disambiguation index for the rejected page. <br> **Only required if multiple pages exist with the same name*. |
 
 <details>
 <summary>💡 View <code>[hydrus.preview]</code> Example</summary>
@@ -166,7 +188,7 @@ If tag removal fails for any reason, the tags remain in Hydrus. On the next run,
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `tags` | Array of Strings | No | List of tags to remove from successfully processed files. |
-| `tag_service_keys` | Array of Strings | Yes* | Hydrus tag service keys to remove the tags from. *Only required if `tags` is specified. |
+| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to remove the tags from. <br> **Only required if `tags` is specified*. |
 
 <details>
 <summary>💡 View <code>[hydrus.remove_tags]</code> Example</summary>
@@ -187,12 +209,12 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `prefer_tag_level_thresholds` | Boolean | No | Uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* Defaults to `true`. |
-| `tag_level_threshold_relative_offset` | Float | No | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. Defaults to `0.0`. |
-| `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. Defaults to `0.4`. |
-| `output_categories` | Array of Strings | No | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. Defaults to `[]`. |
-| `include_tags` | Array of Strings | No | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). Defaults to `[]`. |
-| `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. Defaults to `[]`. |
+| `prefer_tag_level_thresholds` | Boolean | No | Uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* <br> Defaults to `true`. |
+| `tag_level_threshold_relative_offset` | Float | No | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. <br> Defaults to `0.0`. |
+| `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. <br> Defaults to `0.4`. |
+| `output_categories` | Array of Strings | No* | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. <br> Defaults to `[]`. <br> **Required if `include_tags` is not specified or empty*. |
+| `include_tags` | Array of Strings | No* | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). <br> Defaults to `[]`. <br> **Required if `output_categories` is not specified or empty*. |
+| `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. <br> Defaults to `[]`. |
 
 <details>
 <summary>💡 View <code>[output_filter]</code> Example</summary>
@@ -221,6 +243,8 @@ exclude_tags = [
 
 ### `[output_filter.category_thresholds]`
 
+> Required: No
+
 Allows setting custom static threshold overrides for specific categories when using `default_threshold` fallback logic. Omitted categories will use `default_threshold`.
 
 Values can be declared as simple floats or inline tables if they should override Tag-Level Thresholds (TLT) as well:
@@ -241,6 +265,8 @@ artist = { threshold = 0.9, override_tlt = true }
 
 ### `[output_filter.tag_thresholds]`
 
+> Required: No
+
 Allows setting static threshold overrides for specific raw tag names. Uses the same Float or Inline Table structure as `category_thresholds`.
 
 <details>
@@ -255,6 +281,8 @@ Allows setting static threshold overrides for specific raw tag names. Uses the s
 </details>
 
 ### `[output_filter.tag_prefix_mapping]`
+
+> Required: No
 
 Maps model output categories to custom namespace prefixes before they are written to your Hydrus client. Set to an empty string `""` to write tags without a prefix.
 
@@ -280,6 +308,8 @@ contributor = ""
 </details>
 
 ### `[output_filter.max_tags_per_category]`
+
+> Required: No
 
 Limits the maximum number of tags emitted per category, keeping only the highest-scoring tags. Omitted categories have no limit.
 
@@ -314,21 +344,25 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). |
-| `source` | String / Null | No | Path to a local folder containing model files. If omitted, the application attempts to download the model from HuggingFace. Defaults to `null`. |
+| `source` | String / Null | No | Path to a local folder containing model files. If omitted, the application attempts to download the model from HuggingFace. <br> Defaults to `null`. |
 | `device` | String | No | Hardware to run execution on (e.g., `"auto"`, `"cuda"`, `"cpu"`). Defaults to `"auto"`. |
-| `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. Defaults to `null` (auto-detect). |
-| `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory Defaults to `"auto"`. |
-| `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if only running on CPU. Defaults to `1`. |
+| `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. <br> Defaults to `null` (auto-detect). |
+| `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory. <br> Defaults to `"auto"`. |
+| `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if only running on CPU. <br> Defaults to `1`. |
 
 Each model block can also contain per-model overrides for tag processing and output targets:
 
 #### Model-specific `[inference.models.output_filter]`
 
-An optional sub-table that accepts any configuration options available in the global `[output_filter]` block. Keys specified here replace the global settings for this model; omitted keys fall back to the global defaults.
+> Required: No
+
+An optional sub-table that accepts any configuration options available in the global [`[output_filter]`](#output_filter) block. Keys specified here replace the global settings for this model; omitted keys fall back to the global defaults.
 
 #### Model-specific `[inference.models.output_tag_services]`
 
-An optional sub-table that overrides the global `[hydrus.output_tag_services]` configuration. When set, it replaces the global destination list entirely for this model.
+> Required: No
+
+An optional sub-table that overrides the global [`[hydrus.output_tag_services]`](#hydrusoutput_tag_services) configuration. When set, it replaces the global destination list entirely for this model.
 
 <details>
 <summary>💡 View <code>[[inference.models]]</code> Overrides Example</summary>
@@ -366,7 +400,7 @@ Settings for the application's local state and cache storage.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. Defaults to `"data/hyvis.db"`. |
+| `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
