@@ -209,8 +209,47 @@ class HydrusClient:
             target_key = keys[0]
 
         info_data = self.get_page_info(target_key, simple=False)
-        hashes = info_data.get("page_info", {}).get("media", {}).get("hashes", [])
+        media_info = info_data.get("media", {})
+        if not media_info and "page_info" in info_data:
+            media_info = info_data["page_info"].get("media", {})
+        hashes = media_info.get("hashes", [])
         return set(hashes)
+
+    @_handle_hydrus_errors
+    def get_empty_media_page(self, name: str, index: int | None = None) -> str:
+        """Find an empty media page by name/index and return its page_key."""
+        root_data = self.get_pages()
+        keys = self._find_pages_by_name(root_data.get("pages", {}), name)
+
+        if not keys:
+            raise HydrusError(
+                f"No media page found with name '{name}'. Please create an empty page with this name in Hydrus."
+            )
+
+        if len(keys) > 1:
+            if index is None:
+                raise HydrusError(
+                    f"Found {len(keys)} pages named '{name}'. "
+                    f"Please specify an 'index' in your preview config or rename the pages to be unique."
+                )
+            if index < 0 or index >= len(keys):
+                raise HydrusError(f"Page index {index} out of bounds for '{name}' (found {len(keys)} instances).")
+            target_key = keys[index]
+        else:
+            if index is not None and index != 0:
+                raise HydrusError(f"Found only 1 page named '{name}', but index {index} was requested.")
+            target_key = keys[0]
+
+        info_data = self.get_page_info(target_key, simple=True)
+        media_info = info_data.get("media", {})
+        if not media_info and "page_info" in info_data:
+            media_info = info_data["page_info"].get("media", {})
+
+        num_files = media_info.get("num_files", 0)
+        if num_files > 0:
+            raise HydrusError(f"The page '{name}' is not empty ({num_files} files). Please clear it first.")
+
+        return target_key
 
     def collect_candidate_hashes(self, queries: list[FileQueryConfig]) -> tuple[set[str], list[int]]:
         """Union results from all configured file queries. Returns (union_hashes, list_of_counts)."""
@@ -237,14 +276,15 @@ class HydrusClient:
         self,
         hashes: list[str],
         progress_callback: Any | None = None,
-    ) -> tuple[list[FileInfo], set[str]]:
+    ) -> tuple[list[FileInfo], set[str], list[str]]:
         """
         Batch-fetch metadata for all hashes, retain only allowed MIME types.
 
-        Returns FileInfo objects (without local_path; call resolve_paths() later).
+        Returns (accepted_infos, rejected_mimes, rejected_hashes).
         """
         accepted: list[FileInfo] = []
         rejected_mimes: set[str] = set()
+        rejected_hashes: list[str] = []
         total = len(hashes)
 
         for start in range(0, total, _METADATA_BATCH):
@@ -262,6 +302,7 @@ class HydrusClient:
                 if mime not in ALLOWED_MIMES:
                     if mime:
                         rejected_mimes.add(mime)
+                    rejected_hashes.append(meta["hash"])
                     logger.debug("Skipping %s: unsupported MIME %s", meta.get("hash", "?"), mime)
                     continue
                 accepted.append(
@@ -275,7 +316,7 @@ class HydrusClient:
             if progress_callback is not None:
                 progress_callback(min(start + _METADATA_BATCH, total), total)
 
-        return accepted, rejected_mimes
+        return accepted, rejected_mimes, rejected_hashes
 
     def resolve_paths(
         self,
@@ -361,6 +402,22 @@ class HydrusClient:
                 hashes=hashes,
                 service_keys_to_actions_to_tags={key: {hydrus_api.TagAction.DELETE: tags}},
             )
+
+    @_handle_hydrus_errors
+    def add_files_to_page(self, page_key: str, hashes: list[str]) -> None:
+        """Add files to a specific page using the native hydrus-api wrapper."""
+        if not hashes:
+            return
+
+        # Chunk hashes in batches of 500 to keep request sizes manageable
+        for i in range(0, len(hashes), 500):
+            batch = hashes[i : i + 500]
+            self._client.add_files_to_page(page_key=page_key, hashes=batch)
+
+    @_handle_hydrus_errors
+    def focus_page(self, page_key: str) -> None:
+        """Focus a specific page using the native hydrus-api wrapper."""
+        self._client.focus_page(page_key=page_key)
 
 
 def format_boot_time(timestamp: float) -> str:

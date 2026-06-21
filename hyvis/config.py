@@ -62,6 +62,16 @@ class PageQueryConfig:
 
 
 @dataclass(frozen=True)
+class PreviewConfig:
+    """Target specific open pages for file previewing before inference."""
+
+    page_name: str | None = None
+    page_index: int | None = None
+    rejected_page_name: str | None = None
+    rejected_page_index: int | None = None
+
+
+@dataclass(frozen=True)
 class OutputTagService:
     """A Hydrus tag service where inference results will be written."""
 
@@ -193,13 +203,15 @@ class InferenceConfig:
 
 @dataclass(frozen=True)
 class HydrusConfig:
-    """Hydrus connection + search/output settings."""
+    """Hydrus connection + search/preview/output settings."""
 
     api_url: str
     api_key: str
-    file_queries: list[FileQueryConfig]
-    page_queries: list[PageQueryConfig]
-    output_tag_services: list[OutputTagService]  # Global output tag services.
+
+    file_queries: list[FileQueryConfig] = field(default_factory=list)
+    page_queries: list[PageQueryConfig] = field(default_factory=list)
+    preview: PreviewConfig | None = None
+    output_tag_services: list[OutputTagService] = field(default_factory=list)
     remove_tags: RemoveTagConfig | None = None
 
 
@@ -313,6 +325,17 @@ class AppConfig:
             for q in h.get("page_queries", [])
         ]
 
+        # Parse preview
+        preview = None
+        if "preview" in h:
+            p = h["preview"]
+            preview = PreviewConfig(
+                page_name=str(p["page_name"]) if p.get("page_name") else None,
+                page_index=int(p["page_index"]) if "page_index" in p else None,
+                rejected_page_name=str(p["rejected_page_name"]) if p.get("rejected_page_name") else None,
+                rejected_page_index=int(p["rejected_page_index"]) if "rejected_page_index" in p else None,
+            )
+
         # Parse remove_tags
         remove_tags = None
         if "remove_tags" in h:
@@ -331,10 +354,10 @@ class AppConfig:
             api_key=str(h.get("api_key", "")),
             file_queries=file_queries,
             page_queries=page_queries,
+            preview=preview,
             output_tag_services=global_output_services,
             remove_tags=remove_tags,
         )
-
         # --- [output_filter] ---
         global_filter = _parse_output_filter(data.get("output_filter", {}))
 
@@ -377,6 +400,13 @@ class AppConfig:
                 errors.append(f"[[hydrus.page_queries]][{i}]: 'name' must be provided and cannot be empty")
             if pq.index is not None and pq.index < 0:
                 errors.append(f"[[hydrus.page_queries]][{i}]: 'index' cannot be negative")
+
+        if self.hydrus.preview:
+            p = self.hydrus.preview
+            if p.page_index is not None and p.page_index < 0:
+                errors.append("[hydrus.preview] page_index cannot be negative")
+            if p.rejected_page_index is not None and p.rejected_page_index < 0:
+                errors.append("[hydrus.preview] rejected_page_index cannot be negative")
 
         all_models_override = bool(self.inference.models) and all(
             m.output_tag_services is not None for m in self.inference.models

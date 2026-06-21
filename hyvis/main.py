@@ -115,6 +115,7 @@ async def main() -> int:
     # Rejections tracking init
     mime_rejected = 0
     rejected_mimes: set[str] = set()
+    all_rejected_hashes: list[str] = []
 
     if mode != "push_only":
         from hyvis.extra_hashes import load_extra_hashes
@@ -149,11 +150,12 @@ async def main() -> int:
         if total_raw:
             try:
                 # Collect main query rejections
-                file_infos, r_mimes = hydrus.filter_by_mime(
+                file_infos, r_mimes, r_hashes = hydrus.filter_by_mime(
                     hash_list,
                     progress_callback=lambda d, t: inline_progress("Filtering metadata", d, t),
                 )
                 rejected_mimes.update(r_mimes)
+                all_rejected_hashes.extend(r_hashes)
             except HydrusConnectionError as exc:
                 print(_c(f"\nERROR: Hydrus connection lost during metadata fetch: {exc}", RED), file=sys.stderr)
                 return 1
@@ -203,10 +205,11 @@ async def main() -> int:
                 )
                 try:
                     # Collect extra hash file rejections
-                    extra_infos, extra_r_mimes = hydrus.filter_by_mime(extra_hash_values)
+                    extra_infos, extra_r_mimes, extra_r_hashes = hydrus.filter_by_mime(extra_hash_values)
                     extra_mime_rejected = len(extra_hash_values) - len(extra_infos)
                     mime_rejected += extra_mime_rejected
                     rejected_mimes.update(extra_r_mimes)
+                    all_rejected_hashes.extend(extra_r_hashes)
 
                     extra_infos = hydrus.resolve_paths(extra_infos)
                 except HydrusConnectionError as exc:
@@ -260,6 +263,67 @@ async def main() -> int:
     if mode != "push_only" and actionable_count == 0:
         print(_c("No actionable files. Exiting.", YELLOW))
         return 0
+
+    # region Previewing
+    if cfg.hydrus.preview:
+        p = cfg.hydrus.preview
+        try:
+            preview_hashes = []
+
+            if mode == "push_only":
+                from hyvis.db import Database
+
+                db_path = Path(cfg.database.path)
+                if not db_path.is_absolute():
+                    db_path = Path.cwd() / db_path
+
+                with Database(db_path) as db:
+                    for model_cfg in cfg.inference.models:
+                        if args.force:
+                            rows = db.conn.execute(
+                                "SELECT file_hash FROM file_model_results WHERE model_id = ? AND infer_success = 1",
+                                (model_cfg.model_id,),
+                            ).fetchall()
+                            preview_hashes.extend(row[0] for row in rows)
+                        else:
+                            preview_hashes.extend(db.bulk_push_pending(model_cfg.model_id))
+                preview_hashes = list(set(preview_hashes))
+            else:
+                preview_hashes = [fi.file_hash for fi in file_infos if fi.local_path]
+
+            focused_any = False
+
+            if (p.page_name and preview_hashes) or (p.rejected_page_name and all_rejected_hashes and mode != "push_only"):
+                print("Sending files...")
+
+            if p.page_name and preview_hashes:
+                print(_c(f"  Sending {len(preview_hashes)} file(s) to preview page '{p.page_name}'...", DIM))
+                pk = hydrus.get_empty_media_page(p.page_name, p.page_index)
+                hydrus.add_files_to_page(pk, preview_hashes)
+                hydrus.focus_page(pk)
+                focused_any = True
+                print(_c("    Done.", GREEN))
+
+            if p.rejected_page_name and all_rejected_hashes and mode != "push_only":
+                print(
+                    _c(
+                        f"  Sending {len(all_rejected_hashes)} file(s) to rejected preview page '{p.rejected_page_name}'...",
+                        DIM,
+                    )
+                )
+                rpk = hydrus.get_empty_media_page(p.rejected_page_name, p.rejected_page_index)
+                hydrus.add_files_to_page(rpk, all_rejected_hashes)
+                if not focused_any:
+                    hydrus.focus_page(rpk)
+                print(_c("    Done.", GREEN))
+
+        except HydrusError as exc:
+            from hyvis.hydrus import HydrusError
+
+            print(_c(f"\nERROR: Failed to set up preview page: {exc}", RED), file=sys.stderr)
+            return 1
+
+        print()
 
     if not args.yes:
         previous_sigint_handler = signal.getsignal(signal.SIGINT)
