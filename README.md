@@ -1,5 +1,3 @@
-> HyVis is currently in a development phase where one or two breaking changes may be made (on the config side).
-
 # HyVis - Hydrus Tagger
 
 HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/) using a vibecoded vision transformer inference backend (to run WD Taggers or JTP).
