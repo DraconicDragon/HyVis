@@ -1,9 +1,9 @@
-[hyvis]
-log_level = "WARNING"
+# *** Example Config File ***
+# An example config file I used to tag only the top confidence rating tag for the query-ed files
 
 [hydrus]
-api_url = "http://127.0.0.1:45678"
-api_key = "api key here"
+api_url = "http://127.0.0.1:45678" # CHANGE
+api_key = "api key here"           # CHANGE
 
 [[hydrus.file_queries]]
 tags = [
@@ -14,8 +14,12 @@ tags = [
 ]
 tag_service_keys = [] # empty == "all known tags"
 
+# [hydrus.preview]
+# page_name = "hyvis preview"
+# rejected_page_name = "hyvis rejected"
+
 [hydrus.output_tag_services]
-keys = ["1ffa0013df05b86549f5e9bdf19d1f254fb9527120841f44ebceebe928c7a464"]
+keys = ["abcd"] # CHANGE
 
 
 # *** Output filter  (global) ***
@@ -43,13 +47,7 @@ output_categories = ["rating"]
 # *** Models ***
 
 [[inference.models]]
-model_id = "at-convnextv2-huge-dbv4-full"
-#source = ""
+model_id = "at-caformer-b36-dbv4-full"
 device = "auto"
 batch_size = 3
-# backend  = "pytorch"   # "pytorch" | "onnx" | "auto"
 precision = "fp16" # "fp16" | "bf16" | "fp32" | "auto"
-
-
-[database]
-path = "data/hyvis.db"

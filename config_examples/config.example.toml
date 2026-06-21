@@ -1,8 +1,9 @@
 # *** EXAMPLE CONFIGURATION FILE ***
+# This is an example config file that lists pretty much all available options with some small comments
 # See CONFIGURATION.md for more help on individual options
 
 [hyvis]
-# Related CLI args: --log-level | # todo -v/--verbose
+# Related CLI args: --log-level
 # Options: "DEBUG" | "INFO" | "WARNING" | "ERROR"
 log_level = "WARNING"
 
