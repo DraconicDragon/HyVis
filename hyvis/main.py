@@ -265,7 +265,7 @@ async def main() -> int:
         return 0
 
     # region Previewing
-    if cfg.hydrus.preview:
+    if cfg.hydrus.preview and not args.no_preview:
         p = cfg.hydrus.preview
         try:
             preview_hashes = []
