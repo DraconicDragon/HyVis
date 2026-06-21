@@ -294,7 +294,7 @@ async def main() -> int:
             focused_any = False
 
             if (p.page_name and preview_hashes) or (p.rejected_page_name and all_rejected_hashes and mode != "push_only"):
-                print("Sending files...")
+                print("Setting up preview...")
 
             if p.page_name and preview_hashes:
                 print(_c(f"  Sending {len(preview_hashes)} file(s) to preview page '{p.page_name}'...", DIM))
