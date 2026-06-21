@@ -9,7 +9,6 @@ Support for downloading the files remotely over API and processing them that way
 
 ## Table of Contents
 
-- [HyVis - Hydrus Tagger](#hyvis---hydrus-tagger)
 - [Installation](#installation)
 - [Updating](#updating)
 - [Configuration](#configuration)

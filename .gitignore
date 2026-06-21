@@ -1,6 +1,9 @@
 # repo-specific
 *.db
 t_*.toml
+md_notes.md
+md_notes.png
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

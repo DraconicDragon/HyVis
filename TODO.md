@@ -1,15 +1,10 @@
 # TODO
 
-- Support for pulling files from an open page in hydrus
-  - In theory could also work with tag file queries, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
-  - Lock down page selection to specific page types (see api docs)
-  - API caveat: user can't really specify page ID, only page name. But page names can be dupes, so need a way to specify which one, and also error if 2 pages with same name exist
+- [x] Support for pulling files from an open page in hydrus
+  - [ ] In theory could also work with tag file queries, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
 
-- Preview for file queries using an open page in Hydrus
-  - API caveat: same as pulling files from open page
-  - Lock down/require specific/normal page type only
-  - Require page to be empty
-  - mark experimental since i think API says that these endpoints are experimental
+- [x] Preview for file queries using an open page in Hydrus
+  - [ ] mark experimental since i think API says that these endpoints are experimental
 
 - (vibe - ModelPlugin Metadata) Recommended thresholds for each model, in extra column in SUPPORTED_MODELS.md
 
@@ -29,8 +24,8 @@
 
 - its gonna be weird but: video/animation support, could support multiple modes
   - every frame (too heavy but an option, maybe for gifs/very short vids)
-  - every nth frame
-  - keyframes only (if possible)
+  - every nth frame (could do fps percentage based or hard user-set frame intervals)
+  - keyframes only (if easily possible)
   - do analysis and find frames with cuts or scene changes
 
 - configurable metadata fetch batch size (currently 256 hardcoded)
