@@ -343,12 +343,12 @@ Global settings for running tag inference across your models.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). |
-| `source` | String / Null | No | Path to a local folder containing model files. If omitted, the application attempts to download the model from HuggingFace. <br> Defaults to `null`. |
-| `device` | String | No | Hardware to run execution on (e.g., `"auto"`, `"cuda"`, `"cpu"`). Defaults to `"auto"`. |
+| `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). You can find all supported and recommended models in the [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md) document. |
+| `source` | String / Null | No | Path to a local folder containing model files (or, if you are experimenting: a HuggingFace repo ID). If omitted, HyVis will attempt to download the model from HuggingFace. <br> If you set source to a local folder which does NOT have any/all model files required present, then HyVis will download the (missing) files into that directory instead of the `HF_HOME` cache directory. <br> Defaults to `null`. |
+| `device` | String | No | Hardware device to run inference on (e.g., `"auto"`, `"cuda"`/`"gpu"`, `"cpu"`). <br> Defaults to `"auto"`. |
 | `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. <br> Defaults to `null` (auto-detect). |
 | `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory. <br> Defaults to `"auto"`. |
-| `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if only running on CPU. <br> Defaults to `1`. |
+| `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if running only on CPU. <br> Defaults to `1`. |
 
 Each model block can also contain per-model overrides for tag processing and output targets:
 
