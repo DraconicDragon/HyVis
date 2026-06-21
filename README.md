@@ -116,7 +116,7 @@ pip install .
 
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
-To get started you can copy one of the examples in the `config_examples/` directory and modify your copy to your liking.
+To get started you can copy one of the examples in the `config_examples/` directory and modify the copy to your liking.
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md).
 
@@ -144,7 +144,9 @@ hyvis path/to/config.toml
   Run model inference and save results to the database cache, but do not send any tags to Hydrus.
 - `--push-only`
   Read cached results from the local database and push them to Hydrus, skipping the inference step.
+- `--no-preview`
+  Skip any [configured page previews](CONFIGURATION.md#hydruspreview).
 - `--api-url` / `--api-key`
-  Override the connection parameters specified in your TOML config.
+  Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config.
 - `--extra-hash-file PATH`
   Process a text file containing one SHA256 hash per line (useful if you have files from [Garbevoir/wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) that you want to reuse).

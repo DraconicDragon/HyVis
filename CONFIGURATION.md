@@ -1,15 +1,13 @@
 # Configuration Guide
 
-This document outlines all available settings in your HyVis configuration TOML files.
-
-<!-- If you see any parameter's *Description* column prefixed with "**S2C**", it means subject to change in future updates. -->
+This document outlines all available settings for your HyVis configuration TOML files.
 
 ## Basics
 
 ### Structure
 
 - **Single brackets `[section]`**: Defines a single configuration group.
-- **Double brackets `[[section]]`**: Defines an array of tables. You can specify multiple of these sections in the config (for example, run multiple models).
+- **Double brackets `[[section]]`**: Defines an array of tables. You can specify multiple of these sections in the config (for example, run/specify multiple models in the same config file).
 
 ---
 
@@ -50,6 +48,7 @@ Configuration for connecting to your Hydrus client and defining file query and o
 
 *Array of tables (Can be defined multiple times).* Specifies what to use/search for to collect files from Hydrus.
 
+> [!TIP]
 > You can also use almost all system predicates (eg `system:limit is 100`) too. For more (technical) information as well as a list of a lot of system predicates see [here](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_files_search_files).
 
 | Parameter | Type | Required | Description |
@@ -78,6 +77,9 @@ tags = [
 
 ### `[[hydrus.page_queries]]`
 
+> [!NOTE]
+> This setting uses a Hydrus API endpoint that is marked as ["Under Construction" in the documentation](https://hydrusnetwork.github.io/hydrus/developer_api.html#manage_pages_get_pages). This setting may stop working with a Hydrus update if the related endpoint changes.
+
 *Array of tables (Can be defined multiple times).* Allows you to target specific open tabs/pages in your Hydrus client to retrieve files from.
 
 | Parameter | Type | Required | Description |
@@ -96,6 +98,43 @@ name = "memes"
 [[hydrus.page_queries]]
 name = "files"
 index = 1
+```
+
+</details>
+
+### `[hydrus.preview]`
+
+> [!NOTE]
+> This setting uses a Hydrus API endpoint that is marked as ["Under Construction" in the documentation](https://hydrusnetwork.github.io/hydrus/developer_api.html#manage_pages_get_pages). This setting may stop working with a Hydrus update if the related endpoint changes.
+
+Optional setting to send the final to be processed files (and/or rejected files) to a specific open page in your Hydrus client for preview before processing begins. Even if `push-only` mode is executed, the main preview page is updated with all file hashes about to be pushed.  
+
+> If you want to skip previews without commenting in/removing the `[hydrus.preview]` section from the config, you can use the `--no-preview` flag.
+
+> [!IMPORTANT]
+> HyVis cannot create pages for you as the API does not support this. You must manually create the empty page(s) in Hydrus. If a page is not empty you must also manually remove the files from the page (right click -> remove -> all)
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `page_name` | String | **Yes** | Target page to preview the files that will be processed. |
+| `page_index` | Integer | No | Disambiguation index if multiple pages share the same `page_name`. |
+| `rejected_page_name` | String | No | Target page to preview files that were rejected (e.g., unsupported MIME type). |
+| `rejected_page_index` | Integer | No | Disambiguation index for the rejected page. |
+
+<details>
+<summary>💡 View <code>[hydrus.preview]</code> Example</summary>
+
+```toml
+[hydrus.preview]
+page_name = "hyvis preview"
+rejected_page_name = "hyvis rejected"
+
+# Example with disambiguation indices; it's very similar to [hydrus.page_queries]
+[hydrus.preview]
+page_name = "files"
+page_index = 2
+rejected_page_name = "rejected files"
+rejected_page_index = 0
 ```
 
 </details>
