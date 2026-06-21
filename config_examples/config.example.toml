@@ -25,6 +25,11 @@ tag_service_keys = [] # empty == "all known tags"
 name = "files"
 # index = 0  # optional; must use this if multiple pages with same name exist. 0-based
 
+# Preview files to process before inference
+# [hydrus.preview]
+# page_name = "hyvis preview"
+# rejected_page_name = "hyvis rejected"
+
 # Output services: where tags will be written/added to.
 # This setting applies globally to all models.
 # It can be overriden per-model (see model section below)
