@@ -214,7 +214,7 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 | `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. <br> Defaults to `0.4`. |
 | `output_categories` | Array of Strings | No* | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. <br> Defaults to `[]`. <br> **Required if `include_tags` is not specified or empty*. |
 | `include_tags` | Array of Strings | No* | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). <br> Defaults to `[]`. <br> **Required if `output_categories` is not specified or empty*. |
-| `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). No prefix escaping is needed. <br> Defaults to `[]`. |
+| `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). <br> Defaults to `[]`. |
 
 <details>
 <summary>💡 View <code>[output_filter]</code> Example</summary>
@@ -280,7 +280,7 @@ Allows setting static threshold overrides for specific raw tag names. Uses the s
 
 </details>
 
-### `[output_filter.tag_prefix_mapping]`
+### `[output_filter.category_tag_prefix_mapping]`
 
 > Required: No
 
@@ -290,19 +290,46 @@ Maps model output categories to custom namespace prefixes before they are writte
 - **Values**: String (prefix to prepend)
 
 <details>
-<summary>💡 View <code>[output_filter.tag_prefix_mapping]</code> Example</summary>
+<summary>💡 View <code>[output_filter.category_tag_prefix_mapping]</code> Example</summary>
 
 ```toml
-[output_filter.tag_prefix_mapping]
+# Example: Model outputs "touhou", which is in the copyright category. With this mapping, the tag is pushed to Hydrus as "series:touhou"
+[output_filter.category_tag_prefix_mapping]
 rating = "rating:"
 general = "" 
 artist = "creator:"
-copyright = "series:"
+copyright = "series:" 
 character = "character:"
 meta = "meta:"
 species = "species:"
 lore = "lore:"
 contributor = ""
+```
+
+</details>
+
+### `[output_filter.tag_prefix_overrides]`
+
+> Required: No
+
+Maps specific raw tag names to custom prefixes, overriding any category-level prefixes set in `tag_prefix_mapping`.
+
+- **Keys**: Raw tag name
+- **Values**: String (prefix to prepend)
+
+<details>
+<summary>💡 View <code>[output_filter.tag_prefix_overrides]</code> Example</summary>
+
+```toml
+# This example would be for JTP-3 or similar taggers where the "rating" tags are in the meta category (in this case because of e621)
+[output_filter.category_tag_prefix_mapping]
+meta = "meta:"
+
+# Example: Instead of "meta:safe" we get "rating:safe"
+[output_filter.tag_prefix_overrides]
+"safe" = "rating:"
+"questionable" = "rating:"
+"explicit" = "rating:"
 ```
 
 </details>
