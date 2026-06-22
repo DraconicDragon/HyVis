@@ -266,13 +266,13 @@ def print_confirmation(
             print("    max tags / category")
             for cat, max_ in of.max_tags_per_category.items():
                 print(f"      {cat:<14} {max_}")
-                print()
+            print()
         if of.category_tag_prefix_mapping:
             print("    category tag prefix mapping")
             for cat, prefix in of.category_tag_prefix_mapping.items():
                 display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
                 print(f"      {cat:<14} → {display_prefix}")
-                print()
+            print()
 
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED, BOLD))
