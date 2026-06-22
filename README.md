@@ -120,11 +120,11 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - `config.example.toml` - Example config file with pretty much all available options + some comments. Reading the configuration guide over the comments is preferred though
 
-- `tagging_example.toml` - Generic example config for tagging files using a model with basic default settings - likely a good starting point for most users
+- `tagging_example.toml` - Generic example config for general tagging of files using a model with basic default settings - likely a good starting point for most users
 
 - `dan_rating_only.toml` - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
 
-<!-- - `tagging_multi_model.toml` - A more advanced example config that uses 2 models (1 outputting Danbooru tags, the other e621 tags) to tag files and puts each model's output in separate tag services -->
+- `tagging_multi_model.toml` - A more advanced example config that uses 2 models (one outputting Danbooru tags, the other E621 tags) to tag files and puts each model's output in separate tag services
 
 ### Supported and Recommended Models
 
