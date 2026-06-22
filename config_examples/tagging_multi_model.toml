@@ -1,0 +1,90 @@
+# *** EXAMPLE CONFIGURATION FILE ***
+# This is a more advanced example config for tagging files using two models and model specific output filter settings
+
+[hydrus]
+api_url = "http://127.0.0.1:45869"
+api_key = "your_api_key_here"
+
+[[hydrus.file_queries]]
+tags = ["system:limit is 500"]
+tag_service_keys = [] # empty == "all known tags"
+
+
+# *** Output filter  (global) ***
+
+[output_filter]
+prefer_tag_level_thresholds = true
+default_threshold = 0.4
+
+
+# *** Output selection ***
+
+output_categories = [
+    "rating",
+    "general",
+    "contributor",
+    "copyright",
+    "character",
+    "meta",
+    "species",
+    "lore",
+]
+
+[output_filter.max_tags_per_category]
+"rating" = 1
+
+
+# *** Tag prefix mapping ***
+
+[output_filter.category_tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+"contributor" = ""
+
+
+# *** Models ***
+
+[[inference.models]]
+model_id = "at-caformer-b36-dbv4-full"
+# source   = ""
+device = "auto"
+batch_size = 4
+precision = "fp16"
+
+[inference.models.output_filter.category_thresholds]
+"character" = 0.5
+
+[output_filter.tag_thresholds]
+"extra_ears"   = { threshold = 0.23, override_tlt = true }
+
+[inference.models.output_tag_services]
+keys = ["model_specific_service_key_here"]
+
+
+### Second model
+[[inference.models]]
+model_id   = "jtp-3"
+#source     = ""
+device     = "cuda"
+batch_size = 2
+
+[inference.models.output_filter]
+default_threshold = 0.55
+
+[inference.models.output_filter.tag_prefix_overrides]
+"safe" = "rating:"
+"questionable" = "rating:"
+"explicit" = "rating:"
+
+[inference.models.output_tag_services]
+keys = ["second_model_specific_service_key_here"]
+
+
+[database]
+path = "data/hyvis.db"

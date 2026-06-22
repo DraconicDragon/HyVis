@@ -1,0 +1,61 @@
+# *** EXAMPLE CONFIGURATION FILE ***
+# This is an example config for tagging files in hydrus.
+
+[hydrus]
+api_url = "http://127.0.0.1:45869"
+api_key = "your_api_key_here" 
+
+[[hydrus.file_queries]]
+tags = ["system:limit is 500"]
+tag_service_keys = [] # empty == "all known tags"
+
+[hydrus.output_tag_services]
+keys = ["your_service_key_here"]
+
+
+# *** Output filter  (global) ***
+
+[output_filter]
+prefer_tag_level_thresholds = true
+default_threshold = 0.35
+
+
+# *** Output selection ***
+
+output_categories = [
+    "rating",
+    "general",
+    #"artist",
+    "contributor",
+    "copyright",
+    "character",
+    "meta",
+    "species",
+    "lore",
+]
+
+
+# *** Tag prefix mapping ***
+
+[output_filter.category_tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+#"contributor" = ""
+
+
+# *** Models ***
+
+[[inference.models]]
+model_id = "wd-swinv2-v3"
+device = "auto"
+batch_size = 6
+
+
+[database]
+path = "data/hyvis.db"

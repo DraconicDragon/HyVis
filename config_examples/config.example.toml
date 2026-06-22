@@ -98,15 +98,12 @@ exclude_tags = [
 # Two forms are accepted:
 #   category = 0.7                                        plain threshold, override_tlt is false by default
 #   category = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
-#
-# Tag names with special characters must be quoted: "cyberpunk_(series)" = 0.9
 [output_filter.category_thresholds]
 "character" = 0.7
 "artist" = 0.9    # most models don't support it anyway and when they do, have low artist accuracy
 
 # Per-tag threshold overrides.  Same two forms as category_thresholds.
-# Keys are raw tag names without prefixes, e.g. "1girl" not "rating:1girl" or "creator:artistname".
-# Tag names with special characters must be quoted.
+# Keys are raw tag names without prefixes, e.g. "artist_name" not "creator:artist_name".
 #
 # [output_filter.tag_thresholds]
 # "1girl"  = 0.6
@@ -136,6 +133,13 @@ exclude_tags = [
 "species" = "species:"
 "lore" = "lore:"
 "contributor" = ""
+
+# Per-tag prefix mapping, overrides category mapping
+# Example below is for jtp-3/e6 rating tags which doesn't in the model don't have their own category/column 
+# [output_filter.tag_prefix_overrides]
+# "safe" = "rating:"
+# "questionable" = "rating:"
+# "explicit" = "rating:"
 
 
 # *** Models ***
