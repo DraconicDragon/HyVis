@@ -116,7 +116,15 @@ HyVis uses TOML configuration files to define your Hydrus API connection, search
 
 To get started you can copy one of the examples in the `config_examples/` directory and modify the copy to your liking.
 
-For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md).
+For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md). You may want to have this open while checking the example configs and editing/creating your own.
+
+- `config.example.toml` - Example config file with pretty much all available options + some comments. Reading the configuration guide over the comments is preferred though
+
+- `tagging_example.toml` - Generic example config for tagging files using a model with basic default settings - likely a good starting point for most users
+
+- `dan_rating_only.toml` - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
+
+<!-- - `tagging_multi_model.toml` - A more advanced example config that uses 2 models (1 outputting Danbooru tags, the other e621 tags) to tag files and puts each model's output in separate tag services -->
 
 ### Supported and Recommended Models
 
@@ -148,3 +156,7 @@ hyvis path/to/config.toml
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config.
 - `--extra-hash-file PATH`
   Process a text file containing one SHA256 hash per line (useful if you have files from [Garbevoir/wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) that you want to reuse).
+
+<!-- ## FAQ
+
+There would be frequently asked questions here, but there are none, because I can't come up with any and nobody asked yet -->
