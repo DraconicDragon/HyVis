@@ -126,7 +126,7 @@ exclude_tags = [
 # Maps category name -> prefix prepended to each tag before writing to Hydrus.
 # Empty string = no prefix.
 # Example: tag "fate_(series)" is in "copyright" category; will be pushed to hydrus as "series:fate (series)".
-[output_filter.tag_prefix_mapping]
+[output_filter.category_tag_prefix_mapping]
 "rating" = "rating:"
 "general" = ""
 "artist" = "creator:"
@@ -143,7 +143,7 @@ exclude_tags = [
 # All models are loaded at the same time and run against the same file set.
 
 [[inference.models]]
-model_id = "wd-swinv2-v3" # Check README for supported models and their IDs
+model_id = "wd-swinv2-v3" # Check SUPPORTED_MODELS.md for supported models and their IDs
 # source   = "" # Local path to folder or omit/leave empty to auto-download from HuggingFace
 device = "auto"
 batch_size = 4  # higher = more VRAM usage. Not useful if device resolved to CPU

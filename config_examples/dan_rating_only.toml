@@ -2,8 +2,8 @@
 # An example config file I used to tag only the top confidence rating tag for the query-ed files
 
 [hydrus]
-api_url = "http://127.0.0.1:45678" # CHANGE
-api_key = "api key here"           # CHANGE
+api_url = "http://127.0.0.1:45869"
+api_key = "api key here"
 
 [[hydrus.file_queries]]
 tags = [
@@ -19,7 +19,7 @@ tag_service_keys = [] # empty == "all known tags"
 # rejected_page_name = "hyvis rejected"
 
 [hydrus.output_tag_services]
-keys = ["abcd"] # CHANGE
+keys = ["abcd"]
 
 
 # *** Output filter  (global) ***
@@ -40,7 +40,7 @@ output_categories = ["rating"]
 
 # *** Tag prefix mapping ***
 
-[output_filter.tag_prefix_mapping]
+[output_filter.category_tag_prefix_mapping]
 "rating" = "rating:"
 
 
@@ -50,4 +50,4 @@ output_categories = ["rating"]
 model_id = "at-caformer-b36-dbv4-full"
 device = "auto"
 batch_size = 3
-precision = "fp16" # "fp16" | "bf16" | "fp32" | "auto"
+precision = "fp16"
