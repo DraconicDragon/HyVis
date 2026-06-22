@@ -112,6 +112,9 @@ pip install .
 
 ## Configuration
 
+>[!NOTE]
+> Practically every single model's tags file makes it output tags with underscores like you'd find and use for search on image boards (Danbooru/E621 etc) - HyVis by default has a single non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`). Please make an issue about this if you require this to be a configurable setting in any way.
+
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
 To get started you can copy one of the examples in the `config_examples/` directory and modify the copy to your liking.
