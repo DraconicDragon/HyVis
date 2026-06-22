@@ -159,7 +159,7 @@ def build_markdown() -> str:
 
     lines.extend(
         [
-            '### Legend <a id="legend"></a>',
+            "### Legend",
             "",
             "- **Model Name:** Just a human-friendly display name. Click it to go to a model's source HuggingFace repository.",
             "- **Model ID:** Unique identifier to use in HyVis config to select which model to run.",
