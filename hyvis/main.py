@@ -293,7 +293,9 @@ async def main() -> int:
 
             focused_any = False
 
-            if (p.page_name and preview_hashes) or (p.rejected_page_name and all_rejected_hashes and mode != "push_only"):
+            if (p.page_name and preview_hashes) or (
+                p.rejected_page_name and all_rejected_hashes and mode != "push_only"
+            ):
                 print("Setting up preview...")
 
             if p.page_name and preview_hashes:
@@ -366,7 +368,14 @@ async def main() -> int:
         db.start_run(run_id=run_id, config_toml=config_toml)
 
         for model_cfg in cfg.inference.models:
-            print(_c(f"  Using model: {model_cfg.model_id}", BOLD, CYAN))
+            try:
+                import vibe
+
+                model_info = vibe.describe(model_cfg.model_id)
+                display_name = model_info.display_name
+            except Exception:
+                display_name = model_cfg.model_id
+            print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id})', DIM)}")
             print()
 
             # --- Step 0: push previously-inferred-but-not-pushed ---
