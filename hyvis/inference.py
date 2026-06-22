@@ -117,7 +117,7 @@ def extract_tags(
     exclude_set = set(output_filter.exclude_tags)
 
     for category, tag_scores in tags_by_category.items():
-        prefix = output_filter.tag_prefix_mapping.get(category) or ""
+        category_prefix = output_filter.category_tag_prefix_mapping.get(category) or ""
         cat_records: list[TagRecord] = []
 
         for raw_tag, score in tag_scores.items():
@@ -132,6 +132,9 @@ def extract_tags(
             if not is_allowed:
                 if not categories or category not in categories:
                     continue
+
+            # Determine effective prefix (individual override takes precedence)
+            prefix = output_filter.tag_prefix_overrides.get(raw_tag, category_prefix)
 
             cat_records.append(
                 TagRecord(

@@ -154,8 +154,11 @@ class OutputFilterConfig:
 
     # --- Output selection ---
 
-    tag_prefix_mapping: dict[str, str] = field(default_factory=dict)
+    category_tag_prefix_mapping: dict[str, str] = field(default_factory=dict)
     """Maps category name → tag prefix applied before writing to Hydrus."""
+
+    tag_prefix_overrides: dict[str, str] = field(default_factory=dict)
+    """Maps specific raw tag name → tag prefix."""
 
     max_tags_per_category: dict[str, int] = field(default_factory=dict)
     """
@@ -276,7 +279,10 @@ class AppConfig:
             exclude_tags=_pick("exclude_tags", m.exclude_tags, g.exclude_tags),
             category_thresholds=_pick("category_thresholds", m.category_thresholds, g.category_thresholds),
             tag_thresholds=_pick("tag_thresholds", m.tag_thresholds, g.tag_thresholds),
-            tag_prefix_mapping=_pick("tag_prefix_mapping", m.tag_prefix_mapping, g.tag_prefix_mapping),
+            category_tag_prefix_mapping=_pick(
+                "category_tag_prefix_mapping", m.category_tag_prefix_mapping, g.category_tag_prefix_mapping
+            ),
+            tag_prefix_overrides=_pick("tag_prefix_overrides", m.tag_prefix_overrides, g.tag_prefix_overrides),
             max_tags_per_category=_pick("max_tags_per_category", m.max_tags_per_category, g.max_tags_per_category),
         )
 
@@ -473,7 +479,8 @@ def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
         exclude_tags=list(raw.get("exclude_tags", [])),
         category_thresholds=category_thresholds,
         tag_thresholds=tag_thresholds,
-        tag_prefix_mapping={str(k): str(v) for k, v in raw.get("tag_prefix_mapping", {}).items()},
+        category_tag_prefix_mapping={str(k): str(v) for k, v in raw.get("category_tag_prefix_mapping", {}).items()},
+        tag_prefix_overrides={str(k): str(v) for k, v in raw.get("tag_prefix_overrides", {}).items()},
         max_tags_per_category=max_tags,
         _raw_keys=frozenset(raw.keys()),
     )
