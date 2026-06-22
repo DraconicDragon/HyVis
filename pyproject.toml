@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hyvis"
-version = "0.19.1"
+version = "0.19.2"
 dependencies = [
     "requests",
     "hydrus-api",
