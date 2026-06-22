@@ -34,6 +34,9 @@ output_categories = [
     "lore",
 ]
 
+[output_filter.max_tags_per_category]
+"rating" = 1
+
 
 # *** Tag prefix mapping ***
 
