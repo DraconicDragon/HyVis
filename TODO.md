@@ -29,6 +29,9 @@
 
 - (need more info) magic byte fallback for metadata fetch incase hydrus mime type is "unknown" (suggesting its not set, which would be unexpected)
 
+- (v2) support for removing tags if confidence is below a certain threshold
+  - can be useful if there's wrong tags either from original source or from old model i guess?
+
 - configurable metadata fetch batch size (currently 256 hardcoded)
 
 - hydrus file download to memory for remote clients/file locations
