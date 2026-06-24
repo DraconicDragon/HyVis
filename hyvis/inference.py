@@ -453,7 +453,8 @@ async def infer_files(
                         logger.error("DB write failed for %s: %s", file_hash[:8], exc)
                         # Don't abort for DB errors; keep going.
 
-                    # Interleaved push; only when Hydrus is available and still reachable.
+                    # region Interleaved push
+                    # only when Hydrus is available and still reachable.
                     if hydrus_reachable:
                         assert hydrus is not None  # narrowing: hydrus_reachable implies hydrus was provided
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
@@ -472,6 +473,24 @@ async def infer_files(
                             db.commit()
                             stats.push_ok += 1
                             stats.total_tags_pushed += len(prefixed_tags)
+
+                            # region Tag Cleanup
+                            model_ids = [m.model_id for m in config.inference.models]
+                            if len(db.bulk_fully_completed([file_hash], model_ids)) > 0:
+                                if config.hydrus.remove_tags:
+                                    r_cfg = config.hydrus.remove_tags
+                                    try:
+                                        hydrus.delete_tags(
+                                            hashes=[file_hash],
+                                            service_keys=r_cfg.tag_service_keys,
+                                            tags=r_cfg.tags,
+                                        )
+                                    except Exception as cleanup_exc:
+                                        logger.error(
+                                            "Immediate tag cleanup failed for %s: %s", file_hash[:8], cleanup_exc
+                                        )
+                                db.mark_cleanup_done([file_hash], model_ids, done=True)
+
                         except Exception as exc:
                             logger.error(
                                 "Hydrus push failed for %s: %s | suspending push for remainder of inference. "
@@ -599,6 +618,21 @@ async def push_cached_to_hydrus(
             stats.total_tags_pushed += len(prefixed_tags)
             progress.set_last_file_info(file_hash, model_cfg.model_id, len(prefixed_tags))
             progress.tick(processed=1)
+
+            # tag cleanup
+            model_ids = [m.model_id for m in config.inference.models]
+            if len(db.bulk_fully_completed([file_hash], model_ids)) > 0:
+                if config.hydrus.remove_tags:
+                    r_cfg = config.hydrus.remove_tags
+                    try:
+                        hydrus.delete_tags(
+                            hashes=[file_hash],
+                            service_keys=r_cfg.tag_service_keys,
+                            tags=r_cfg.tags,
+                        )
+                    except Exception as cleanup_exc:
+                        logger.error("Immediate tag cleanup failed for %s: %s", file_hash[:8], cleanup_exc)
+                db.mark_cleanup_done([file_hash], model_ids, done=True)
 
         except Exception as exc:
             logger.error("Hydrus push failed for %s: %s", file_hash[:8], exc)
