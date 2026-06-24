@@ -204,28 +204,6 @@ class Database:
                     completed.add(file_hash)
         return completed
 
-    def mark_cleanup_done(self, file_hashes: list[str], model_ids: list[str], *, done: bool = True) -> None:
-        """Mark cleanup_done for all (hash, model) pairs where push was successful."""
-        if not file_hashes or not model_ids:
-            return
-        val = 1 if done else 0
-        chunk_size = 900
-        for start in range(0, len(file_hashes), chunk_size):
-            chunk = file_hashes[start : start + chunk_size]
-            placeholders = ",".join("?" * len(chunk))
-            model_placeholders = ",".join("?" * len(model_ids))
-            self.conn.execute(
-                f"""
-                UPDATE file_model_results
-                SET cleanup_done = ?
-                WHERE push_success = 1
-                  AND file_hash IN ({placeholders})
-                  AND model_id IN ({model_placeholders})
-                """,
-                [val, *chunk, *model_ids],
-            )
-        self.conn.commit()
-
     def get_pending_cleanup(self) -> list[tuple[str, str, str]]:
         """
         Return (file_hash, model_id, run_id) for every (file, model) pair where:
@@ -253,6 +231,82 @@ class Database:
             """
         ).fetchall()
         return [(r[0], r[1], r[2]) for r in rows]
+
+    def mark_cleanup_done(self, file_hashes: list[str], model_ids: list[str], *, done: bool = True) -> None:
+        """Mark cleanup_done for all (hash, model) pairs where push was successful."""
+        if not file_hashes or not model_ids:
+            return
+        val = 1 if done else 0
+        chunk_size = 900
+        for start in range(0, len(file_hashes), chunk_size):
+            chunk = file_hashes[start : start + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            model_placeholders = ",".join("?" * len(model_ids))
+            self.conn.execute(
+                f"""
+                UPDATE file_model_results
+                SET cleanup_done = ?
+                WHERE push_success = 1
+                  AND file_hash IN ({placeholders})
+                  AND model_id IN ({model_placeholders})
+                """,
+                [val, *chunk, *model_ids],
+            )
+        self.conn.commit()
+
+    def get_failed_inferences(self) -> list[tuple[str, str, str, str]]:
+        """Return (file_hash, model_id, run_id, infer_error) for failed inferences."""
+        rows = self.conn.execute(
+            """
+            SELECT file_hash, model_id, run_id, infer_error
+            FROM file_model_results
+            WHERE infer_success = 0
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2], r[3] or "Unknown error") for r in rows]
+
+    def get_cleanup_blocked_by_failed_inference(self) -> list[str]:
+        """
+        Return unique file_hashes that have some successful pushes, but are blocked
+        from cleanup because at least one of the models in the same run failed inference.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT fmr.file_hash
+            FROM file_model_results fmr
+            WHERE fmr.cleanup_done = 0
+              AND fmr.push_success = 1
+              AND EXISTS (
+                  SELECT 1 FROM file_model_results fmr2
+                  WHERE fmr2.file_hash = fmr.file_hash
+                    AND fmr2.run_id = fmr.run_id
+                    AND fmr2.infer_success = 0
+              )
+            """
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def get_cleanup_held_by_pending_pushes_count(self) -> int:
+        """
+        Return the number of unique file_hashes that have some successful pushes, but
+        are waiting for other models in the same run to be pushed (which succeeded inference).
+        """
+        rows = self.conn.execute(
+            """
+            SELECT COUNT(DISTINCT fmr.file_hash)
+            FROM file_model_results fmr
+            WHERE fmr.cleanup_done = 0
+              AND fmr.push_success = 1
+              AND EXISTS (
+                  SELECT 1 FROM file_model_results fmr2
+                  WHERE fmr2.file_hash = fmr.file_hash
+                    AND fmr2.run_id = fmr.run_id
+                    AND fmr2.infer_success = 1
+                    AND fmr2.push_success = 0
+              )
+            """
+        ).fetchall()
+        return rows[0][0] if rows else 0
 
     def get_pending_push(self) -> list[tuple[str, str, str]]:
         """
