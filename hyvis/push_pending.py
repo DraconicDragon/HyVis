@@ -54,17 +54,30 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
 
     # === DEBUG RESET ===
-    # print(_c("DEBUG: Resetting push_success and cleanup_done to 0 for all records...", YELLOW))
-    # with Database(db_path) as db:
-    #     db.conn.execute("UPDATE file_model_results SET push_success = 0, cleanup_done = 0")
-    #     db.commit()
+    print(_c("DEBUG: Resetting push_success and cleanup_done to 0 for all records...", YELLOW))
+    with Database(db_path) as db:
+        db.conn.execute("UPDATE file_model_results SET push_success = 0, cleanup_done = 0")
+        db.commit()
 
     with Database(db_path) as db:
         pending_push = db.get_pending_push()
         initial_pending_cleanup = db.get_pending_cleanup()
+        failed_inferences = db.get_failed_inferences()
+        blocked_by_failures = db.get_cleanup_blocked_by_failed_inference()
+        held_by_pending = db.get_cleanup_held_by_pending_pushes_count()
 
     if not pending_push and not initial_pending_cleanup:
         print("Nothing pending. All files are pushed and cleaned up.")
+        if failed_inferences:
+            print()
+            print(
+                _c(
+                    f"  Note: There are {len(failed_inferences)} result(s) with failed inferences (infer_success = 0).",
+                    YELLOW,
+                )
+            )
+            print(_c("        These require re-running the main inference pipeline to resolve.", YELLOW))
+            print()
         return 0
 
     # Calculate estimated cleanups resulting from the pending pushes
@@ -73,8 +86,9 @@ async def _run(args: argparse.Namespace) -> int:
 
     if pending_push:
         with Database(db_path) as db:
-            # Gather unique run IDs from the pending pushes
-            unique_run_ids = {run_id for _, _, run_id in pending_push}
+            # Gather unique (file_hash, run_id) pairs to estimate unique file cleanups
+            unique_file_runs = {(file_hash, run_id) for file_hash, _, run_id in pending_push}
+            unique_run_ids = {run_id for _, run_id in unique_file_runs}
 
             # Map run_id to whether it requires actual cleanup or auto-marking
             run_cleanup_requires_action: dict[str, bool] = {}
@@ -89,8 +103,8 @@ async def _run(args: argparse.Namespace) -> int:
                 else:
                     run_cleanup_requires_action[r_id] = False
 
-            # Count the files falling into each category
-            for _, _, run_id in pending_push:
+            # Count the unique file cleanups falling into each category
+            for _, run_id in unique_file_runs:
                 if run_cleanup_requires_action.get(run_id, False):
                     est_cleanup_active += 1
                 else:
@@ -99,6 +113,7 @@ async def _run(args: argparse.Namespace) -> int:
     print()
     print(_c(f"  Pending pushes  : {len(pending_push)}", BOLD))
     print(_c(f"  Pending cleanups: {len(initial_pending_cleanup)}", BOLD))
+
     if pending_push:
         est_total = est_cleanup_active + est_cleanup_auto
         details = []
@@ -108,6 +123,37 @@ async def _run(args: argparse.Namespace) -> int:
             details.append(f"{est_cleanup_auto} auto-marked completed")
         details_str = f" ({', '.join(details)})" if details else ""
         print(_c(f"  Estimated additional cleanups (after pushes succeed): {est_total}{details_str}", DIM))
+
+    # Print Warnings/Diagnostics for stuck states
+    if failed_inferences:
+        print()
+        print(
+            _c(
+                f"  WARNING: Found {len(failed_inferences)} result(s) with failed inferences (infer_success = 0).",
+                YELLOW,
+            )
+        )
+        print(_c("           These cannot be pushed or cleaned up until you re-run inference on those files.", YELLOW))
+
+    if blocked_by_failures:
+        print()
+        print(
+            _c(
+                f"  WARNING: Cleanup is blocked for {len(blocked_by_failures)} file(s) because at least one of their models failed inference.",
+                RED,
+            )
+        )
+        print(_c("           (Cleanup requires ALL configured models for a file to succeed).", RED))
+
+    if held_by_pending and pending_push:
+        print()
+        print(
+            _c(
+                f"  Note: {held_by_pending} cleanup(s) are temporarily held waiting for pending pushes to complete.",
+                DIM,
+            )
+        )
+        print(_c("        These will execute immediately after the pushes succeed during this run.", DIM))
     print()
 
     if not args.yes:
@@ -118,8 +164,7 @@ async def _run(args: argparse.Namespace) -> int:
             return 0
         print()
 
-    # region Group by run_id
-    # so we deserialize each config only once
+    # region Group by run_id so we deserialize each config only once
     # For push: group (file_hash, model_id) by run_id
     push_by_run: dict[str, list[tuple[str, str]]] = {}
     for file_hash, model_id, run_id in pending_push:
@@ -225,10 +270,11 @@ async def _run(args: argparse.Namespace) -> int:
                     total_cleanup_err += len(entries)
                     continue
 
+                hashes = list({fh for fh, _ in entries})
+                model_ids = list({mid for _, mid in entries})
+
                 if not cfg.hydrus.remove_tags:
                     # This run had no remove_tags configured; mark as done so it stops appearing
-                    hashes = [fh for fh, _ in entries]
-                    model_ids = list({mid for _, mid in entries})
                     db.mark_cleanup_done(hashes, model_ids, done=True)
                     total_cleanup_ok += len(hashes)
                     print(_c(f"  marked {len(hashes)} file(s) as cleaned (no remove_tags) (run {run_id[:8]})", DIM))
@@ -243,8 +289,6 @@ async def _run(args: argparse.Namespace) -> int:
                     continue
 
                 r_cfg = cfg.hydrus.remove_tags
-                hashes = [fh for fh, _ in entries]
-                model_ids = list({mid for _, mid in entries})
 
                 try:
                     hydrus.delete_tags(hashes=hashes, service_keys=r_cfg.tag_service_keys, tags=r_cfg.tags)
