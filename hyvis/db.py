@@ -228,17 +228,28 @@ class Database:
 
     def get_pending_cleanup(self) -> list[tuple[str, str, str]]:
         """
-        Return (file_hash, model_id, run_id) for every (file, model) pair where
-        push_success=1 but cleanup_done=0.
-
-        Each row is independent: if a file has 2 models and only one has
-        cleanup_done=0, only that one row is returned.
+        Return (file_hash, model_id, run_id) for every (file, model) pair where:
+          1. push_success = 1 and cleanup_done = 0.
+          2. ALL models executed for this file in this run have successfully completed pushing.
         """
         rows = self.conn.execute(
             """
-            SELECT file_hash, model_id, run_id
-            FROM file_model_results
-            WHERE push_success = 1 AND cleanup_done = 0
+            SELECT fmr.file_hash, fmr.model_id, fmr.run_id
+            FROM file_model_results fmr
+            WHERE fmr.push_success = 1 
+              AND fmr.cleanup_done = 0
+              AND (
+                  SELECT COUNT(*) 
+                  FROM file_model_results fmr2 
+                  WHERE fmr2.file_hash = fmr.file_hash 
+                    AND fmr2.run_id = fmr.run_id
+              ) = (
+                  SELECT COUNT(*) 
+                  FROM file_model_results fmr3 
+                  WHERE fmr3.file_hash = fmr.file_hash 
+                    AND fmr3.run_id = fmr.run_id 
+                    AND fmr3.push_success = 1
+              )
             """
         ).fetchall()
         return [(r[0], r[1], r[2]) for r in rows]
