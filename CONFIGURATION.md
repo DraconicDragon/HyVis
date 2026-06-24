@@ -127,14 +127,16 @@ index = 1
 ### `[hydrus.preview]`
 
 > [!NOTE]
-> This setting uses a Hydrus API endpoint that is marked as ["Under Construction" in the documentation](https://hydrusnetwork.github.io/hydrus/developer_api.html#manage_pages_get_pages). This setting may stop working with a Hydrus update if the related endpoint changes.
+> This setting uses a Hydrus API endpoint that is marked as ["Under Construction" in the documentation](https://hydrusnetwork.github.io/hydrus/developer_api.html#manage_pages_get_pages). This setting may stop working with a Hydrus update if the related endpoint changes drastically.
 
 Optional setting to send the final to be processed files (and/or rejected files) to a specific open page in your Hydrus client for preview before processing begins. Even if `push-only` mode is executed, the main preview page is updated with all file hashes about to be pushed.  
 
 > If you want to skip previews without commenting in/removing the `[hydrus.preview]` section from the config, you can use the `--no-preview` flag.
 
 > [!IMPORTANT]
-> HyVis cannot create pages for you as the API does not support this. You must manually create the empty page(s) in Hydrus. If a page is not empty you must also manually remove the files from the page (right click -> remove -> all)
+> **For Hydrus v676 or newer:** HyVis will automatically create the preview pages for you if they do not already exist. If a page with the configured name already exists, HyVis will use it.
+> **For older Hydrus versions:** You must manually create the page(s) in Hydrus. This is an API limitation.
+> *In both cases the pages must be empty and cleared manually if they aren't (select all -> right click -> remove)*
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
