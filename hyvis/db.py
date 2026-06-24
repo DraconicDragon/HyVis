@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS file_model_results (
     run_id          TEXT    NOT NULL REFERENCES runs(run_id),
     infer_success   INTEGER NOT NULL DEFAULT 0,  -- 1 = inference ok and cached
     push_success    INTEGER NOT NULL DEFAULT 0,  -- 1 = Hydrus push ok
+    cleanup_done    INTEGER NOT NULL DEFAULT 0,  -- 1 = tags removal ok
     infer_error     TEXT,
     push_error      TEXT,
     duration_ms     INTEGER,
@@ -202,6 +203,73 @@ class Database:
                 if count == len(unique_models):
                     completed.add(file_hash)
         return completed
+
+    def mark_cleanup_done(self, file_hashes: list[str], model_ids: list[str], *, done: bool = True) -> None:
+        """Mark cleanup_done for all (hash, model) pairs."""
+        if not file_hashes or not model_ids:
+            return
+        val = 1 if done else 0
+        chunk_size = 900
+        for start in range(0, len(file_hashes), chunk_size):
+            chunk = file_hashes[start : start + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            model_placeholders = ",".join("?" * len(model_ids))
+            self.conn.execute(
+                f"""
+                UPDATE file_model_results
+                SET cleanup_done = ?
+                WHERE file_hash IN ({placeholders})
+                AND model_id IN ({model_placeholders})
+                """,
+                [val, *chunk, *model_ids],
+            )
+        self.conn.commit()
+
+    def get_pending_cleanup(self) -> list[tuple[str, str, str]]:
+        """
+        Return (file_hash, model_id, run_id) for every (file, model) pair where
+        push_success=1 but cleanup_done=0.
+
+        Each row is independent: if a file has 2 models and only one has
+        cleanup_done=0, only that one row is returned.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT file_hash, model_id, run_id
+            FROM file_model_results
+            WHERE push_success = 1 AND cleanup_done = 0
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def get_pending_push(self) -> list[tuple[str, str, str]]:
+        """
+        Return (file_hash, model_id, run_id) for every (file, model) pair where
+        infer_success=1 but push_success=0.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT file_hash, model_id, run_id
+            FROM file_model_results
+            WHERE infer_success = 1 AND push_success = 0
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def get_config_toml(self, run_id: str) -> str | None:
+        """Return the raw config TOML string saved for a given run_id, or None."""
+        row = self.conn.execute(
+            "SELECT config_toml FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def has_pending_push(self) -> bool:
+        """Fast check: are there any files with infer_success=1 and push_success=0?"""
+        row = self.conn.execute(
+            "SELECT 1 FROM file_model_results WHERE infer_success = 1 AND push_success = 0 LIMIT 1"
+        ).fetchone()
+        return row is not None
 
     def get_cached_inference(self, file_hash: str, model_id: str) -> dict[str, Any] | None:
         """Return the cached TagResult dict, or None if not cached."""
