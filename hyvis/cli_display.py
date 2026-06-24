@@ -117,7 +117,6 @@ def print_confirmation(
     mode_label = {
         "default": "Infer + Push",
         "infer_only": "Infer only  (Hydrus push skipped)",
-        "push_only": "Push only   (no inference)",
     }.get(mode, mode)
 
     print()
@@ -141,138 +140,135 @@ def print_confirmation(
     print(f"    Boot time  {_c(boot_time, GREEN)}")
     print()
 
-    if mode != "push_only":
-        # region File / Page Queries
-        # File Queries
-        if hydrus.file_queries:
-            print(_c("  File Queries", BOLD))
-            for idx, q in enumerate(hydrus.file_queries):
-                count = file_query_counts[idx] if idx < len(file_query_counts) else 0
-                count_str = _c(f"[{count} files]", DIM)
+    # region File / Page Queries
+    # File Queries
+    if hydrus.file_queries:
+        print(_c("  File Queries", BOLD))
+        for idx, q in enumerate(hydrus.file_queries):
+            count = file_query_counts[idx] if idx < len(file_query_counts) else 0
+            count_str = _c(f"[{count} files]", DIM)
 
-                if q.tag_service_keys:
-                    names = []
-                    for key in q.tag_service_keys:
-                        name = service_name_by_key.get(key, "(unknown service)")
-                        names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-                    svc = ", ".join(names)
+            if q.tag_service_keys:
+                names = []
+                for key in q.tag_service_keys:
+                    name = service_name_by_key.get(key, "(unknown service)")
+                    names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+                svc = ", ".join(names)
+            else:
+                svc = _c("(all known tags)", DIM)
+            print(f"    service  {svc} {count_str}")
+
+            def _format_tag(t: Any) -> str:
+                if isinstance(t, list):
+                    return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
+                return str(t)
+
+            for tag in q.tags:
+                if isinstance(tag, list):
+                    # Top-level nested list; no need for outer parentheses
+                    print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
                 else:
-                    svc = _c("(all known tags)", DIM)
-                print(f"    service  {svc} {count_str}")
-
-                def _format_tag(t: Any) -> str:
-                    if isinstance(t, list):
-                        return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
-                    return str(t)
-
-                for tag in q.tags:
-                    if isinstance(tag, list):
-                        # Top-level nested list; no need for outer parentheses
-                        print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
-                    else:
-                        print(f"      tag    {tag}")
-            print()
-
-        # Page Queries
-        if hydrus.page_queries:
-            print(_c("  Page Queries", BOLD))
-            for idx, pq in enumerate(hydrus.page_queries):
-                count = page_query_counts[idx] if idx < len(page_query_counts) else 0
-                count_str = _c(f"[{count} files]", DIM)
-                idx_str = f" (index: {pq.index})" if pq.index is not None else ""
-                print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
-            print()
-
-        if hydrus.remove_tags and mode in ("default", "push_only"):
-            print(_c("  Cleanup Tags (removed after successful run)", BOLD))
-            r = hydrus.remove_tags
-            names = []
-            for key in r.tag_service_keys:
-                name = service_name_by_key.get(key, "(unknown service)")
-                names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-            svc = ", ".join(names)
-
-            print(f"    service  {svc}")
-            for tag in r.tags:
-                print(f"      tag    {_c(tag, RED)}")
-            print()
-
-        # region File / Rejected count
-        if mime_rejected:
-            mimes_str = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
-            print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)}  {_c(f'({mimes_str})', DIM)}")
-
-        count_col = YELLOW if file_count == 0 else GREEN
-        forced_note = "  (--force: cache bypassed)" if force else ""
-        extra_note = (
-            f"  (+{extra_hash_count} extra hash{'es' if extra_hash_count != 1 else ''})" if extra_hash_count else ""
-        )
-        print(
-            f"  {_c('Files to process', BOLD)}  {_c(str(file_count), count_col, BOLD)}"
-            f"{_c(extra_note, DIM)}{_c(forced_note, DIM)}"
-        )
+                    print(f"      tag    {tag}")
         print()
+
+    # Page Queries
+    if hydrus.page_queries:
+        print(_c("  Page Queries", BOLD))
+        for idx, pq in enumerate(hydrus.page_queries):
+            count = page_query_counts[idx] if idx < len(page_query_counts) else 0
+            count_str = _c(f"[{count} files]", DIM)
+            idx_str = f" (index: {pq.index})" if pq.index is not None else ""
+            print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
+        print()
+
+    if hydrus.remove_tags and mode == "default":
+        print(_c("  Cleanup Tags (removed after successful run)", BOLD))
+        r = hydrus.remove_tags
+        names = []
+        for key in r.tag_service_keys:
+            name = service_name_by_key.get(key, "(unknown service)")
+            names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+        svc = ", ".join(names)
+
+        print(f"    service  {svc}")
+        for tag in r.tags:
+            print(f"      tag    {_c(tag, RED)}")
+        print()
+
+    # region File / Rejected count
+    if mime_rejected:
+        mimes_str = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
+        print(f"  {_c('MIME Rejected', BOLD)}     {_c(str(mime_rejected), RED)}  {_c(f'({mimes_str})', DIM)}")
+
+    count_col = YELLOW if file_count == 0 else GREEN
+    forced_note = "  (--force: cache bypassed)" if force else ""
+    extra_note = (
+        f"  (+{extra_hash_count} extra hash{'es' if extra_hash_count != 1 else ''})" if extra_hash_count else ""
+    )
+    print(
+        f"  {_c('Files to process', BOLD)}  {_c(str(file_count), count_col, BOLD)}"
+        f"{_c(extra_note, DIM)}{_c(forced_note, DIM)}"
+    )
+    print()
 
     if mode != "infer_only":
-        if mode == "push_only":
-            # Output services
-            print(_c("  Output Tag Services (global)", BOLD))
-            for svc in hydrus.output_tag_services:
-                name = service_name_by_key.get(svc.key, "(unknown service)")
-                print(f"    {_c(name, BOLD, CYAN)} {_c(svc.key, DIM)}")
-            print()
-
-    if mode != "push_only":
-        # region Models
-        print(_c("  Models", BOLD))
-        for i, m in enumerate(inf.models, 1):
-            print(f"    {i}. {_c(m.model_id, BOLD)}")
-            print(f"       source           {m.source}")
-            print(
-                f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
-            )
-            eff_svcs = config.resolved_output_tag_services(m)
-            print("       output services")
-            for s in eff_svcs:
-                name = service_name_by_key.get(s.key, s.key)
-                print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
-            if m.output_filter is not None:
-                print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
+        # Output services
+        print(_c("  Output Tag Services (global)", BOLD))
+        for svc in hydrus.output_tag_services:
+            name = service_name_by_key.get(svc.key, "(unknown service)")
+            print(f"    {_c(name, BOLD, CYAN)} {_c(svc.key, DIM)}")
         print()
 
-        # region Output Filter
-        of = config.output_filter
-        print(_c("  Output Filter (global)", BOLD))
-        print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
-        print(f"    TLT offset          {of.tag_level_threshold_relative_offset}")
-        print(f"    default threshold   {of.default_threshold}")
-        if of.category_thresholds:
-            print("    category thresholds")
-            for cat, cfg_ in of.category_thresholds.items():
-                tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
-                print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
-        cats = of.output_categories
-        print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
+    # region Models
+    print(_c("  Models", BOLD))
+    for i, m in enumerate(inf.models, 1):
+        print(f"    {i}. {_c(m.model_id, BOLD)}")
+        print(f"       source           {m.source}")
+        print(
+            f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
+        )
+        eff_svcs = config.resolved_output_tag_services(m)
+        print("       output services")
+        for s in eff_svcs:
+            name = service_name_by_key.get(s.key, s.key)
+            print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
+        if m.output_filter is not None:
+            print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
+    print()
 
-        # region tag incl. / excl.
-        if of.include_tags:
-            print(_c(f"    include tags        {', '.join(of.include_tags)}", GREEN))
-        if of.exclude_tags:
-            print(_c(f"    exclude tags        {', '.join(of.exclude_tags)}", RED))
+    # region Output Filter
+    of = config.output_filter
+    print(_c("  Output Filter (global)", BOLD))
+    print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
+    print(f"    TLT offset          {of.tag_level_threshold_relative_offset}")
+    print(f"    default threshold   {of.default_threshold}")
+    if of.category_thresholds:
+        print("    category thresholds")
+        for cat, cfg_ in of.category_thresholds.items():
+            tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
+            print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
+    cats = of.output_categories
+    print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
+    # region tag incl. / excl.
+    if of.include_tags:
+        print(_c(f"    include tags        {', '.join(of.include_tags)}", GREEN))
+    if of.exclude_tags:
+        print(_c(f"    exclude tags        {', '.join(of.exclude_tags)}", RED))
+
+    print()
+
+    if of.max_tags_per_category:
+        print("    max tags / category")
+        for cat, max_ in of.max_tags_per_category.items():
+            print(f"      {cat:<14} {max_}")
         print()
-
-        if of.max_tags_per_category:
-            print("    max tags / category")
-            for cat, max_ in of.max_tags_per_category.items():
-                print(f"      {cat:<14} {max_}")
-            print()
-        if of.category_tag_prefix_mapping:
-            print("    category tag prefix mapping")
-            for cat, prefix in of.category_tag_prefix_mapping.items():
-                display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
-                print(f"      {cat:<14} → {display_prefix}")
-            print()
+    if of.category_tag_prefix_mapping:
+        print("    category tag prefix mapping")
+        for cat, prefix in of.category_tag_prefix_mapping.items():
+            display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
+            print(f"      {cat:<14} → {display_prefix}")
+        print()
 
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED, BOLD))
@@ -281,7 +277,7 @@ def print_confirmation(
             _c(
                 "      Tip: File paths are resolved. You may close Hydrus now to free up memory if needed.\n"
                 + "             While Hydrus is closed/unreachable, no tags can be pushed to Hydrus, but inference will continue.\n"
-                + "             After run completion you may run hyvis again with --push-only to push any pending tags to Hydrus.",
+                + "             After run completion you may run 'hyvis-push-pending' to push any pending tags to Hydrus.",
                 YELLOW,
             )
         )
@@ -307,8 +303,8 @@ def print_run_summary(
     print(f"  Run ID    : {_c(run_id, DIM)}")
     if mode in ("default", "infer_only"):
         print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped")
-    if mode in ("default", "push_only"):
+    if mode == "default":
         print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
         if total_push_err:
-            print(_c("  Tip: run with --push-only to retry failed pushes.", DIM))
+            print(_c("  Tip: Run 'hyvis-push-pending' to retry failed pushes and process cleanups.", DIM))
     print()

@@ -58,10 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yes", "-y", action="store_true", help="Skip all confirmation prompts.")
     parser.add_argument("--force", "-f", action="store_true", help="Ignore the DB cache; re-process all matched files.")
     parser.add_argument("--infer-only", action="store_true", help="Run inference only; do not push results to Hydrus.")
-    parser.add_argument("--push-only", action="store_true", help="Push cached results to Hydrus; skip inference.")
-    parser.add_argument(
-        "--no-preview", action="store_true", help="Skip any configured page previews."
-    )
+    parser.add_argument("--no-preview", action="store_true", help="Skip any configured page previews.")
     parser.add_argument(
         "--log-level",
         default=None,

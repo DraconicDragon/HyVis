@@ -1,5 +1,5 @@
 """
-db.py Stores more than currently needed, maybe future updates can make use of it
+db.py Stores run metadata, known file info, and cached inference results.
 """
 
 from __future__ import annotations
@@ -46,9 +46,6 @@ CREATE TABLE IF NOT EXISTS inference_cache (
 -- Outcome for each (file, model) pair in a run.
 -- infer_success tracks whether inference ran and results were saved to cache.
 -- push_success tracks whether tags were successfully sent to Hydrus.
--- These are intentionally separate: inference can succeed while push fails
--- (e.g. Hydrus was closed), and push can be retried later without re-running
--- inference.
 CREATE TABLE IF NOT EXISTS file_model_results (
     file_hash       TEXT    NOT NULL REFERENCES known_files(file_hash),
     model_id        TEXT    NOT NULL,
@@ -126,18 +123,6 @@ class Database:
 
     # region Cache / deduplication
 
-    def is_already_inferred(self, file_hash: str, model_id: str) -> bool:
-        """True if inference has already run successfully for this (file, model)."""
-        row = self.conn.execute(
-            """
-            SELECT 1 FROM file_model_results
-             WHERE file_hash = ? AND model_id = ? AND infer_success = 1
-             LIMIT 1
-            """,
-            (file_hash, model_id),
-        ).fetchone()
-        return row is not None
-
     def bulk_already_inferred(self, file_hashes: list[str], model_id: str) -> set[str]:
         """Return the subset of hashes that were already inferred successfully."""
         if not file_hashes:
@@ -159,21 +144,6 @@ class Database:
             ).fetchall()
             done.update(r[0] for r in rows)
         return done
-
-    def bulk_push_pending(self, model_id: str) -> list[str]:
-        """
-        Return hashes that were inferred successfully but never pushed to Hydrus.
-
-        These are candidates for a --push-only retry run.
-        """
-        rows = self.conn.execute(
-            """
-            SELECT file_hash FROM file_model_results
-             WHERE model_id = ? AND infer_success = 1 AND push_success = 0
-            """,
-            (model_id,),
-        ).fetchall()
-        return [r[0] for r in rows]
 
     def bulk_fully_completed(self, file_hashes: list[str], model_ids: list[str]) -> set[str]:
         """Return the subset of file_hashes that have successful inference and push across all specified models."""

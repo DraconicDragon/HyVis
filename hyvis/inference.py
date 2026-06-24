@@ -1,16 +1,9 @@
 """
 inference.py Inference orchestration.
 
-Two independent phases:
-
-  infer_files()             Run a model against files, store results in DB.
-                            Does NOT require Hydrus to be reachable.
-
-  push_cached_to_hydrus()   Read inference_cache from DB, send tags to Hydrus.
-                            Does NOT require the model to be loaded.
-
-Both phases can be run together after one another (default) or individually
-via --infer-only / --push-only CLI flags.
+infer_files()             Run a model against files, store results in DB.
+                          Does NOT require Hydrus to be reachable.
+                          If Hydrus is reachable, pushes results (interleaved) and performs tag cleanups.
 
 FileSource abstraction
 ----------------------
@@ -269,7 +262,7 @@ class PhaseStats:
     # inference-specific
     total_tags_cached: int = 0
 
-    # push-specific (interleaved or standalone)
+    # push-specific (interleaved)
     push_ok: int = 0
     total_tags_pushed: int = 0
     push_errors: int = 0
@@ -296,15 +289,11 @@ async def infer_files(
     Saves results to inference_cache and file_model_results (infer_success).
 
     If `hydrus` is provided, tags are pushed to Hydrus immediately after each
-    file is inferred (interleaved).  On the first Hydrus error the push is
-    silently suspended for the rest of inference (one error logged, no spam),
-    leaving those results as pending in the DB for a follow-up push pass.
+    file is inferred (interleaved). On the first Hydrus error the push is
+    silently suspended for the rest of inference, leaving those results as pending
+    in the DB for a follow-up push pass via `hyvis-push-pending`.
 
     If `hydrus` is None (--infer-only), no push is attempted at all.
-
-    file_infos is used only to build the LocalFileSource; the FileSource
-    abstraction makes it straightforward to swap in a remote implementation
-    later (see FileSource protocol above).
     """
     import vibe
     from vibe.session import InferenceCancelled
@@ -451,12 +440,11 @@ async def infer_files(
                         db.commit()
                     except Exception as exc:
                         logger.error("DB write failed for %s: %s", file_hash[:8], exc)
-                        # Don't abort for DB errors; keep going.
 
                     # region Interleaved push
                     # only when Hydrus is available and still reachable.
                     if hydrus_reachable:
-                        assert hydrus is not None  # narrowing: hydrus_reachable implies hydrus was provided
+                        assert hydrus is not None
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
                         try:
                             for svc in config.resolved_output_tag_services(model_cfg):
@@ -494,7 +482,7 @@ async def infer_files(
                         except Exception as exc:
                             logger.error(
                                 "Hydrus push failed for %s: %s | suspending push for remainder of inference. "
-                                "Run again or use --push-only to retry.",
+                                "Run 'hyvis-push-pending' to retry failed pushes later.",
                                 file_hash[:8],
                                 exc,
                             )
@@ -545,112 +533,6 @@ async def infer_files(
     # decide to do a backlog push pass.
     if hydrus is not None and not hydrus_reachable:
         stats.hydrus_suspended = True
-
-    return stats
-
-
-# region P2: Push to Hydrus
-
-
-async def push_cached_to_hydrus(
-    model_cfg: ModelConfig,
-    *,
-    config: AppConfig,
-    hydrus: HydrusClient,
-    db: Database,
-    progress: Progress,
-    force: bool,
-) -> PhaseStats:
-    """
-    Read cached inference results from the DB and push tags to Hydrus.
-
-    Only processes files where infer_success=1 and (push_success=0 OR --force).
-    Does NOT load the model; safe to run after the model has been unloaded.
-    """
-    stats = PhaseStats(model_id=model_cfg.model_id)
-
-    if force:
-        # Re-push everything that has been inferred, regardless of push status.
-        all_inferred = db.conn.execute(
-            "SELECT file_hash FROM file_model_results WHERE model_id = ? AND infer_success = 1",
-            (model_cfg.model_id,),
-        ).fetchall()
-        to_push = [r[0] for r in all_inferred]
-        logger.info("--force: re-pushing %d cached results for %s", len(to_push), model_cfg.model_id)
-    else:
-        to_push = db.bulk_push_pending(model_cfg.model_id)
-        logger.info(
-            "Model %s: %d cached results pending push",
-            model_cfg.model_id,
-            len(to_push),
-        )
-
-    if not to_push:
-        return stats
-
-    consecutive_errors = 0
-
-    for file_hash in to_push:
-        cached = db.get_cached_inference(file_hash, model_cfg.model_id)
-        if cached is None:
-            logger.warning("No cached inference for %s / %s | skipping push", file_hash[:8], model_cfg.model_id)
-            stats.skipped += 1
-            progress.tick(skipped=1)
-            continue
-
-        eff = config.resolved_output_filter(model_cfg)
-        tag_records = extract_tags(cached, output_filter=eff)
-        prefixed_tags = [tr.prefixed_tag for tr in tag_records]
-
-        try:
-            for svc in config.resolved_output_tag_services(model_cfg):
-                hydrus.add_tags(
-                    hashes=[file_hash],
-                    service_key=svc.key,
-                    tags=prefixed_tags,
-                )
-            db.record_push_result(file_hash=file_hash, model_id=model_cfg.model_id, success=True)
-            db.commit()
-
-            consecutive_errors = 0
-            stats.ok += 1
-            stats.push_ok += 1
-            stats.total_tags_pushed += len(prefixed_tags)
-            progress.set_last_file_info(file_hash, model_cfg.model_id, len(prefixed_tags))
-            progress.tick(processed=1)
-
-            # tag cleanup
-            model_ids = [m.model_id for m in config.inference.models]
-            if len(db.bulk_fully_completed([file_hash], model_ids)) > 0:
-                if config.hydrus.remove_tags:
-                    r_cfg = config.hydrus.remove_tags
-                    try:
-                        hydrus.delete_tags(
-                            hashes=[file_hash],
-                            service_keys=r_cfg.tag_service_keys,
-                            tags=r_cfg.tags,
-                        )
-                    except Exception as cleanup_exc:
-                        logger.error("Immediate tag cleanup failed for %s: %s", file_hash[:8], cleanup_exc)
-                db.mark_cleanup_done([file_hash], model_ids, done=True)
-
-        except Exception as exc:
-            logger.error("Hydrus push failed for %s: %s", file_hash[:8], exc)
-            db.record_push_result(
-                file_hash=file_hash,
-                model_id=model_cfg.model_id,
-                success=False,
-                error_message=str(exc)[:500],
-            )
-            db.commit()
-            stats.errors += 1
-            stats.push_errors += 1
-            progress.tick(errors=1)
-            consecutive_errors += 1
-            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                stats.aborted_early = True
-                stats.abort_reason = f"Aborted after {consecutive_errors} consecutive Hydrus errors. Last: {exc}"
-                return stats
 
     return stats
 
