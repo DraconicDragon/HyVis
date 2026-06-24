@@ -12,6 +12,72 @@ from hyvis.config import ALLOWED_MIMES, FileQueryConfig, PageQueryConfig
 
 logger = logging.getLogger(__name__)
 
+
+# PATCH: temporary for new_page endpoint to hydrus_api lib until its available in the official release
+def _new_page(
+    self,
+    page_type: int,
+    page_name: str | None = None,
+    page_of_pages_key: str | None = None,
+    focus_page: bool | None = None,
+    tags: list[str] | None = None,
+    file_service_key: str | None = None,
+    tag_service_key: str | None = None,
+    hashes: list[str] | None = None,
+    service_key: str | None = None,
+    paths: list[str] | None = None,
+    delete_after_success: bool | None = None,
+    file_sort_type: int | None = None,
+    file_sort_asc: bool | None = None,
+    file_sort_namespaces: list[str] | None = None,
+    collect_namespaces: list[str] | None = None,
+    system_hash_locked: bool | None = None,
+    urls: list[str] | None = None,
+    url: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"page_type": page_type}
+    if page_name is not None:
+        payload["page_name"] = page_name
+    if page_of_pages_key is not None:
+        payload["page_of_pages_key"] = page_of_pages_key
+    if focus_page is not None:
+        payload["focus_page"] = focus_page
+    if tags is not None:
+        payload["tags"] = tags
+    if file_service_key is not None:
+        payload["file_service_key"] = file_service_key
+    if tag_service_key is not None:
+        payload["tag_service_key"] = tag_service_key
+    if hashes is not None:
+        payload["hashes"] = hashes
+    if service_key is not None:
+        payload["service_key"] = service_key
+    if paths is not None:
+        payload["paths"] = paths
+    if delete_after_success is not None:
+        payload["delete_after_success"] = delete_after_success
+    if file_sort_type is not None:
+        payload["file_sort_type"] = file_sort_type
+    if file_sort_asc is not None:
+        payload["file_sort_asc"] = file_sort_asc
+    if file_sort_namespaces is not None:
+        payload["file_sort_namespaces"] = file_sort_namespaces
+    if collect_namespaces is not None:
+        payload["collect_namespaces"] = collect_namespaces
+    if system_hash_locked is not None:
+        payload["system_hash_locked"] = system_hash_locked
+    if urls is not None:
+        payload["urls"] = urls
+    if url is not None:
+        payload["url"] = url
+
+    return self._api_request("POST", "/manage_pages/new_page", json=payload).json()
+
+
+if not hasattr(hydrus_api.Client, "new_page"):
+    hydrus_api.Client.new_page = _new_page  # ty:ignore[unresolved-attribute]
+
+
 # region Exceptions
 
 
@@ -216,40 +282,47 @@ class HydrusClient:
         return set(hashes)
 
     @_handle_hydrus_errors
-    def get_empty_media_page(self, name: str, index: int | None = None) -> str:
-        """Find an empty media page by name/index and return its page_key."""
+    def setup_preview_page(self, name: str, hashes: list[str], index: int | None = None, focus: bool = True) -> str:
+        """Find an existing empty page or create a new one, and populate it with files."""
         root_data = self.get_pages()
         keys = self._find_pages_by_name(root_data.get("pages", {}), name)
 
-        if not keys:
-            raise HydrusError(
-                f"No media page found with name '{name}'. Please create an empty page with this name in Hydrus."
-            )
+        if keys:
+            # Page exists, apply index/disambiguation logic
+            if len(keys) > 1:
+                if index is None:
+                    raise HydrusError(f"Found {len(keys)} pages named '{name}'. Please specify an 'index'.")
+                if index < 0 or index >= len(keys):
+                    raise HydrusError(f"Page index {index} out of bounds for '{name}'.")
+                target_key = keys[index]
+            else:
+                if index is not None and index != 0:
+                    raise HydrusError(f"Found only 1 page named '{name}', but index {index} was requested.")
+                target_key = keys[0]
 
-        if len(keys) > 1:
-            if index is None:
+            # Check if empty
+            info_data = self.get_page_info(target_key, simple=True)
+            media_info = info_data.get("media", {}) or info_data.get("page_info", {}).get("media", {})
+            if media_info.get("num_files", 0) > 0:
+                raise HydrusError(f"The page '{name}' is not empty. Please clear it first (select all > right click > remove).")
+
+            self.add_files_to_page(target_key, hashes)
+            if focus:
+                self.focus_page(target_key)
+            return target_key
+
+        # Attempt to create page (Hydrus v676+)
+        try:
+            resp = self._client.new_page(page_type=6, page_name=name, hashes=hashes, focus_page=focus)  # ty:ignore[possibly-missing-attribute]
+            return resp["page_key"]
+        except hydrus_api.APIError as exc:
+            if exc.response.status_code == 404:
                 raise HydrusError(
-                    f"Found {len(keys)} pages named '{name}'. "
-                    f"Please specify an 'index' in your preview config or rename the pages to be unique."
+                    f"No media page found with name '{name}' and page creation failed (HTTP Error 404). "
+                    "Hydrus v676+ is required for automatic page creation. "
+                    "Please create an empty page with this name manually."
                 )
-            if index < 0 or index >= len(keys):
-                raise HydrusError(f"Page index {index} out of bounds for '{name}' (found {len(keys)} instances).")
-            target_key = keys[index]
-        else:
-            if index is not None and index != 0:
-                raise HydrusError(f"Found only 1 page named '{name}', but index {index} was requested.")
-            target_key = keys[0]
-
-        info_data = self.get_page_info(target_key, simple=True)
-        media_info = info_data.get("media", {})
-        if not media_info and "page_info" in info_data:
-            media_info = info_data["page_info"].get("media", {})
-
-        num_files = media_info.get("num_files", 0)
-        if num_files > 0:
-            raise HydrusError(f"The page '{name}' is not empty ({num_files} files). Please clear it first.")
-
-        return target_key
+            raise
 
     def collect_candidate_hashes(self, queries: list[FileQueryConfig]) -> tuple[set[str], list[int]]:
         """Union results from all configured file queries. Returns (union_hashes, list_of_counts)."""

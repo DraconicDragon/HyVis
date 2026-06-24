@@ -300,8 +300,7 @@ async def main() -> int:
 
             if p.page_name and preview_hashes:
                 print(_c(f"  Sending {len(preview_hashes)} file(s) to preview page '{p.page_name}'...", DIM))
-                pk = hydrus.get_empty_media_page(p.page_name, p.page_index)
-                hydrus.add_files_to_page(pk, preview_hashes)
+                pk = hydrus.setup_preview_page(p.page_name, preview_hashes, p.page_index, focus=False)
                 hydrus.focus_page(pk)
                 focused_any = True
                 print(_c("    Done.", GREEN))
@@ -313,8 +312,7 @@ async def main() -> int:
                         DIM,
                     )
                 )
-                rpk = hydrus.get_empty_media_page(p.rejected_page_name, p.rejected_page_index)
-                hydrus.add_files_to_page(rpk, all_rejected_hashes)
+                rpk = hydrus.setup_preview_page(p.rejected_page_name, all_rejected_hashes, p.rejected_page_index, focus=False)
                 if not focused_any:
                     hydrus.focus_page(rpk)
                 print(_c("    Done.", GREEN))
