@@ -129,7 +129,7 @@ index = 1
 > [!NOTE]
 > This setting uses a Hydrus API endpoint that is marked as ["Under Construction" in the documentation](https://hydrusnetwork.github.io/hydrus/developer_api.html#manage_pages_get_pages). This setting may stop working with a Hydrus update if the related endpoint changes drastically.
 
-Optional setting to send the final to be processed files (and/or rejected files) to a specific open page in your Hydrus client for preview before processing begins. Even if `push-only` mode is executed, the main preview page is updated with all file hashes about to be pushed.  
+Optional setting to send the files (and/or rejected files) to a specific open page in your Hydrus client for preview before processing begins.
 
 > If you want to skip previews without commenting in/removing the `[hydrus.preview]` section from the config, you can use the `--no-preview` flag.
 
@@ -185,7 +185,7 @@ keys = ["your_service_key_here", "another_service_key_here"]
 
 Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun with the `--push-only` flag.
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing the `hyvis-push-pending` tool.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |

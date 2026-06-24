@@ -153,14 +153,15 @@ hyvis path/to/config.toml
   Ignore the local database cache and re-process all matching files.
 - `--infer-only`
   Run model inference and save results to the database cache, but do not send any tags to Hydrus.
-- `--push-only`
-  Read cached results from the local database and push them to Hydrus, skipping the inference step.
 - `--no-preview`
   Skip any [configured page previews](CONFIGURATION.md#hydruspreview).
 - `--api-url` / `--api-key`
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config.
 - `--extra-hash-file PATH`
-  Process a text file containing one SHA256 hash per line (useful if you have files from [Garbevoir/wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) that you want to reuse).
+  Process a text file containing one SHA256 hash per line.
+
+>[!TIP]
+> There is also a separate utility - `hyvis-push-pending` - which allows you to push any results to Hydrus that were not pushed during a previous run (for example, if Hydrus was unreachable at the time or if you used `--infer-only`).
 
 <!-- ## FAQ
 
