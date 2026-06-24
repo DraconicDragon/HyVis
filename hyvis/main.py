@@ -534,6 +534,7 @@ async def main() -> int:
                         tags=r_cfg.tags,
                     )
                     print(_c("  Cleanup completed successfully.", GREEN))
+                    db.mark_cleanup_done(successful_hashes, model_ids, done=True)
                 except Exception as exc:
                     logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
                     print(_c("  Cleanup completed with errors.", RED))
