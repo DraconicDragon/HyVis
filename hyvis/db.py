@@ -205,7 +205,7 @@ class Database:
         return completed
 
     def mark_cleanup_done(self, file_hashes: list[str], model_ids: list[str], *, done: bool = True) -> None:
-        """Mark cleanup_done for all (hash, model) pairs."""
+        """Mark cleanup_done for all (hash, model) pairs where push was successful."""
         if not file_hashes or not model_ids:
             return
         val = 1 if done else 0
@@ -218,8 +218,9 @@ class Database:
                 f"""
                 UPDATE file_model_results
                 SET cleanup_done = ?
-                WHERE file_hash IN ({placeholders})
-                AND model_id IN ({model_placeholders})
+                WHERE push_success = 1
+                  AND file_hash IN ({placeholders})
+                  AND model_id IN ({model_placeholders})
                 """,
                 [val, *chunk, *model_ids],
             )
