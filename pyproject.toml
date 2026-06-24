@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 hyvis = "hyvis.main:cli"
+hyvis-push-pending = "hyvis.push_pending:cli"
 
 [tool.hatch.metadata]
 allow-direct-references = true
