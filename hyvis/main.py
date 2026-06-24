@@ -518,27 +518,31 @@ async def main() -> int:
 
         # region Tag removal/cleanup
         # NOTE: We don't remove tags alongside pushing others because multi-model configurations may fail for one model
-        if mode in ("default", "push_only") and cfg.hydrus.remove_tags and touched_hashes:
+        if mode in ("default", "push_only") and touched_hashes:
             model_ids = [m.model_id for m in cfg.inference.models]
 
             # Check which files fully completed all models
             successful_hashes = list(db.bulk_fully_completed(list(touched_hashes), model_ids))
 
             if successful_hashes:
-                print(_c(f"  Cleaning up search tags for {len(successful_hashes)} fully processed file(s)...", DIM))
-                r_cfg = cfg.hydrus.remove_tags
-                try:
-                    hydrus.delete_tags(
-                        hashes=successful_hashes,
-                        service_keys=r_cfg.tag_service_keys,
-                        tags=r_cfg.tags,
-                    )
-                    print(_c("  Cleanup completed successfully.", GREEN))
+                if cfg.hydrus.remove_tags:
+                    print(_c(f"  Cleaning up search tags for {len(successful_hashes)} fully processed file(s)...", DIM))
+                    r_cfg = cfg.hydrus.remove_tags
+                    try:
+                        hydrus.delete_tags(
+                            hashes=successful_hashes,
+                            service_keys=r_cfg.tag_service_keys,
+                            tags=r_cfg.tags,
+                        )
+                        print(_c("  Cleanup completed successfully.", GREEN))
+                        db.mark_cleanup_done(successful_hashes, model_ids, done=True)
+                    except Exception as exc:
+                        logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
+                        print(_c("  Cleanup completed with errors.", RED))
+                    print()
+                else:
+                    # No remove_tags configured; mark them as completed automatically
                     db.mark_cleanup_done(successful_hashes, model_ids, done=True)
-                except Exception as exc:
-                    logger.error("Failed to remove tags %s: %s", r_cfg.tags, exc)
-                    print(_c("  Cleanup completed with errors.", RED))
-                print()
 
     # region Run summary
     print_run_summary(
