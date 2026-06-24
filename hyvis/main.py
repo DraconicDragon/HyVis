@@ -312,7 +312,9 @@ async def main() -> int:
                         DIM,
                     )
                 )
-                rpk = hydrus.setup_preview_page(p.rejected_page_name, all_rejected_hashes, p.rejected_page_index, focus=False)
+                rpk = hydrus.setup_preview_page(
+                    p.rejected_page_name, all_rejected_hashes, p.rejected_page_index, focus=False
+                )
                 if not focused_any:
                     hydrus.focus_page(rpk)
                 print(_c("    Done.", GREEN))
@@ -364,6 +366,15 @@ async def main() -> int:
 
     with Database(db_path) as db:
         db.start_run(run_id=run_id, config_toml=config_toml)
+
+        if db.has_pending_push():
+            print(
+                _c(
+                    "  Note: there are files with unpushed inference results. Run 'hyvis-push-pending' to push them.",
+                    YELLOW,
+                )
+            )
+            print()
 
         for model_cfg in cfg.inference.models:
             try:
