@@ -227,13 +227,22 @@ def print_confirmation(
         print(
             f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
         )
-        eff_svcs = config.resolved_output_tag_services(m)
-        print("       output services")
-        for s in eff_svcs:
-            name = service_name_by_key.get(s.key, s.key)
-            print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
+        # Only show output services if explicitly configured per-model
+        if m.output_tag_services is not None:
+            eff_svcs = config.resolved_output_tag_services(m)
+            print("       output services")
+            for s in eff_svcs:
+                name = service_name_by_key.get(s.key, s.key)
+                print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
+        # Format overrides with their actual values
         if m.output_filter is not None:
-            print(f"       output_filter    (overrides: {', '.join(m.output_filter._raw_keys)})")
+            overrides_strs = []
+            for key in sorted(m.output_filter._raw_keys):
+                if key.startswith("_"):
+                    continue
+                val = getattr(m.output_filter, key)
+                overrides_strs.append(f"{key}={val}")
+            print(f"       output_filter    (overrides: {', '.join(overrides_strs)})")
     print()
 
     # region Output Filter
