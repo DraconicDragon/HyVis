@@ -435,7 +435,6 @@ async def infer_files(
                     duration_ms = int((time.monotonic() - t_start) * 1000)
 
                     # Count tags that will be available for pushing.
-                    eff = config.resolved_output_filter(model_cfg)
                     tag_records = extract_tags(result_dict, output_filter=eff)
 
                     try:
@@ -569,6 +568,8 @@ async def push_cached_to_hydrus(
     if not to_push:
         return stats
 
+    eff = config.resolved_output_filter(model_cfg)
+
     consecutive_errors = 0
 
     for file_hash in to_push:
@@ -579,7 +580,6 @@ async def push_cached_to_hydrus(
             progress.tick(skipped=1)
             continue
 
-        eff = config.resolved_output_filter(model_cfg)
         tag_records = extract_tags(cached, output_filter=eff)
         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
