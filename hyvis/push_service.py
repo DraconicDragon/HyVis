@@ -277,7 +277,7 @@ async def run_push_and_cleanup(
                 print(_c(f"  ERROR: Cannot reach Hydrus at {target_api_url}", RED))
                 print(
                     _c(
-                        f"  Waiting for Hydrus to become available... (checking every {wait_interval}s; Press Ctrl+C to bypass/abort)",
+                        f"  Waiting for Hydrus to become available... (checking every {wait_interval}s; Press Ctrl+C to abort)",
                         YELLOW,
                     )
                 )
@@ -438,7 +438,7 @@ async def run_push_and_cleanup(
                         total_cleanup_ok += len(hashes)
                         print(
                             _c(
-                                f"  marked {len(hashes)} file(s) as cleaned (no remove_tags) (run {run_id[:8]})",
+                                f"  marked {len(hashes)} file(s) as cleaned (no remove_tags) (run {run_id})",
                                 DIM,
                             )
                         )
@@ -457,7 +457,7 @@ async def run_push_and_cleanup(
                             db.mark_cleanup_done(hashes, model_ids, done=True)
                             total_cleanup_ok += len(hashes)
                             consecutive_errors = 0
-                            print(_c(f"  cleaned {len(hashes)} file(s) (run {run_id[:8]})", DIM))
+                            print(_c(f"  cleaned {len(hashes)} file(s) (run {run_id})", DIM))
                             cleaned = True
                         except (HydrusConnectionError, HydrusError) as exc:
                             if wait_for_hydrus and isinstance(exc, HydrusConnectionError):
