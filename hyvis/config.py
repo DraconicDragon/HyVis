@@ -441,9 +441,10 @@ class AppConfig:
             if m.batch_size < 1:
                 errors.append(f"[[inference.models]][{i}]: batch_size must be ≥ 1")
             if m.output_filter is not None:
+                resolved = self.resolved_output_filter(m)
                 errors += _validate_output_filter(
-                    m.output_filter,
-                    f"[[inference.models]][{i}] output_filter",
+                    resolved,
+                    f"[[inference.models]][{i}] output_filter (resolved)",
                 )
 
         errors += _validate_output_filter(self.output_filter, "[output_filter]")
