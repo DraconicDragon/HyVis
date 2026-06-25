@@ -138,7 +138,7 @@ class OutputFilterConfig:
     """Global fallback score threshold."""
 
     output_categories: list[str] = field(default_factory=list)
-    """Only emit tags from these categories. Empty → all categories."""
+    """Only emit tags from these categories. Empty → no categories."""
 
     include_tags: list[str] = field(default_factory=list)
     """Tags that are always included, bypassing output_categories."""
