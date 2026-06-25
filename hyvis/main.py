@@ -396,6 +396,7 @@ async def main() -> int:
             has_pending = db.has_pending_push() or bool(db.get_pending_cleanup())
 
         if has_pending:
+            print()
             print(_c("  ══ Trailing Push & Cleanup ══════════════════════════════", BOLD, CYAN))
             print()
             from hyvis.push_service import run_push_and_cleanup

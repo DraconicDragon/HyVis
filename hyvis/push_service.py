@@ -42,7 +42,7 @@ async def _wait_for_hydrus_reconnect(hydrus: HydrusClient, wait_interval: float,
             await asyncio.sleep(wait_interval)
             hydrus.verify_connection()
             sys.stdout.write(f"\r{' ' * 80}\r")
-            success_msg = _c("  Connected successfully! Resuming operations.", GREEN)
+            success_msg = _c("\n  Connected successfully! Resuming operations.", GREEN)
             if progress_obj:
                 progress_obj.print_message(success_msg)
             else:
