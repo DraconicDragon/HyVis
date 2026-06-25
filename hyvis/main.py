@@ -393,6 +393,25 @@ async def main() -> int:
                     print(_c(f"\n  ABORTED: {infer_stats.abort_reason}", RED))
                     break
 
+    # region Trailing Push & Cleanup
+    if run_status == "done" and mode == "default":
+        with Database(db_path) as db:
+            has_pending = db.has_pending_push() or bool(db.get_pending_cleanup())
+
+        if has_pending:
+            print(_c("  ══ Trailing Push & Cleanup ══════════════════════════════", BOLD, CYAN))
+            print()
+            from hyvis.push_service import run_push_and_cleanup
+
+            await run_push_and_cleanup(
+                db_path=db_path,
+                api_url_override=cfg.hydrus.api_url,
+                api_key_override=cfg.hydrus.api_key,
+                wait_for_hydrus=not args.no_wait,
+                wait_interval=5.0,
+                skip_confirm=True,  # Bypasses prompt since user confirmed at start
+            )
+
     # region Run summary
     print_run_summary(
         run_status=run_status,
