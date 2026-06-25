@@ -379,14 +379,11 @@ async def main() -> int:
                 print(f"    Skipped   : {infer_stats.skipped}")
                 print(f"    Tags      : {infer_stats.total_tags_cached}")
 
-                if infer_stats.push_errors:
-                    print(
-                        _c(
-                            f"  {infer_stats.push_errors} file(s) failed to push to Hydrus. "
-                            f"Run 'hyvis-push-pending' to retry those pushes.",
-                            YELLOW,
-                        )
-                    )
+                if infer_stats.hydrus_suspended:
+                    pending = infer_stats.ok - infer_stats.push_ok
+                    print(_c(f"  Interleaved push suspended. {pending} file(s) pending push.", YELLOW))
+                elif infer_stats.push_errors:
+                    print(_c(f"  {infer_stats.push_errors} file(s) failed to push to Hydrus.", YELLOW))
 
                 if infer_stats.aborted_early:
                     run_status = "aborted"
@@ -411,6 +408,18 @@ async def main() -> int:
                 wait_interval=5.0,
                 skip_confirm=True,  # Bypasses prompt since user confirmed at start
             )
+
+    # Re-calculate totals from DB in case trailing push modified them
+    if mode in ("default", "infer_only"):
+        with Database(db_path) as db:
+            rows = db.conn.execute(
+                "SELECT infer_success, push_success FROM file_model_results WHERE run_id = ?", (run_id,)
+            ).fetchall()
+
+            total_infer_ok = sum(1 for r in rows if r[0] == 1)
+            total_infer_err = sum(1 for r in rows if r[0] == 0)
+            total_push_ok = sum(1 for r in rows if r[1] == 1)
+            total_push_err = sum(1 for r in rows if r[0] == 1 and r[1] == 0)
 
     # region Run summary
     print_run_summary(

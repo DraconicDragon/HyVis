@@ -7,13 +7,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 from hyvis.config import AppConfig
 from hyvis.db import Database
 from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
 from hyvis.inference import extract_tags
 from hyvis.logging_utils import BOLD, CYAN, DIM, GREEN, RED, YELLOW, _c  # noqa: F401
+from hyvis.progress import Progress
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,21 +25,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _wait_for_hydrus_reconnect(hydrus: HydrusClient, wait_interval: float) -> None:
+async def _wait_for_hydrus_reconnect(hydrus: HydrusClient, wait_interval: float, progress_obj: Any = None) -> None:
     """Helper to block execution until Hydrus is reachable again."""
-    print(
-        _c(
-            f"  Waiting for Hydrus to re-establish... (checking every {wait_interval}s; Ctrl+C to abort)",
-            YELLOW,
-        )
-    )
+    start_time = time.monotonic()
+
     while True:
+        elapsed = int(time.monotonic() - start_time)
+        m, s = divmod(elapsed, 60)
+        time_str = f"{m:02d}:{s:02d}" if m > 0 else f"{s}s"
+        msg = f"  Waiting for Hydrus to become available... ({time_str} elapsed; checking every {wait_interval}s; Ctrl+C to abort)"
+
+        sys.stdout.write(f"\r{_c(msg, YELLOW)}{' ' * 5}")
+        sys.stdout.flush()
+
         try:
             await asyncio.sleep(wait_interval)
             hydrus.verify_connection()
-            print(_c("  Reconnected! Continuing...", GREEN))
+            sys.stdout.write(f"\r{' ' * 80}\r")
+            success_msg = _c("  Connected successfully! Resuming operations.", GREEN)
+            if progress_obj:
+                progress_obj.print_message(success_msg)
+            else:
+                print(success_msg)
             return
         except (KeyboardInterrupt, asyncio.CancelledError):
+            sys.stdout.write("\n")
             raise KeyboardInterrupt
         except Exception:
             pass
@@ -89,12 +101,14 @@ def push_and_cleanup_file(
         return True
 
     except Exception as exc:
-        logger.error(
-            "Hydrus push failed for %s: %s | suspending push for remainder of inference. "
-            "Run 'hyvis-push-pending' to retry failed pushes later.",
-            file_hash[:8],
-            exc,
-        )
+        if isinstance(exc, HydrusConnectionError):
+            logger.warning("Hydrus connection lost during push for %s. Suspending interleaved push.", file_hash[:8])
+        else:
+            logger.error(
+                "Hydrus push failed for %s: %s | suspending push for remainder of inference.",
+                file_hash[:8],
+                exc,
+            )
         db.record_push_result(
             file_hash=file_hash,
             model_id=model_cfg.model_id,
@@ -220,8 +234,7 @@ async def run_push_and_cleanup(
         print(_c("        These will execute immediately after the pushes succeed during this run.", DIM))
     print()
 
-    # region 2. Connection Settings 
-    # Resolve target Connection settings from DB configurations if overrides are not present
+    # region 2. Connection Settings
     target_api_url = api_url_override
     target_api_key = api_key_override
 
@@ -263,8 +276,7 @@ async def run_push_and_cleanup(
             hydrus.verify_connection()
             connected = True
             if not first_wait_msg:
-                print(_c("  Connected successfully! Resuming operations.", GREEN))
-                print()
+                pass
         except (HydrusConnectionError, HydrusError) as exc:
             if not wait_for_hydrus:
                 print(
@@ -275,17 +287,12 @@ async def run_push_and_cleanup(
 
             if first_wait_msg:
                 print(_c(f"  ERROR: Cannot reach Hydrus at {target_api_url}", RED))
-                print(
-                    _c(
-                        f"  Waiting for Hydrus to become available... (checking every {wait_interval}s; Press Ctrl+C to abort)",
-                        YELLOW,
-                    )
-                )
                 first_wait_msg = False
 
             try:
-                await asyncio.sleep(wait_interval)
-            except (asyncio.CancelledError, KeyboardInterrupt):
+                await _wait_for_hydrus_reconnect(hydrus, wait_interval)
+                connected = True
+            except KeyboardInterrupt:
                 print(_c("\n  Waiting cancelled by user.", YELLOW))
                 return 0
 
@@ -298,8 +305,7 @@ async def run_push_and_cleanup(
             return 0
         print()
 
-    # region 5. Push Pass 
-    # Group and Execute Push Pass
+    # region 5. Push Pass
     total_push_ok = 0
     total_push_err = 0
     consecutive_errors = 0
@@ -310,12 +316,16 @@ async def run_push_and_cleanup(
             push_by_run.setdefault(run_id, []).append((file_hash, model_id))
 
         try:
+            push_progress = Progress(total=len(pending_push))
+            push_progress.reset_start_time()
+
             with Database(db_path) as db:
                 for run_id, entries in push_by_run.items():
                     config_toml = db.get_config_toml(run_id)
                     if config_toml is None:
                         logger.warning("No config found for run_id %s, skipping %d file(s)", run_id, len(entries))
                         total_push_err += len(entries)
+                        push_progress.tick(errors=len(entries))
                         continue
 
                     try:
@@ -323,6 +333,7 @@ async def run_push_and_cleanup(
                     except Exception as exc:
                         logger.error("Failed to parse saved config for run_id %s: %s", run_id, exc)
                         total_push_err += len(entries)
+                        push_progress.tick(errors=len(entries))
                         continue
 
                     run_api_url = api_url_override or cfg.hydrus.api_url
@@ -338,12 +349,14 @@ async def run_push_and_cleanup(
                                 "model_id %s not found in saved config for run %s, skipping", model_id, run_id
                             )
                             total_push_err += 1
+                            push_progress.tick(errors=1)
                             continue
 
                         cached = db.get_cached_inference(file_hash, model_id)
                         if cached is None:
                             logger.warning("No cached inference for %s / %s, skipping", file_hash[:8], model_id)
                             total_push_err += 1
+                            push_progress.tick(errors=1)
                             continue
 
                         eff = cfg.resolved_output_filter(model_cfg)
@@ -359,12 +372,14 @@ async def run_push_and_cleanup(
                                 db.commit()
                                 total_push_ok += 1
                                 consecutive_errors = 0
-                                print(_c(f"  pushed {file_hash[:8]}  ({len(prefixed_tags)} tags)", DIM))
+                                push_progress.tick(processed=1)
+                                push_progress.set_last_file_info(file_hash, model_id, len(prefixed_tags))
                                 pushed = True
                             except (HydrusConnectionError, HydrusError) as exc:
                                 if wait_for_hydrus and isinstance(exc, HydrusConnectionError):
-                                    print(_c(f"\n  Hydrus connection lost during push: {exc}", RED))
-                                    await _wait_for_hydrus_reconnect(run_hydrus, wait_interval)
+                                    push_progress.print_message(_c("  Hydrus connection lost during push.", RED))
+                                    await _wait_for_hydrus_reconnect(run_hydrus, wait_interval, push_progress)
+                                    push_progress.reset_start_time()
                                 else:
                                     logger.error("Push failed for %s: %s", file_hash[:8], exc)
                                     db.record_push_result(
@@ -376,7 +391,9 @@ async def run_push_and_cleanup(
                                     db.commit()
                                     total_push_err += 1
                                     consecutive_errors += 1
+                                    push_progress.tick(errors=1)
                                     if consecutive_errors >= consecutive_push_limit:
+                                        push_progress.finish()
                                         print(
                                             _c(
                                                 f"\n  ERROR: Too many consecutive push errors ({consecutive_errors}). Aborting.",
@@ -387,12 +404,13 @@ async def run_push_and_cleanup(
                                         return 1
                                     pushed = True
 
+            push_progress.finish()
         except KeyboardInterrupt:
-            print(_c("\n  Aborted during push phase.", YELLOW))
+            push_progress.finish()
+            print(_c("  Aborted during push phase.", YELLOW))
             print(_c(f"  Push summary (prior to abort): {total_push_ok} ok / {total_push_err} errors", BOLD))
             return 1
 
-        print()
         print(_c(f"  Push complete: {total_push_ok} ok / {total_push_err} errors", BOLD))
         print()
     else:
@@ -461,7 +479,7 @@ async def run_push_and_cleanup(
                             cleaned = True
                         except (HydrusConnectionError, HydrusError) as exc:
                             if wait_for_hydrus and isinstance(exc, HydrusConnectionError):
-                                print(_c(f"\n  Hydrus connection lost during cleanup: {exc}", RED))
+                                print(_c("  Hydrus connection lost during cleanup.", RED))
                                 await _wait_for_hydrus_reconnect(run_hydrus, wait_interval)
                             else:
                                 logger.error("Cleanup failed for run %s: %s", run_id[:8], exc)
