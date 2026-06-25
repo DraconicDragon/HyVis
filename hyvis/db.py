@@ -1,5 +1,5 @@
 """
-db.py Stores more than currently needed, maybe future updates can make use of it
+db.py Stores run metadata, known file info, and cached inference results.
 """
 
 from __future__ import annotations
@@ -46,15 +46,13 @@ CREATE TABLE IF NOT EXISTS inference_cache (
 -- Outcome for each (file, model) pair in a run.
 -- infer_success tracks whether inference ran and results were saved to cache.
 -- push_success tracks whether tags were successfully sent to Hydrus.
--- These are intentionally separate: inference can succeed while push fails
--- (e.g. Hydrus was closed), and push can be retried later without re-running
--- inference.
 CREATE TABLE IF NOT EXISTS file_model_results (
     file_hash       TEXT    NOT NULL REFERENCES known_files(file_hash),
     model_id        TEXT    NOT NULL,
     run_id          TEXT    NOT NULL REFERENCES runs(run_id),
     infer_success   INTEGER NOT NULL DEFAULT 0,  -- 1 = inference ok and cached
     push_success    INTEGER NOT NULL DEFAULT 0,  -- 1 = Hydrus push ok
+    cleanup_done    INTEGER NOT NULL DEFAULT 0,  -- 1 = tags removal ok
     infer_error     TEXT,
     push_error      TEXT,
     duration_ms     INTEGER,
@@ -125,18 +123,6 @@ class Database:
 
     # region Cache / deduplication
 
-    def is_already_inferred(self, file_hash: str, model_id: str) -> bool:
-        """True if inference has already run successfully for this (file, model)."""
-        row = self.conn.execute(
-            """
-            SELECT 1 FROM file_model_results
-             WHERE file_hash = ? AND model_id = ? AND infer_success = 1
-             LIMIT 1
-            """,
-            (file_hash, model_id),
-        ).fetchone()
-        return row is not None
-
     def bulk_already_inferred(self, file_hashes: list[str], model_id: str) -> set[str]:
         """Return the subset of hashes that were already inferred successfully."""
         if not file_hashes:
@@ -158,21 +144,6 @@ class Database:
             ).fetchall()
             done.update(r[0] for r in rows)
         return done
-
-    def bulk_push_pending(self, model_id: str) -> list[str]:
-        """
-        Return hashes that were inferred successfully but never pushed to Hydrus.
-
-        These are candidates for a --push-only retry run.
-        """
-        rows = self.conn.execute(
-            """
-            SELECT file_hash FROM file_model_results
-             WHERE model_id = ? AND infer_success = 1 AND push_success = 0
-            """,
-            (model_id,),
-        ).fetchall()
-        return [r[0] for r in rows]
 
     def bulk_fully_completed(self, file_hashes: list[str], model_ids: list[str]) -> set[str]:
         """Return the subset of file_hashes that have successful inference and push across all specified models."""
@@ -202,6 +173,139 @@ class Database:
                 if count == len(unique_models):
                     completed.add(file_hash)
         return completed
+
+    def get_pending_cleanup(self) -> list[tuple[str, str, str]]:
+        """
+        Return (file_hash, model_id, run_id) for every (file, model) pair where:
+          1. push_success = 1 and cleanup_done = 0.
+          2. ALL models executed for this file in this run have successfully completed pushing.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT fmr.file_hash, fmr.model_id, fmr.run_id
+            FROM file_model_results fmr
+            WHERE fmr.push_success = 1 
+              AND fmr.cleanup_done = 0
+              AND (
+                  SELECT COUNT(*) 
+                  FROM file_model_results fmr2 
+                  WHERE fmr2.file_hash = fmr.file_hash 
+                    AND fmr2.run_id = fmr.run_id
+              ) = (
+                  SELECT COUNT(*) 
+                  FROM file_model_results fmr3 
+                  WHERE fmr3.file_hash = fmr.file_hash 
+                    AND fmr3.run_id = fmr.run_id 
+                    AND fmr3.push_success = 1
+              )
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def mark_cleanup_done(self, file_hashes: list[str], model_ids: list[str], *, done: bool = True) -> None:
+        """Mark cleanup_done for all (hash, model) pairs where push was successful."""
+        if not file_hashes or not model_ids:
+            return
+        val = 1 if done else 0
+        chunk_size = 900
+        for start in range(0, len(file_hashes), chunk_size):
+            chunk = file_hashes[start : start + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            model_placeholders = ",".join("?" * len(model_ids))
+            self.conn.execute(
+                f"""
+                UPDATE file_model_results
+                SET cleanup_done = ?
+                WHERE push_success = 1
+                  AND file_hash IN ({placeholders})
+                  AND model_id IN ({model_placeholders})
+                """,
+                [val, *chunk, *model_ids],
+            )
+        self.conn.commit()
+
+    def get_failed_inferences(self) -> list[tuple[str, str, str, str]]:
+        """Return (file_hash, model_id, run_id, infer_error) for failed inferences."""
+        rows = self.conn.execute(
+            """
+            SELECT file_hash, model_id, run_id, infer_error
+            FROM file_model_results
+            WHERE infer_success = 0
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2], r[3] or "Unknown error") for r in rows]
+
+    def get_cleanup_blocked_by_failed_inference(self) -> list[str]:
+        """
+        Return unique file_hashes that have some successful pushes, but are blocked
+        from cleanup because at least one of the models in the same run failed inference.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT fmr.file_hash
+            FROM file_model_results fmr
+            WHERE fmr.cleanup_done = 0
+              AND fmr.push_success = 1
+              AND EXISTS (
+                  SELECT 1 FROM file_model_results fmr2
+                  WHERE fmr2.file_hash = fmr.file_hash
+                    AND fmr2.run_id = fmr.run_id
+                    AND fmr2.infer_success = 0
+              )
+            """
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def get_cleanup_held_by_pending_pushes_count(self) -> int:
+        """
+        Return the number of unique file_hashes that have some successful pushes, but
+        are waiting for other models in the same run to be pushed (which succeeded inference).
+        """
+        rows = self.conn.execute(
+            """
+            SELECT COUNT(DISTINCT fmr.file_hash)
+            FROM file_model_results fmr
+            WHERE fmr.cleanup_done = 0
+              AND fmr.push_success = 1
+              AND EXISTS (
+                  SELECT 1 FROM file_model_results fmr2
+                  WHERE fmr2.file_hash = fmr.file_hash
+                    AND fmr2.run_id = fmr.run_id
+                    AND fmr2.infer_success = 1
+                    AND fmr2.push_success = 0
+              )
+            """
+        ).fetchall()
+        return rows[0][0] if rows else 0
+
+    def get_pending_push(self) -> list[tuple[str, str, str]]:
+        """
+        Return (file_hash, model_id, run_id) for every (file, model) pair where
+        infer_success=1 but push_success=0.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT file_hash, model_id, run_id
+            FROM file_model_results
+            WHERE infer_success = 1 AND push_success = 0
+            """
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def get_config_toml(self, run_id: str) -> str | None:
+        """Return the raw config TOML string saved for a given run_id, or None."""
+        row = self.conn.execute(
+            "SELECT config_toml FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def has_pending_push(self) -> bool:
+        """Fast check: are there any files with infer_success=1 and push_success=0?"""
+        row = self.conn.execute(
+            "SELECT 1 FROM file_model_results WHERE infer_success = 1 AND push_success = 0 LIMIT 1"
+        ).fetchone()
+        return row is not None
 
     def get_cached_inference(self, file_hash: str, model_id: str) -> dict[str, Any] | None:
         """Return the cached TagResult dict, or None if not cached."""

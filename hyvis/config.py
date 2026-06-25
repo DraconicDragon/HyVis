@@ -306,6 +306,11 @@ class AppConfig:
         return cls._parse(raw)
 
     @classmethod
+    def from_toml_string(cls, toml_str: str) -> "AppConfig":
+        raw: dict[str, Any] = tomllib.loads(toml_str)
+        return cls._parse(raw)
+
+    @classmethod
     def _parse(cls, data: dict[str, Any]) -> "AppConfig":
         # --- [hyvis] ---
         hv = data.get("hyvis", {})
