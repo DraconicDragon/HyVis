@@ -60,6 +60,18 @@ async def main() -> int:
         print(_c(f"ERROR: Failed to parse config: {exc}", RED), file=sys.stderr)
         return 1
 
+    # Merge CLI overrides into the config object
+    if args.api_url or args.api_key:
+        import dataclasses
+        cfg = dataclasses.replace(
+            cfg,
+            hydrus=dataclasses.replace(
+                cfg.hydrus,
+                api_url=(args.api_url or cfg.hydrus.api_url or "").rstrip("/"),
+                api_key=args.api_key or cfg.hydrus.api_key or "",
+            ),
+        )
+
     # preload heavy imports in background
     backends = [m.backend for m in cfg.inference.models]
     start_imports(backends)
