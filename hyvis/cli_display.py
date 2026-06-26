@@ -166,7 +166,9 @@ def print_confirmation(
             for tag in q.tags:
                 if isinstance(tag, list):
                     # Top-level nested list; no need for outer parentheses
-                    print(f"      tag    {f'{_c(" OR ", BOLD)}'.join(_format_tag(sub) for sub in tag)}")
+                    separator = f'{_c(" OR ", BOLD)}'
+                    joined_tags = separator.join(_format_tag(sub) for sub in tag)
+                    print(f"      tag    {joined_tags}")
                 else:
                     print(f"      tag    {tag}")
         print()
