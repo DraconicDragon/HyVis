@@ -329,6 +329,15 @@ async def main() -> int:
         print(_c(f"ERROR: Failed to read config file: {exc}", RED), file=sys.stderr)
         return 1
 
+    # Apply overrides to the saved TOML string
+    if args.api_url or args.api_key:
+        from hyvis.config import override_toml_connection_settings
+        config_toml = override_toml_connection_settings(
+            config_toml,
+            api_url=args.api_url,
+            api_key=args.api_key,
+        )
+
     db_path = Path(cfg.database.path)
     if not db_path.is_absolute():
         db_path = Path.cwd() / db_path

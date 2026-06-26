@@ -553,3 +553,19 @@ def _validate_output_filter(f: OutputFilterConfig, prefix: str) -> list[str]:
             errors.append(f"{prefix} max_tags_per_category '{cat}': must be ≥ 1")
 
     return errors
+
+
+def override_toml_connection_settings(toml_str: str, api_url: str | None, api_key: str | None) -> str:
+    import tomli_w
+
+    data = tomllib.loads(toml_str)
+
+    if "hydrus" not in data:
+        data["hydrus"] = {}
+
+    if api_url is not None:
+        data["hydrus"]["api_url"] = api_url
+    if api_key is not None:
+        data["hydrus"]["api_key"] = api_key
+
+    return tomli_w.dumps(data)
