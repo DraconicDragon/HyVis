@@ -12,9 +12,10 @@ Support for downloading the files remotely over API and processing them that way
 
 - [Installation](#installation)
 - [Updating](#updating)
-- [Configuration](#configuration)
-  - [Supported and Recommended Models](#supported-and-recommended-models)
 - [Usage](#usage)
+  - [Configuration](#configuration)
+    - [Supported and Recommended Models](#supported-and-recommended-models)
+  - [Showcase](#showcase)
   - [Useful CLI Flags](#useful-cli-flags)
 
 ---
@@ -25,7 +26,7 @@ Support for downloading the files remotely over API and processing them that way
 
 - **git** | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 - **Python 3.11** ***or higher*** | Python 3.12 is recommended and tested
-- Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with Client API enabled in: services > manager services > client api > "run the client api?:" - yes/checked
+- Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with [Client API enabled](https://hydrusnetwork.github.io/hydrus/client_api.html).
 
 ### 2. Clone the Repository
 
@@ -113,7 +114,9 @@ pip install .
 
 ---
 
-## Configuration
+## Usage
+
+### Configuration
 
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
@@ -131,15 +134,13 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - [`tagging_multi_model.toml`](config_examples/tagging_multi_model.toml) - A more advanced example config that uses 2 models (one outputting Danbooru tags, the other E621 tags) to tag files and puts each model's output in separate tag services
 
-### Supported and Recommended Models
+#### Supported and Recommended Models
 
 Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
 
----
+### Running HyVis
 
-## Usage
-
-Run HyVis by passing the path to your configured TOML file:
+You can run HyVis by passing the path to your configured TOML file:
 
 ```bash
 hyvis path/to/config.toml
@@ -152,7 +153,7 @@ hyvis path/to/config.toml
 ### Useful CLI Flags
 
 - `-h`, `--help`
-  Show the help message.
+  Show the help message and all available CLI flags.
 - `-y`, `--yes`
   Skip all interactive confirmation prompts.
 - `-f`, `--force`
@@ -162,9 +163,9 @@ hyvis path/to/config.toml
 - `--no-preview`
   Skip any [configured page previews](CONFIGURATION.md#hydruspreview).
 - `--api-url` / `--api-key`
-  Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config.
+  Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
 - `--extra-hash-file PATH`
-  Process a text file containing one SHA256 hash per line.
+  For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) Process a text file containing one SHA256 hash per line.
 
 >[!TIP]
 > There is also a separate utility - `hyvis-push-pending` - which allows you to push any results to Hydrus that were not pushed during a previous run (for example, if Hydrus was unreachable at the time or if you used `--infer-only`).
