@@ -21,7 +21,7 @@ Support for downloading the files remotely over API and processing them that way
 ### 1. Prerequisites
 
 - **git** | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- **Python 3.11** ***or higher*** | Python 3.12 is recommended and tested (Python 3.10 may work but is not officially supported; 3.10 is also EOL after October 2026)
+- **Python 3.11** ***or higher*** | Python 3.12 is recommended and tested
 - Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with Client API enabled in: services > manager services > client api > "run the client api?:" - yes/checked
 
 ### 2. Clone the Repository
