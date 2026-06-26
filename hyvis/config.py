@@ -4,18 +4,10 @@ config.py Configuration dataclasses and TOML loading.
 
 from __future__ import annotations
 
-import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib  # stdlib in Python 3.11+
-except ImportError:
-    try:
-        import tomli as tomllib  # type: ignore[no-reattr]
-    except ImportError:
-        sys.exit("ERROR: TOML support not found. Python 3.11+ includes it by default, or install: pip install tomli")
 
 # region Constants
 

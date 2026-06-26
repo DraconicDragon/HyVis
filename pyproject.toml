@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hyvis"
 version = "0.21.1"
+requires-python = ">=3.11"
 dependencies = [
     "requests",
     "hydrus-api",
