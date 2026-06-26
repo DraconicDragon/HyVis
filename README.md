@@ -125,7 +125,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - [`config.example.toml`](config_examples/config.example.toml) - Example config file with pretty much all available options + some comments. Reading the configuration guide over the comments is preferred though
 
-- [`tagging_example.toml`](config_examples/tagging_example.toml) - Generic example config for general tagging of files using a model with basic default settings - likely a good starting point for most users
+- [`tagging_example.toml`](config_examples/tagging_example.toml) - Generic example config for general tagging of files using a model with basic default settings - *likely a good starting point for most users*
 
 - [`dan_rating_only.toml`](config_examples/dan_rating_only.toml) - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
 
@@ -145,8 +145,14 @@ Run HyVis by passing the path to your configured TOML file:
 hyvis path/to/config.toml
 ```
 
+### Showcase
+
+<video controls src=".assets/showcase.mp4" title="HyVis Showcase"></video>
+
 ### Useful CLI Flags
 
+- `-h`, `--help`
+  Show the help message.
 - `-y`, `--yes`
   Skip all interactive confirmation prompts.
 - `-f`, `--force`
