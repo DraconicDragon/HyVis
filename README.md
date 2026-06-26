@@ -5,6 +5,9 @@ HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https:/
 HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  
 Support for downloading the files remotely over API and processing them that way may or may not be added in the future - if there is need/demand for it, it may be added sooner rather than later
 
+>[!NOTE]
+> It's worth noting that HyVis by default has a single, very simple and non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Example - Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`).
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -111,9 +114,6 @@ pip install .
 ---
 
 ## Configuration
-
->[!NOTE]
-> Practically every single model's tags file makes it output tags with underscores like you'd find and use for search on image boards (Danbooru/E621 etc) - HyVis by default has a single non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`). Please make an issue about this if you require this to be a configurable setting in any way.
 
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
