@@ -62,7 +62,6 @@ async def main() -> int:
 
     # Merge CLI overrides into the config object
     if args.api_url or args.api_key:
-        import dataclasses
         cfg = dataclasses.replace(
             cfg,
             hydrus=dataclasses.replace(
