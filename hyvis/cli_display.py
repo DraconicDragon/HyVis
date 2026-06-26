@@ -106,7 +106,7 @@ def print_confirmation(
     hydrus_version: str,
     api_version: str,
     boot_time: str,
-    file_query_counts: list[int],
+    tag_query_counts: list[int],
     page_query_counts: list[int],
     mime_rejected: int = 0,
     rejected_mimes: set[str] | None = None,
@@ -140,12 +140,12 @@ def print_confirmation(
     print(f"    Boot time  {_c(boot_time, GREEN)}")
     print()
 
-    # region File / Page Queries
-    # File Queries
-    if hydrus.file_queries:
-        print(_c("  File Queries", BOLD))
-        for idx, q in enumerate(hydrus.file_queries):
-            count = file_query_counts[idx] if idx < len(file_query_counts) else 0
+    # region Tag / Page Queries
+    # Tag Queries
+    if hydrus.tag_queries:
+        print(_c("  Tag Queries", BOLD))
+        for idx, q in enumerate(hydrus.tag_queries):
+            count = tag_query_counts[idx] if idx < len(tag_query_counts) else 0
             count_str = _c(f"[{count} files]", DIM)
 
             if q.tag_service_keys:
@@ -166,7 +166,7 @@ def print_confirmation(
             for tag in q.tags:
                 if isinstance(tag, list):
                     # Top-level nested list; no need for outer parentheses
-                    separator = f'{_c(" OR ", BOLD)}'
+                    separator = f"{_c(' OR ', BOLD)}"
                     joined_tags = separator.join(_format_tag(sub) for sub in tag)
                     print(f"      tag    {joined_tags}")
                 else:

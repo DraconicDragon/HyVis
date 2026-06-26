@@ -40,9 +40,9 @@
   - or just tell people to prefix source option with `local:`
 
 - [x] Support for pulling files from an open page in hydrus
-  - [ ] In theory could also work with tag file queries, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
+  - [ ] In theory could also work with tag tag queries, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
 
-- [x] Preview for file queries using an open page in Hydrus
+- [x] Preview for tag queries using an open page in Hydrus
   - [ ] mark experimental since i think API says that these endpoints are experimental
 
 - file domains - unlikely, i dont use them at all and dont plan to

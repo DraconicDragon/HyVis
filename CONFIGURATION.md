@@ -40,7 +40,7 @@ log_level = "WARNING"
 
 ## `[hydrus]`
 
-Configuration for connecting to your Hydrus client and defining file query and output rules.
+Configuration for connecting to your Hydrus client and defining tag/page query and output rules.
 
 > [!TIP]
 > Both connection settings can be overridden at runtime using the `--api-url` and `--api-key` command-line flags.
@@ -64,9 +64,9 @@ api_key = "your_api_key_here"
 ### File Collection Settings
 
 > [!IMPORTANT]
-> To run a processing pass, HyVis needs to find files. You must configure at least one file collection method: **either** a `[[hydrus.file_queries]]` block, a `[[hydrus.page_queries]]` block, **or** provide a `.txt` file containing a list of hashes via the `--extra-hash-file` CLI flag.
+> To run a processing pass, HyVis needs to find files. You must configure at least one file collection method: **either** a `[[hydrus.tag_queries]]` block, a `[[hydrus.page_queries]]` block, **or** provide a `.txt` file containing a list of hashes via the `--extra-hash-file` CLI flag.
 
-### `[[hydrus.file_queries]]`
+### `[[hydrus.tag_queries]]`
 
 *Array of tables (Can be defined multiple times).* Specifies what search parameters to use to collect candidate files from Hydrus.
 
@@ -79,16 +79,16 @@ api_key = "your_api_key_here"
 | `tag_service_keys` | Array of Strings | No | Hydrus tag service keys to limit the query to. If empty, defaults to `all known tags`. |
 
 <details>
-<summary>💡 View <code>[[hydrus.file_queries]]</code> Example</summary>
+<summary>💡 View <code>[[hydrus.tag_queries]]</code> Example</summary>
 
 ```toml
 # Simple search: (system:untagged AND class:illustration)
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = ["system:untagged", "class:illustration"]
 tag_service_keys = [] # empty -> all known tags
 
 # A second (option) query block with OR search using nested arrays: (dog OR cat) AND type:photo
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = [
     ["dog", "cat"], 
     "type:photo",

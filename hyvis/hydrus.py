@@ -8,7 +8,7 @@ from typing import Any, Callable, TypeVar
 import hydrus_api
 import hydrus_api.utils
 
-from hyvis.config import ALLOWED_MIMES, FileQueryConfig, PageQueryConfig
+from hyvis.config import ALLOWED_MIMES, PageQueryConfig, TagQueryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -216,9 +216,9 @@ class HydrusClient:
         return self._client.get_page_info(page_key=page_key, simple=simple)
 
     @_handle_hydrus_errors
-    def search_files(self, query: FileQueryConfig) -> set[str]:
+    def search_files(self, query: TagQueryConfig) -> set[str]:
         """
-        Execute one file query and return the set of matching hashes.
+        Execute one tag query and return the set of matching hashes.
 
         Uses tag_service_key when the query specifies exactly one service;
         fans out across multiple service keys when more than one is given.
@@ -226,7 +226,7 @@ class HydrusClient:
         if len(query.tag_service_keys) > 1:
             hashes: set[str] = set()
             for key in query.tag_service_keys:
-                sub_query = FileQueryConfig(tags=query.tags, tag_service_keys=[key])
+                sub_query = TagQueryConfig(tags=query.tags, tag_service_keys=[key])
                 hashes |= self.search_files(sub_query)
             return hashes
 
@@ -304,7 +304,9 @@ class HydrusClient:
             info_data = self.get_page_info(target_key, simple=True)
             media_info = info_data.get("media", {}) or info_data.get("page_info", {}).get("media", {})
             if media_info.get("num_files", 0) > 0:
-                raise HydrusError(f"The page '{name}' is not empty. Please clear it first (select all > right click > remove).")
+                raise HydrusError(
+                    f"The page '{name}' is not empty. Please clear it first (select all > right click > remove)."
+                )
 
             self.add_files_to_page(target_key, hashes)
             if focus:
@@ -324,8 +326,8 @@ class HydrusClient:
                 )
             raise
 
-    def collect_candidate_hashes(self, queries: list[FileQueryConfig]) -> tuple[set[str], list[int]]:
-        """Union results from all configured file queries. Returns (union_hashes, list_of_counts)."""
+    def collect_candidate_hashes(self, queries: list[TagQueryConfig]) -> tuple[set[str], list[int]]:
+        """Union results from all configured tag queries. Returns (union_hashes, list_of_counts)."""
         result: set[str] = set()
         counts: list[int] = []
         for query in queries:

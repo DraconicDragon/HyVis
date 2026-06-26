@@ -32,8 +32,8 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
 
 
 @dataclass(frozen=True)
-class FileQueryConfig:
-    """One search query issued to Hydrus to collect candidate files."""
+class TagQueryConfig:
+    """One tag search query issued to Hydrus to collect candidate files."""
 
     tags: list[Any]
     """Each tag is a separate string. Nested lists evaluate as OR predicates."""
@@ -203,7 +203,7 @@ class HydrusConfig:
     api_url: str
     api_key: str
 
-    file_queries: list[FileQueryConfig] = field(default_factory=list)
+    tag_queries: list[TagQueryConfig] = field(default_factory=list)
     page_queries: list[PageQueryConfig] = field(default_factory=list)
     preview: PreviewConfig | None = None
     output_tag_services: list[OutputTagService] = field(default_factory=list)
@@ -312,12 +312,12 @@ class AppConfig:
 
         # --- [hydrus] ---
         h = data.get("hydrus", {})
-        file_queries = [
-            FileQueryConfig(
+        tag_queries = [
+            TagQueryConfig(
                 tags=list(q["tags"]),
                 tag_service_keys=list(q.get("tag_service_keys", [])),
             )
-            for q in h.get("file_queries", [])
+            for q in h.get("tag_queries", [])
         ]
 
         page_queries = [
@@ -355,7 +355,7 @@ class AppConfig:
         hydrus = HydrusConfig(
             api_url=str(h.get("api_url", "")).rstrip("/"),
             api_key=str(h.get("api_key", "")),
-            file_queries=file_queries,
+            tag_queries=tag_queries,
             page_queries=page_queries,
             preview=preview,
             output_tag_services=global_output_services,
@@ -392,9 +392,9 @@ class AppConfig:
         if not self.hydrus.api_key:
             errors.append("[hydrus] api_key is required")
 
-        if not self.hydrus.file_queries and not self.hydrus.page_queries and not has_extra_hashes:
+        if not self.hydrus.tag_queries and not self.hydrus.page_queries and not has_extra_hashes:
             errors.append(
-                "[hydrus] At least one [[hydrus.file_queries]] or [[hydrus.page_queries]] entry is required, "
+                "[hydrus] At least one [[hydrus.tag_queries]] or [[hydrus.page_queries]] entry is required, "
                 "or an extra hash file must be supplied via --extra-hash-file CLI flag."
             )
 

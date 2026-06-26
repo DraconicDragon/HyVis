@@ -5,7 +5,7 @@
 api_url = "http://127.0.0.1:45869"
 api_key = "api key here"
 
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = [
     "-rating:general",
     "-rating:sensitive",

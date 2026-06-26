@@ -12,12 +12,12 @@ api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
 
 # The tag queries to make to get the files to run inference on. 
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = ["system:limit is 64"]
 tag_service_keys = [] # empty == "all known tags"
 
 ### Second query example; results are merged with the first
-# [[hydrus.file_queries]]
+# [[hydrus.tag_queries]]
 # tags = ["source:pixiv", "my namespace:some value"]
 # tag_service_keys = ["abcdef1234567890"]
 
@@ -38,7 +38,7 @@ name = "files"
 keys = ["your_service_key_here"]
 
 
-# Tags to be removed from files, in case you used added any to files for use with file_queries
+# Tags to be removed from files, in case you used added any to files for use with tag_queries
 # [hydrus.remove_tags]
 # tags = ["temp:tagme"]
 # tag_service_keys = []

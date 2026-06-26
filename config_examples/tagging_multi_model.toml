@@ -5,9 +5,9 @@
 api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
 
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = ["system:limit is 500"]
-tag_service_keys = [] # empty == "all known tags"
+tag_service_keys = []          # empty == "all known tags"
 
 
 # *** Output filter  (global) ***
@@ -61,7 +61,7 @@ precision = "fp16"
 "character" = 0.5
 
 [output_filter.tag_thresholds]
-"extra_ears"   = { threshold = 0.23, override_tlt = true }
+"extra_ears" = { threshold = 0.23, override_tlt = true }
 
 [inference.models.output_tag_services]
 keys = ["model_specific_service_key_here"]
@@ -69,9 +69,9 @@ keys = ["model_specific_service_key_here"]
 
 ### Second model
 [[inference.models]]
-model_id   = "jtp-3"
+model_id = "jtp-3"
 #source     = ""
-device     = "cuda"
+device = "cuda"
 batch_size = 2
 
 [inference.models.output_filter]

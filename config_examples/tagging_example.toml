@@ -3,11 +3,11 @@
 
 [hydrus]
 api_url = "http://127.0.0.1:45869"
-api_key = "your_api_key_here" 
+api_key = "your_api_key_here"
 
-[[hydrus.file_queries]]
+[[hydrus.tag_queries]]
 tags = ["system:limit is 500"]
-tag_service_keys = [] # empty == "all known tags"
+tag_service_keys = []          # empty == "all known tags"
 
 [hydrus.output_tag_services]
 keys = ["your_service_key_here"]

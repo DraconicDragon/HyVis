@@ -103,10 +103,10 @@ async def main() -> int:
     # --- Connect to Hydrus (always needed: confirmation screen + file paths) ---
     hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg, args)
 
-    if cfg.hydrus.file_queries and not any(q.tags for q in cfg.hydrus.file_queries):
+    if cfg.hydrus.tag_queries and not any(q.tags for q in cfg.hydrus.tag_queries):
         print(
             _c(
-                "  Warning: all configured Hydrus file queries are empty; only extra hashes or page queries can produce files.",
+                "  Warning: all configured Hydrus tag queries are empty; only extra hashes or page queries can produce files.",
                 YELLOW,
             )
         )
@@ -115,7 +115,7 @@ async def main() -> int:
     actionable_count = 0
     extra_count = 0
 
-    file_query_counts: list[int] = []
+    tag_query_counts: list[int] = []
     page_query_counts: list[int] = []
 
     # Rejections tracking init
@@ -132,9 +132,9 @@ async def main() -> int:
     raw_hashes = set()
 
     try:
-        if cfg.hydrus.file_queries:
-            fq_hashes, file_query_counts = hydrus.collect_candidate_hashes(cfg.hydrus.file_queries)
-            raw_hashes |= fq_hashes
+        if cfg.hydrus.tag_queries:
+            tq_hashes, tag_query_counts = hydrus.collect_candidate_hashes(cfg.hydrus.tag_queries)
+            raw_hashes |= tq_hashes
 
         if cfg.hydrus.page_queries:
             pq_hashes, page_query_counts = hydrus.collect_page_hashes(cfg.hydrus.page_queries)
@@ -255,7 +255,7 @@ async def main() -> int:
         hydrus_version=hydrus_version,
         api_version=api_version,
         boot_time=boot_time,
-        file_query_counts=file_query_counts,
+        tag_query_counts=tag_query_counts,
         page_query_counts=page_query_counts,
         mime_rejected=mime_rejected,
         rejected_mimes=rejected_mimes,
@@ -331,6 +331,7 @@ async def main() -> int:
     # Apply overrides to the saved TOML string
     if args.api_url or args.api_key:
         from hyvis.config import override_toml_connection_settings
+
         config_toml = override_toml_connection_settings(
             config_toml,
             api_url=args.api_url,
