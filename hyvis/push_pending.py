@@ -34,6 +34,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt.")
     parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Only push pending files associated with this specific run ID.",
+    )
+    parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -58,6 +63,7 @@ async def _run(args: argparse.Namespace) -> int:
         wait_for_hydrus=not args.no_wait,
         wait_interval=5.0,
         skip_confirm=args.yes,
+        run_id=args.run_id,
     )
 
 

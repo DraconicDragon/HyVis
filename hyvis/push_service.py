@@ -129,6 +129,7 @@ async def run_push_and_cleanup(
     consecutive_push_limit: int = 10,
     consecutive_cleanup_limit: int = 5,
     skip_confirm: bool = False,
+    run_id: str | None = None,
 ) -> int:
     """
     Execute push and cleanup passes for all pending entries.
@@ -138,11 +139,11 @@ async def run_push_and_cleanup(
     """
     # region 1. Initial DB read
     with Database(db_path) as db:
-        pending_push = db.get_pending_push()
-        initial_pending_cleanup = db.get_pending_cleanup()
-        failed_inferences = db.get_failed_inferences()
-        blocked_by_failures = db.get_cleanup_blocked_by_failed_inference()
-        held_by_pending = db.get_cleanup_held_by_pending_pushes_count()
+        pending_push = db.get_pending_push(run_id=run_id)
+        initial_pending_cleanup = db.get_pending_cleanup(run_id=run_id)
+        failed_inferences = db.get_failed_inferences(run_id=run_id)
+        blocked_by_failures = db.get_cleanup_blocked_by_failed_inference(run_id=run_id)
+        held_by_pending = db.get_cleanup_held_by_pending_pushes_count(run_id=run_id)
 
     if not pending_push and not initial_pending_cleanup:
         print("Nothing pending. All files are pushed and cleaned up.")
@@ -157,6 +158,18 @@ async def run_push_and_cleanup(
             print(_c("        These require re-running the main inference pipeline to resolve.", YELLOW))
             print()
         return 0
+
+    # Calculate grouped stats across multiple runs
+    push_by_run_id: dict[str, int] = {}
+    for _, _, r_id in pending_push:
+        push_by_run_id[r_id] = push_by_run_id.get(r_id, 0) + 1
+
+    cleanup_by_run_id: dict[str, int] = {}
+    for _, _, r_id in initial_pending_cleanup:
+        cleanup_by_run_id[r_id] = cleanup_by_run_id.get(r_id, 0) + 1
+
+    unique_runs = set(push_by_run_id.keys()) | set(cleanup_by_run_id.keys())
+    has_multiple_runs = len(unique_runs) > 1
 
     # Calculate estimated cleanups resulting from the pending pushes
     est_cleanup_active = 0
@@ -190,7 +203,14 @@ async def run_push_and_cleanup(
 
     print()
     print(_c(f"  Pending pushes  : {len(pending_push)}", BOLD))
+    if has_multiple_runs and pending_push:
+        for r_id, count in sorted(push_by_run_id.items()):
+            print(_c(f"    • {r_id}: {count}", DIM))
+
     print(_c(f"  Pending cleanups: {len(initial_pending_cleanup)}", BOLD))
+    if has_multiple_runs and initial_pending_cleanup:
+        for r_id, count in sorted(cleanup_by_run_id.items()):
+            print(_c(f"    • {r_id}: {count}", DIM))
 
     if pending_push:
         est_total = est_cleanup_active + est_cleanup_auto
@@ -419,7 +439,7 @@ async def run_push_and_cleanup(
 
     # region 6. Cleanup Pass
     with Database(db_path) as db:
-        pending_cleanup = db.get_pending_cleanup()
+        pending_cleanup = db.get_pending_cleanup(run_id=run_id)
 
     total_cleanup_ok = 0
     total_cleanup_err = 0
