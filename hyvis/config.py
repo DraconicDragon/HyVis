@@ -446,8 +446,7 @@ class AppConfig:
                 errors.append("[hydrus.add_tags] tags list cannot be empty if add_tags is specified")
             if not a.tag_service_keys:
                 errors.append(
-                    "[hydrus.add_tags] tag_service_keys cannot be empty. "
-                    "You must specify at least one service key because virtual domains cannot be used for tag additions."
+                    "[hydrus.add_tags] tag_service_keys cannot be empty. You must specify at least one service key."
                 )
 
         if self.hydrus.remove_tags:
@@ -456,8 +455,7 @@ class AppConfig:
                 errors.append("[hydrus.remove_tags] tags list cannot be empty if remove_tags is specified")
             if not r.tag_service_keys:
                 errors.append(
-                    "[hydrus.remove_tags] tag_service_keys cannot be empty. "
-                    "You must specify at least one service key because virtual domains cannot be used for tag removal."
+                    "[hydrus.remove_tags] tag_service_keys cannot be empty. You must specify at least one service key."
                 )
 
         if not self.inference.models:
