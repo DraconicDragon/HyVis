@@ -43,7 +43,7 @@ log_level = "WARNING"
 Configuration for connecting to your Hydrus client and defining tag/page query and output rules.
 
 > [!TIP]
-> Both connection settings can be overridden at runtime using the `--api-url` and `--api-key` command-line flags.
+> Both connection settings can be overridden using the `--api-url` and `--api-key` command-line flags.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -177,6 +177,26 @@ Defines the Hydrus tag services where the inferred tags will be written/pushed t
 ```toml
 [hydrus.output_tag_services]
 keys = ["your_service_key_here", "another_service_key_here"]
+```
+
+</details>
+
+### `[hydrus.add_tags]`
+
+Specifies arbitrary extra tags to apply to successfully processed files. These tags are added to files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `tags` | Array of Strings | No | List of tags to add to files. |
+| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to write the tags to. <br> **Only required if `tags` is specified*. |
+
+<details>
+<summary>💡 View <code>[hydrus.add_tags]</code> Example</summary>
+
+```toml
+[hydrus.add_tags]
+tags = ["ai:tagged"]
+tag_service_keys = ["my_service_key_here"]
 ```
 
 </details>
