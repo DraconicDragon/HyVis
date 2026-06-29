@@ -71,6 +71,14 @@ class OutputTagService:
 
 
 @dataclass(frozen=True)
+class AddTagConfig:
+    """Rule specifying tags to add to successfully processed files."""
+
+    tags: list[str]
+    tag_service_keys: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class RemoveTagConfig:
     """Rule specifying tags to remove from successful files."""
 
@@ -207,6 +215,7 @@ class HydrusConfig:
     page_queries: list[PageQueryConfig] = field(default_factory=list)
     preview: PreviewConfig | None = None
     output_tag_services: list[OutputTagService] = field(default_factory=list)
+    add_tags: AddTagConfig | None = None
     remove_tags: RemoveTagConfig | None = None
 
 
@@ -339,6 +348,15 @@ class AppConfig:
                 rejected_page_index=int(p["rejected_page_index"]) if "rejected_page_index" in p else None,
             )
 
+        # Parse add_tags
+        add_tags = None
+        if "add_tags" in h:
+            a = h["add_tags"]
+            add_tags = AddTagConfig(
+                tags=list(a.get("tags", [])),
+                tag_service_keys=list(a.get("tag_service_keys", [])),
+            )
+
         # Parse remove_tags
         remove_tags = None
         if "remove_tags" in h:
@@ -359,8 +377,10 @@ class AppConfig:
             page_queries=page_queries,
             preview=preview,
             output_tag_services=global_output_services,
+            add_tags=add_tags,
             remove_tags=remove_tags,
         )
+
         # --- [output_filter] ---
         global_filter = _parse_output_filter(data.get("output_filter", {}))
 
@@ -419,6 +439,16 @@ class AppConfig:
                 "[hydrus] At least one output service key is required under [hydrus.output_tag_services].keys "
                 "(or every [[inference.models]] entry must define its own output_tag_services)"
             )
+
+        if self.hydrus.add_tags:
+            a = self.hydrus.add_tags
+            if not a.tags:
+                errors.append("[hydrus.add_tags] tags list cannot be empty if add_tags is specified")
+            if not a.tag_service_keys:
+                errors.append(
+                    "[hydrus.add_tags] tag_service_keys cannot be empty. "
+                    "You must specify at least one service key because virtual domains cannot be used for tag additions."
+                )
 
         if self.hydrus.remove_tags:
             r = self.hydrus.remove_tags

@@ -87,6 +87,20 @@ def push_and_cleanup_file(
         # tag cleanup if all models for this file are fully completed
         model_ids = [m.model_id for m in config.inference.models]
         if len(db.bulk_fully_completed([file_hash], model_ids)) > 0:
+            # 1. Add extra user set tags
+            if config.hydrus.add_tags:
+                a_cfg = config.hydrus.add_tags
+                try:
+                    for svc_key in a_cfg.tag_service_keys:
+                        hydrus.add_tags(
+                            hashes=[file_hash],
+                            service_key=svc_key,
+                            tags=a_cfg.tags,
+                        )
+                except Exception as add_exc:
+                    logger.error("Immediate extra tag addition failed for %s: %s", file_hash[:8], add_exc)
+
+            # 2. Delete tags
             if config.hydrus.remove_tags:
                 r_cfg = config.hydrus.remove_tags
                 try:
@@ -188,7 +202,8 @@ async def run_push_and_cleanup(
                 if config_toml:
                     try:
                         cfg = AppConfig.from_toml_string(config_toml)
-                        run_cleanup_requires_action[r_id] = bool(cfg.hydrus.remove_tags)
+                        # Active if there is something to remove OR add
+                        run_cleanup_requires_action[r_id] = bool(cfg.hydrus.remove_tags or cfg.hydrus.add_tags)
                     except Exception:
                         run_cleanup_requires_action[r_id] = False
                 else:
@@ -216,7 +231,7 @@ async def run_push_and_cleanup(
         est_total = est_cleanup_active + est_cleanup_auto
         details = []
         if est_cleanup_active > 0:
-            details.append(f"{est_cleanup_active} via Hydrus tag removal")
+            details.append(f"{est_cleanup_active} via Hydrus tag additions/removals")
         if est_cleanup_auto > 0:
             details.append(f"{est_cleanup_auto} auto-marked completed")
         details_str = f" ({', '.join(details)})" if details else ""
@@ -471,12 +486,15 @@ async def run_push_and_cleanup(
                     hashes = list({fh for fh, _ in entries})
                     model_ids = list({mid for _, mid in entries})
 
-                    if not cfg.hydrus.remove_tags:
+                    # Check if there are active modifications to perform
+                    has_active_cleanup = bool(cfg.hydrus.remove_tags or cfg.hydrus.add_tags)
+
+                    if not has_active_cleanup:
                         db.mark_cleanup_done(hashes, model_ids, done=True)
                         total_cleanup_ok += len(hashes)
                         print(
                             _c(
-                                f"  marked {len(hashes)} file(s) as cleaned (no remove_tags) (run {run_id})",
+                                f"  marked {len(hashes)} file(s) as cleaned (no actions) (run {run_id})",
                                 DIM,
                             )
                         )
@@ -486,16 +504,26 @@ async def run_push_and_cleanup(
                     run_api_key = api_key_override or cfg.hydrus.api_key
                     run_hydrus = HydrusClient(run_api_url, run_api_key)
 
-                    r_cfg = cfg.hydrus.remove_tags
-
                     cleaned = False
                     while not cleaned:
                         try:
-                            run_hydrus.delete_tags(hashes=hashes, service_keys=r_cfg.tag_service_keys, tags=r_cfg.tags)
+                            # 1. tag additions
+                            if cfg.hydrus.add_tags:
+                                a_cfg = cfg.hydrus.add_tags
+                                for svc_key in a_cfg.tag_service_keys:
+                                    run_hydrus.add_tags(hashes=hashes, service_key=svc_key, tags=a_cfg.tags)
+
+                            # 2. Process tag removals
+                            if cfg.hydrus.remove_tags:
+                                r_cfg = cfg.hydrus.remove_tags
+                                run_hydrus.delete_tags(
+                                    hashes=hashes, service_keys=r_cfg.tag_service_keys, tags=r_cfg.tags
+                                )
+
                             db.mark_cleanup_done(hashes, model_ids, done=True)
                             total_cleanup_ok += len(hashes)
                             consecutive_errors = 0
-                            print(_c(f"  cleaned {len(hashes)} file(s) (run {run_id})", DIM))
+                            print(_c(f"  completed tag modifications for {len(hashes)} file(s) (run {run_id})", DIM))
                             cleaned = True
                         except (HydrusConnectionError, HydrusError) as exc:
                             if wait_for_hydrus and isinstance(exc, HydrusConnectionError):

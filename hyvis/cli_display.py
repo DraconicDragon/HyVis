@@ -183,6 +183,25 @@ def print_confirmation(
             print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
         print()
 
+    # Add tags
+    if hydrus.add_tags and mode == "default":
+        print(_c("  Additional Tags (added after successful run)", BOLD))
+        a = hydrus.add_tags
+        if a.tag_service_keys:
+            names = []
+            for key in a.tag_service_keys:
+                name = service_name_by_key.get(key, "(unknown service)")
+                names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+            svc = ", ".join(names)
+        else:
+            svc = _c("(global output services)", DIM)
+
+        print(f"    service  {svc}")
+        for tag in a.tags:
+            print(f"      tag    {_c(tag, GREEN)}")
+        print()
+
+    # Remove tags
     if hydrus.remove_tags and mode == "default":
         print(_c("  Cleanup Tags (removed after successful run)", BOLD))
         r = hydrus.remove_tags
