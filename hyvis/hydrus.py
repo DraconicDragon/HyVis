@@ -8,7 +8,7 @@ from typing import Any, Callable, TypeVar
 import hydrus_api
 import hydrus_api.utils
 
-from hyvis.config import ALLOWED_MIMES, PageQueryConfig, TagQueryConfig
+from hyvis.config import ALLOWED_MIMES, AppConfig, PageQueryConfig, TagQueryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -493,6 +493,55 @@ class HydrusClient:
     def focus_page(self, page_key: str) -> None:
         """Focus a specific page using the native hydrus-api wrapper."""
         self._client.focus_page(page_key=page_key)
+
+
+def validate_service_keys(
+    cfg: AppConfig,
+    service_name_by_key: dict[str, str],
+) -> None:
+    """
+    Check that all service keys referenced in the config exist in Hydrus.
+    Raises HydrusError with a list of missing keys if any are invalid.
+    """
+    missing: list[str] = []
+
+    # Global output services
+    for key in cfg.hydrus.output_tag_services.keys:
+        if key not in service_name_by_key:
+            missing.append(f"hydrus.output_tag_services: {key}")
+
+    # Per-model output services
+    for model_cfg in cfg.inference.models:
+        if model_cfg.output_tag_services is not None:
+            for key in model_cfg.output_tag_services.keys:
+                if key not in service_name_by_key:
+                    missing.append(f"model '{model_cfg.model_id}' output_tag_services: {key}")
+
+    # Add tags service keys
+    if cfg.hydrus.add_tags is not None:
+        for key in cfg.hydrus.add_tags.tag_service_keys:
+            if key not in service_name_by_key:
+                missing.append(f"hydrus.add_tags: {key}")
+
+    # Remove tags service keys
+    if cfg.hydrus.remove_tags is not None:
+        for key in cfg.hydrus.remove_tags.tag_service_keys:
+            if key not in service_name_by_key:
+                missing.append(f"hydrus.remove_tags: {key}")
+
+    # Optional: tag query service keys
+    for idx, query in enumerate(cfg.hydrus.tag_queries):
+        for key in query.tag_service_keys:
+            if key not in service_name_by_key:
+                missing.append(f"hydrus.tag_queries[{idx}].tag_service_keys: {key}")
+
+    if missing:
+        error_msg = (
+            "The following Hydrus service keys are invalid (not found in Hydrus):\n"
+            + "\n".join(f"  • {key}" for key in missing)
+            + "\n\nCheck your config and ensure these service keys exist in Hydrus."
+        )
+        raise HydrusError(error_msg)
 
 
 def format_boot_time(timestamp: float) -> str:

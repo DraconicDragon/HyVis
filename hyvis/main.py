@@ -15,6 +15,7 @@ from pathlib import Path
 from hyvis.bg_imports import start_imports, wait_for_imports
 from hyvis.cli import parse_args
 from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
+from hyvis.hydrus import HydrusConnectionError, HydrusError, validate_service_keys
 from hyvis.logging_utils import (  # noqa: F401
     BOLD,
     CYAN,
@@ -103,6 +104,13 @@ async def main() -> int:
     # --- Connect to Hydrus (always needed: confirmation screen + file paths) ---
     hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg, args)
 
+    # Validate all Hydrus service keys before showing confirmation
+    try:
+        validate_service_keys(cfg, service_name_by_key)
+    except HydrusError as e:
+        print(_c(f"ERROR: {e}", RED), file=sys.stderr)
+        return 1
+
     if cfg.hydrus.tag_queries and not any(q.tags for q in cfg.hydrus.tag_queries):
         print(
             _c(
@@ -126,8 +134,6 @@ async def main() -> int:
     from hyvis.extra_hashes import load_extra_hashes
 
     # Collect candidate files
-    from hyvis.hydrus import HydrusConnectionError, HydrusError
-
     print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
     raw_hashes = set()
 
