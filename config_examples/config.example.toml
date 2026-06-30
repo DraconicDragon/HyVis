@@ -96,15 +96,14 @@ exclude_tags = [
 
 # Per-category threshold overrides.
 # Two forms are accepted:
-#   category = 0.7                                        plain threshold, override_tlt is false by default
-#   category = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
+#   "category" = 0.7                                        plain threshold, override_tlt is false by default
+#   "category" = { threshold = 0.7, override_tlt = true }   also overrides any value TLT has for this category/tag
 [output_filter.category_thresholds]
 "character" = 0.7
 "artist" = 0.9    # most models don't support it anyway and when they do, have low artist accuracy
 
 # Per-tag threshold overrides.  Same two forms as category_thresholds.
 # Keys are raw tag names without prefixes, e.g. "artist_name" not "creator:artist_name".
-#
 # [output_filter.tag_thresholds]
 # "1girl"  = 0.6
 # "solo"   = { threshold = 0.65, override_tlt = true }
@@ -112,11 +111,19 @@ exclude_tags = [
 
 
 # Maximum tags to emit per category, selected by descending score.
-# Omitted categories have no limit.
 #
-# Example: limit rating to the single most-confident tag:
+# Example: limitrating to the single most-confident tag:
 # [output_filter.max_tags_per_category]
 # "rating" = 1
+
+
+# Maximum tags to emit per subset of tags
+#
+# Example: limit JTP-3's rating to the single most-confident tag:
+# We have to do it this way for JTP-3 specifically because the rating tags are all in the "meta" category
+# [[output_filter.max_tags_per_subset]]
+# tags = ["safe", "questionable", "explicit"]
+# limit = 1
 
 # *** Tag prefix mapping ***
 
