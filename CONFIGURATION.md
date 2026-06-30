@@ -376,6 +376,30 @@ character = 5
 
 </details>
 
+### `[[output_filter.max_tags_per_subset]]`
+
+Allows setting a joint maximum limit on an arbitrary collection of tags. If multiple tags in this group are above their configured thresholds, only the top highest-scoring tags up to the specified `limit` are retained.
+
+This setting works independently from `[output_filter.max_tags_per_category]`.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `tags` | Array of Strings | No | Explicit list of raw tags that belong to this subset. |
+| `limit` | Integer | No* | The maximum number of tags from this subset to output. Must be $\ge 1$. <br> Defaults to `1`. <br> **Required if `tags` is specified*. |
+
+<details>
+<summary>💡 View <code>[[output_filter.max_tags_per_subset]]</code> Example</summary>
+
+```toml
+# In contrast to other models like those that output rating tags in their own category (for which max_tags_per_category can be used)
+# you need to use this to achieve the same effect with JTP-3 since it's rating tags are all bunched up in the "meta" category.
+[[output_filter.max_tags_per_subset]]
+tags = ["safe", "questionable", "explicit"]
+limit = 1
+```
+
+</details>
+
 ---
 
 ## `[inference]`
