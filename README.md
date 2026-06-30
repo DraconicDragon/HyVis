@@ -1,12 +1,12 @@
 # HyVis - Hydrus Tagger
 
-HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/) using a vibecoded vision transformer inference backend (to run WD Taggers or JTP).
+HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/).
 
 HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  
 Support for downloading the files remotely over API and processing them that way may or may not be added in the future - if there is need/demand for it, it may be added sooner rather than later
 
 >[!NOTE]
-> It's worth noting that HyVis by default has a single, very simple and non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Example - Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`).
+> It's worth noting that HyVis by default has a single, very simple and non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Example - Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`; with [prefix mapping](CONFIGURATION.md#output_filtercategory_tag_prefix_mapping) set it would be `character:grea (shingeki no bahamut)`).
 
 ## Table of Contents
 
