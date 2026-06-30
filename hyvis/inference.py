@@ -105,13 +105,21 @@ def extract_tags(
     records: list[TagRecord] = []
 
     categories = output_filter.output_categories
-    # Convert lists to sets for O(1) exact-match lookups
+    # sets for fast lookups
     include_set = set(output_filter.include_tags)
     exclude_set = set(output_filter.exclude_tags)
 
+    # set of all tags governed by custom subset limits
+    subset_managed_tags = set()
+    for group in output_filter.max_tags_per_subset:
+        subset_managed_tags.update(group.tags)
+
+    standard_records_by_category: dict[str, list[TagRecord]] = {}
+    subset_records: list[TagRecord] = []
+
     for category, tag_scores in tags_by_category.items():
         category_prefix = output_filter.category_tag_prefix_mapping.get(category) or ""
-        cat_records: list[TagRecord] = []
+        standard_records_by_category[category] = []
 
         for raw_tag, score in tag_scores.items():
             # 1. Check Exclusions: Drop if explicitly excluded
@@ -128,23 +136,44 @@ def extract_tags(
 
             # Determine effective prefix (individual override takes precedence)
             prefix = output_filter.tag_prefix_overrides.get(raw_tag, category_prefix)
-
-            cat_records.append(
-                TagRecord(
-                    category=category,
-                    raw_tag=raw_tag,
-                    prefixed_tag=f"{prefix}{raw_tag}",
-                    score=float(score),
-                )
+            record = TagRecord(
+                category=category,
+                raw_tag=raw_tag,
+                prefixed_tag=f"{prefix}{raw_tag}",
+                score=float(score),
             )
 
+            # Isolate subset-managed tags from standard category limits
+            if raw_tag in subset_managed_tags:
+                subset_records.append(record)
+            else:
+                standard_records_by_category[category].append(record)
+
+    # apply category limits
+    for category, cat_records in standard_records_by_category.items():
         limit = output_filter.max_tags_per_category.get(category)
         if limit is not None:
             # sort descending by score, keep top-N
             cat_records.sort(key=lambda r: r.score, reverse=True)
             cat_records = cat_records[:limit]
-
         records.extend(cat_records)
+
+    # apply subset limits to isolated tags
+    for group in output_filter.max_tags_per_subset:
+        group_tags_set = set(group.tags)
+        matching_subset_records = [r for r in subset_records if r.raw_tag in group_tags_set]
+
+        if len(matching_subset_records) > group.limit:
+            matching_subset_records.sort(key=lambda r: r.score, reverse=True)
+            matching_subset_records = matching_subset_records[: group.limit]
+
+        records.extend(matching_subset_records)
+
+        # Remove processed records to avoid double-evaluation
+        subset_records = [r for r in subset_records if r not in matching_subset_records]
+
+    # add any fallback subset records that didn't match a defined subset group
+    records.extend(subset_records)
 
     return records
 

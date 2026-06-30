@@ -115,6 +115,17 @@ class TagThresholdConfig:
 
 
 @dataclass(frozen=True)
+class TagSubsetConfig:
+    """
+    A collection of tags subject to a collective output limit.
+    Used to isolate and limit tags that belong to the same logical category.
+    """
+
+    tags: list[str]
+    limit: int = 1
+
+
+@dataclass(frozen=True)
 class OutputFilterConfig:
     """
     Controls which tags are emitted and how they are transformed.
@@ -164,6 +175,12 @@ class OutputFilterConfig:
     """
     Maximum number of tags to emit per category.
     Tags are selected by descending score.  Omitted categories → no limit.
+    """
+
+    max_tags_per_subset: list[TagSubsetConfig] = field(default_factory=list)
+    """
+    Arbitrary tag collections where only the top-N highest scoring tags
+    matching the collection are retained, isolated from category limits.
     """
 
     # Internal: raw keys present in TOML for this section.
@@ -285,6 +302,7 @@ class AppConfig:
             ),
             tag_prefix_overrides=_pick("tag_prefix_overrides", m.tag_prefix_overrides, g.tag_prefix_overrides),
             max_tags_per_category=_pick("max_tags_per_category", m.max_tags_per_category, g.max_tags_per_category),
+            max_tags_per_subset=_pick("max_tags_per_subset", m.max_tags_per_subset, g.max_tags_per_subset),
         )
 
     def resolved_output_tag_services(self, model_cfg: ModelConfig) -> list[OutputTagService]:
@@ -496,6 +514,11 @@ def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
 
     max_tags: dict[str, int] = {str(k): int(v) for k, v in raw.get("max_tags_per_category", {}).items()}
 
+    max_subsets = [
+        TagSubsetConfig(tags=[str(t) for t in g.get("tags", [])], limit=int(g.get("limit", 1)))
+        for g in raw.get("max_tags_per_subset", [])
+    ]
+
     return OutputFilterConfig(
         prefer_tag_level_thresholds=bool(raw.get("prefer_tag_level_thresholds", True)),
         tag_level_threshold_relative_offset=float(raw.get("tag_level_threshold_relative_offset", 0.0)),
@@ -508,6 +531,7 @@ def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
         category_tag_prefix_mapping={str(k): str(v) for k, v in raw.get("category_tag_prefix_mapping", {}).items()},
         tag_prefix_overrides={str(k): str(v) for k, v in raw.get("tag_prefix_overrides", {}).items()},
         max_tags_per_category=max_tags,
+        max_tags_per_subset=max_subsets,
         _raw_keys=frozenset(raw.keys()),
     )
 
@@ -579,6 +603,12 @@ def _validate_output_filter(f: OutputFilterConfig, prefix: str) -> list[str]:
     for cat, limit in f.max_tags_per_category.items():
         if limit < 1:
             errors.append(f"{prefix} max_tags_per_category '{cat}': must be ≥ 1")
+
+    for i, group in enumerate(f.max_tags_per_subset):
+        if not group.tags:
+            errors.append(f"{prefix} max_tags_per_subset[{i}]: 'tags' list cannot be empty")
+        if group.limit < 1:
+            errors.append(f"{prefix} max_tags_per_subset[{i}]: 'limit' must be ≥ 1")
 
     return errors
 
