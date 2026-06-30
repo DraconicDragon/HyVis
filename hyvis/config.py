@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
@@ -210,7 +210,14 @@ class DatabaseConfig(BaseModel, frozen=True):
 class HyvisConfig(BaseModel, frozen=True):
     """Application-level settings."""
 
-    log_level: str = Field(default="WARNING", pattern=r"^(DEBUG|INFO|WARNING|ERROR)$")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def coerce_log_level(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.upper()
+        return v
 
 
 class AppConfig(BaseModel, frozen=True):
