@@ -258,7 +258,7 @@ def print_confirmation(
         # Format overrides with their actual values
         if m.output_filter is not None:
             overrides_strs = []
-            for key in sorted(m.output_filter._raw_keys):
+            for key in sorted(m.output_filter.model_fields_set):
                 if key.startswith("_"):
                     continue
                 val = getattr(m.output_filter, key)
