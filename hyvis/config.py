@@ -184,6 +184,16 @@ class OutputFilterConfig(BaseModel, frozen=True):
     category_thresholds: dict[str, CategoryThresholdConfig] = Field(default_factory=dict)
     tag_thresholds: dict[str, TagThresholdConfig] = Field(default_factory=dict)
 
+    @field_validator("category_thresholds", "tag_thresholds", mode="before")
+    @classmethod
+    def _coerce_threshold_dict(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            for key, val in v.items():
+                if isinstance(val, (int, float)):
+                    v[key] = {"threshold": float(val), "override_tlt": False}
+            return v
+        return v
+
     # --- Output selection ---
     category_tag_prefix_mapping: dict[str, str] = Field(default_factory=dict)
     tag_prefix_overrides: dict[str, str] = Field(default_factory=dict)
