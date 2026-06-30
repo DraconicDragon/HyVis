@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 # region Constants
 
@@ -27,6 +27,35 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
         # "image/gif",
     }
 )
+
+
+def _format_validation_error(e: ValidationError, path: Path | str) -> str:
+    import pydantic
+
+    from hyvis.logging_utils import BOLD, CYAN, RED, _c
+
+    lines = [_c(f"Configuration error in {path}:", RED, BOLD), ""]
+
+    version_parts = pydantic.VERSION.split(".")
+    major = version_parts[0]
+    minor = version_parts[1] if len(version_parts) > 1 else "0"
+
+    version_tag = f"{major}.{minor}"
+
+    for err in e.errors():
+        loc = ".".join(str(p) for p in err["loc"])
+        msg = err["msg"]
+        err_type = err["type"]
+
+        url = f"https://errors.pydantic.dev/{version_tag}/v/{err_type}"
+        hyperlink = f"\033]8;;{url}\033\\{err_type}\033]8;;\033\\"
+
+        lines.append(_c(loc, BOLD, CYAN))
+        lines.append(f"  {msg}")
+        # lines.append(_c(f"  [{hyperlink}]", DIM))
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
 
 
 # region Config Models
@@ -269,7 +298,7 @@ class AppConfig(BaseModel, frozen=True):
                 raw: dict[str, Any] = tomllib.load(fh)
             return cls.model_validate(raw)
         except ValidationError as e:
-            raise SystemExit(f"Configuration error in {path}:\n{e}") from None
+            raise SystemExit(_format_validation_error(e, path)) from None
 
     @classmethod
     def from_toml_string(cls, toml_str: str) -> AppConfig:
@@ -277,7 +306,7 @@ class AppConfig(BaseModel, frozen=True):
             raw: dict[str, Any] = tomllib.loads(toml_str)
             return cls.model_validate(raw)
         except ValidationError as e:
-            raise SystemExit(f"Configuration error:\n{e}") from None
+            raise SystemExit(_format_validation_error(e, "config string")) from None
 
     # region Validation
 
