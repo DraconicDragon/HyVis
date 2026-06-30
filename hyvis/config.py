@@ -22,7 +22,6 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
         "image/bmp",
         "image/jxl",
         "image/avif",
-        "image/heic",
         "image/heif",
         # "image/gif",
     }
