@@ -3,9 +3,6 @@
 - Character IP mapping support
   - (vibe) also find out how to make my own or if i just need full metadata for that and have the math done on full post metadata to see how often series tags are together with what character tags, maybe some of the e6 people already have some process open source
 
-- Something like max_tags_per_category but for a collection of tags
-  - This is for when user wants to use max_tags_per_category for rating tags, but JTP doesnt have rating tags in separate category, so it'd be possible to put all those 3 rating tags in a collection and if 2 or 3 tags are above threshold for a file, itd only pick n tags starting with highest threshold
-
 - (vibe - ModelPlugin Metadata) Recommended thresholds for each model, in extra column in SUPPORTED_MODELS.md
 
 - More QoL stuff
@@ -52,3 +49,4 @@
 - hyvis without arg supplied:
   - opens model info getter
   - config chooser
+- hyvis-push-pending
