@@ -1,13 +1,14 @@
 """
-config.py Configuration dataclasses and TOML loading.
+config.py Configuration models and TOML loading via Pydantic V2.
 """
 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 # region Constants
 
@@ -27,33 +28,37 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
     }
 )
 
-# region Config dataclasses
+
+# region Config Models
 
 
-@dataclass(frozen=True)
-class TagQueryConfig:
+class TagQueryConfig(BaseModel, frozen=True):
     """One tag search query issued to Hydrus to collect candidate files."""
 
     tags: list[Any]
     """Each tag is a separate string. Nested lists evaluate as OR predicates."""
 
-    tag_service_keys: list[str] = field(default_factory=list)
+    tag_service_keys: list[str] = Field(default_factory=list)
     """Tag service keys to search within. Empty → Hydrus default (all known tags)."""
 
 
-@dataclass(frozen=True)
-class PageQueryConfig:
+class PageQueryConfig(BaseModel, frozen=True):
     """Target a specific open page in the Hydrus client."""
 
-    name: str
+    name: str = Field(min_length=1)
     """The exact name of the page tab in Hydrus."""
 
     index: int | None = None
     """Optional index (0-based) to disambiguate if multiple pages share the same name."""
 
+    @model_validator(mode="after")
+    def _validate_index(self) -> PageQueryConfig:
+        if self.index is not None and self.index < 0:
+            raise ValueError("'index' cannot be negative")
+        return self
 
-@dataclass(frozen=True)
-class PreviewConfig:
+
+class PreviewConfig(BaseModel, frozen=True):
     """Target specific open pages for file previewing before inference."""
 
     page_name: str | None = None
@@ -61,32 +66,39 @@ class PreviewConfig:
     rejected_page_name: str | None = None
     rejected_page_index: int | None = None
 
+    @model_validator(mode="after")
+    def _validate_indices(self) -> PreviewConfig:
+        errors: list[str] = []
+        if self.page_index is not None and self.page_index < 0:
+            errors.append("page_index cannot be negative")
+        if self.rejected_page_index is not None and self.rejected_page_index < 0:
+            errors.append("rejected_page_index cannot be negative")
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
-@dataclass(frozen=True)
-class OutputTagService:
+
+class OutputTagServices(BaseModel, frozen=True):
     """A Hydrus tag service where inference results will be written."""
 
-    key: str
+    keys: list[str] = Field(default_factory=list, min_length=1)
 
 
-@dataclass(frozen=True)
-class AddTagConfig:
+class AddTagConfig(BaseModel, frozen=True):
     """Rule specifying tags to add to successfully processed files."""
 
-    tags: list[str]
-    tag_service_keys: list[str] = field(default_factory=list)
+    tags: list[str] = Field(min_length=1)
+    tag_service_keys: list[str] = Field(min_length=1)
 
 
-@dataclass(frozen=True)
-class RemoveTagConfig:
+class RemoveTagConfig(BaseModel, frozen=True):
     """Rule specifying tags to remove from successful files."""
 
-    tags: list[str]
-    tag_service_keys: list[str] = field(default_factory=list)
+    tags: list[str] = Field(min_length=1)
+    tag_service_keys: list[str] = Field(min_length=1)
 
 
-@dataclass(frozen=True)
-class CategoryThresholdConfig:
+class CategoryThresholdConfig(BaseModel, frozen=True):
     """
     Threshold settings for one output category.
 
@@ -95,12 +107,11 @@ class CategoryThresholdConfig:
                  this category, not just ScoreThresholds.
     """
 
-    threshold: float
+    threshold: float = Field(ge=0.0, le=1.0)
     override_tlt: bool = False
 
 
-@dataclass(frozen=True)
-class TagThresholdConfig:
+class TagThresholdConfig(BaseModel, frozen=True):
     """
     Threshold settings for one specific tag.
 
@@ -109,23 +120,21 @@ class TagThresholdConfig:
                  this tag, not just ScoreThresholds.
     """
 
-    threshold: float
+    threshold: float = Field(ge=0.0, le=1.0)
     override_tlt: bool = False
 
 
-@dataclass(frozen=True)
-class TagSubsetConfig:
+class TagSubsetConfig(BaseModel, frozen=True):
     """
     A collection of tags subject to a collective output limit.
     Used to isolate and limit tags that belong to the same logical category.
     """
 
     tags: list[str]
-    limit: int = 1
+    limit: int = Field(default=1, ge=1)
 
 
-@dataclass(frozen=True)
-class OutputFilterConfig:
+class OutputFilterConfig(BaseModel, frozen=True):
     """
     Controls which tags are emitted and how they are transformed.
 
@@ -137,129 +146,79 @@ class OutputFilterConfig:
     """
 
     # --- Threshold settings ---
-
     prefer_tag_level_thresholds: bool = True
-    """Use TagLevelThresholds when the model supports it."""
-
-    tag_level_threshold_relative_offset: float = 0.0
-    """Relative offset for TagLevelThresholds. 0.1 → each threshold * 1.1."""
-
-    default_threshold: float = 0.4
-    """Global fallback score threshold."""
-
-    output_categories: list[str] = field(default_factory=list)
-    """Only emit tags from these categories. Empty → no categories."""
-
-    include_tags: list[str] = field(default_factory=list)
-    """Tags that are always included, bypassing output_categories."""
-
-    exclude_tags: list[str] = field(default_factory=list)
-    """Tags that are always excluded, even if their category is allowed."""
-
-    category_thresholds: dict[str, CategoryThresholdConfig] = field(default_factory=dict)
-    """Per-category threshold overrides. Keys are category names."""
-
-    tag_thresholds: dict[str, TagThresholdConfig] = field(default_factory=dict)
-    """Per-tag threshold overrides. Keys are raw tag names (before prefix)."""
+    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, lt=1.0)
+    default_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    output_categories: list[str] = Field(default_factory=list)
+    include_tags: list[str] = Field(default_factory=list)
+    exclude_tags: list[str] = Field(default_factory=list)
+    category_thresholds: dict[str, CategoryThresholdConfig] = Field(default_factory=dict)
+    tag_thresholds: dict[str, TagThresholdConfig] = Field(default_factory=dict)
 
     # --- Output selection ---
+    category_tag_prefix_mapping: dict[str, str] = Field(default_factory=dict)
+    tag_prefix_overrides: dict[str, str] = Field(default_factory=dict)
+    max_tags_per_category: dict[str, int] = Field(default_factory=dict)
+    max_tags_per_subset: list[TagSubsetConfig] = Field(default_factory=list)
 
-    category_tag_prefix_mapping: dict[str, str] = field(default_factory=dict)
-    """Maps category name → tag prefix applied before writing to Hydrus."""
-
-    tag_prefix_overrides: dict[str, str] = field(default_factory=dict)
-    """Maps specific raw tag name → tag prefix."""
-
-    max_tags_per_category: dict[str, int] = field(default_factory=dict)
-    """
-    Maximum number of tags to emit per category.
-    Tags are selected by descending score.  Omitted categories → no limit.
-    """
-
-    max_tags_per_subset: list[TagSubsetConfig] = field(default_factory=list)
-    """
-    Arbitrary tag collections where only the top-N highest scoring tags
-    matching the collection are retained, isolated from category limits.
-    """
-
-    # Internal: raw keys present in TOML for this section.
-    # Used by resolved_output_filter() to distinguish "not set" from
-    # "set to the same value as the default".
-    _raw_keys: frozenset[str] = field(default_factory=frozenset, compare=False, hash=False)
+    @model_validator(mode="after")
+    def _validate_max_tags(self) -> OutputFilterConfig:
+        bad = [k for k, v in self.max_tags_per_category.items() if v < 1]
+        if bad:
+            raise ValueError(f"max_tags_per_category entries must be >= 1: {bad}")
+        return self
 
 
-@dataclass(frozen=True)
-class ModelConfig:
+class ModelConfig(BaseModel, frozen=True):
     """Per-model configuration."""
 
-    model_id: str
+    model_id: str = Field(min_length=1)
     source: str | None = None
     device: str = "auto"
-    backend: str | None = None  # None → auto-select
+    backend: str | None = None
     precision: str = "auto"
-    batch_size: int = 1
+    batch_size: int = Field(default=1, ge=1)
 
     output_filter: OutputFilterConfig | None = None
-    """
-    Per-model output filter overrides.  Fields present in the model's
-    [output_filter] sub-table replace the corresponding global field;
-    all others fall back to the global OutputFilterConfig.
-    """
-
-    output_tag_services: list[OutputTagService] | None = None
-    """
-    Per-model output tag services.  If set, REPLACES the global list for this
-    model.  If None, the global hydrus.output_tag_services list is used.
-    """
+    output_tag_services: OutputTagServices | None = None
 
 
-@dataclass(frozen=True)
-class InferenceConfig:
+class InferenceConfig(BaseModel, frozen=True):
     """Model list and per-model configuration."""
 
-    models: list[ModelConfig]
+    models: list[ModelConfig] = Field(min_length=1)
 
 
-@dataclass(frozen=True)
-class HydrusConfig:
+class HydrusConfig(BaseModel, frozen=True):
     """Hydrus connection + search/preview/output settings."""
 
-    api_url: str
-    api_key: str
+    api_url: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
 
-    tag_queries: list[TagQueryConfig] = field(default_factory=list)
-    page_queries: list[PageQueryConfig] = field(default_factory=list)
+    tag_queries: list[TagQueryConfig] = Field(default_factory=list)
+    page_queries: list[PageQueryConfig] = Field(default_factory=list)
     preview: PreviewConfig | None = None
-    output_tag_services: list[OutputTagService] = field(default_factory=list)
+    output_tag_services: OutputTagServices = Field(default_factory=OutputTagServices)
     add_tags: AddTagConfig | None = None
     remove_tags: RemoveTagConfig | None = None
 
 
-@dataclass(frozen=True)
-class DatabaseConfig:
+class DatabaseConfig(BaseModel, frozen=True):
     path: str = "data/hyvis.db"
 
 
-@dataclass(frozen=True)
-class HyvisConfig:
+class HyvisConfig(BaseModel, frozen=True):
     """Application-level settings."""
 
-    log_level: str = "WARNING"
-    """
-    Log level for hyvis and vibe.
-    One of DEBUG, INFO, WARNING, ERROR.
-    Can be overridden at runtime with --log-level.
-    """
+    log_level: str = Field(default="WARNING", pattern=r"^(DEBUG|INFO|WARNING|ERROR)$")
 
 
-@dataclass(frozen=True)
-class AppConfig:
+class AppConfig(BaseModel, frozen=True):
     hydrus: HydrusConfig
     inference: InferenceConfig
     output_filter: OutputFilterConfig
-    """Global output filter defaults."""
-    database: DatabaseConfig
-    hyvis: HyvisConfig
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    hyvis: HyvisConfig = Field(default_factory=HyvisConfig)
 
     # region Helpers
 
@@ -270,41 +229,20 @@ class AppConfig:
         Per-model fields that were explicitly present in TOML override the
         corresponding global field; all others fall back to the global config.
         """
-        m = model_cfg.output_filter
-        if m is None:
+        if model_cfg.output_filter is None:
             return self.output_filter
-        g = self.output_filter
-        rk = m._raw_keys  # keys explicitly set in the model's output_filter block
 
-        def _pick(key: str, model_val: Any, global_val: Any) -> Any:
-            return model_val if key in rk else global_val
+        # model_fields_set contains ONLY keys explicitly provided in TOML
+        overrides = {
+            k: v
+            for k, v in model_cfg.output_filter.model_dump().items()
+            if k in model_cfg.output_filter.model_fields_set
+        }
 
-        return OutputFilterConfig(
-            prefer_tag_level_thresholds=_pick(
-                "prefer_tag_level_thresholds",
-                m.prefer_tag_level_thresholds,
-                g.prefer_tag_level_thresholds,
-            ),
-            tag_level_threshold_relative_offset=_pick(
-                "tag_level_threshold_relative_offset",
-                m.tag_level_threshold_relative_offset,
-                g.tag_level_threshold_relative_offset,
-            ),
-            default_threshold=_pick("default_threshold", m.default_threshold, g.default_threshold),
-            output_categories=_pick("output_categories", m.output_categories, g.output_categories),
-            include_tags=_pick("include_tags", m.include_tags, g.include_tags),
-            exclude_tags=_pick("exclude_tags", m.exclude_tags, g.exclude_tags),
-            category_thresholds=_pick("category_thresholds", m.category_thresholds, g.category_thresholds),
-            tag_thresholds=_pick("tag_thresholds", m.tag_thresholds, g.tag_thresholds),
-            category_tag_prefix_mapping=_pick(
-                "category_tag_prefix_mapping", m.category_tag_prefix_mapping, g.category_tag_prefix_mapping
-            ),
-            tag_prefix_overrides=_pick("tag_prefix_overrides", m.tag_prefix_overrides, g.tag_prefix_overrides),
-            max_tags_per_category=_pick("max_tags_per_category", m.max_tags_per_category, g.max_tags_per_category),
-            max_tags_per_subset=_pick("max_tags_per_subset", m.max_tags_per_subset, g.max_tags_per_subset),
-        )
+        merged = {**self.output_filter.model_dump(), **overrides}
+        return OutputFilterConfig(**merged)
 
-    def resolved_output_tag_services(self, model_cfg: ModelConfig) -> list[OutputTagService]:
+    def resolved_output_tag_services(self, model_cfg: ModelConfig) -> list[str]:
         """
         Return the effective output tag service list for a model.
 
@@ -312,122 +250,39 @@ class AppConfig:
         Otherwise the global hydrus.output_tag_services list is used.
         """
         if model_cfg.output_tag_services is not None:
-            return model_cfg.output_tag_services
-        return self.hydrus.output_tag_services
+            return model_cfg.output_tag_services.keys
+        return self.hydrus.output_tag_services.keys
 
     # region Factory
 
     @classmethod
-    def from_file(cls, path: Path) -> "AppConfig":
-        with path.open("rb") as fh:
-            raw: dict[str, Any] = tomllib.load(fh)
-        return cls._parse(raw)
+    def from_file(cls, path: Path) -> AppConfig:
+        try:
+            with path.open("rb") as fh:
+                raw: dict[str, Any] = tomllib.load(fh)
+            return cls.model_validate(raw)
+        except ValidationError as e:
+            raise SystemExit(f"Configuration error in {path}:\n{e}") from None
 
     @classmethod
-    def from_toml_string(cls, toml_str: str) -> "AppConfig":
-        raw: dict[str, Any] = tomllib.loads(toml_str)
-        return cls._parse(raw)
-
-    @classmethod
-    def _parse(cls, data: dict[str, Any]) -> "AppConfig":
-        # --- [hyvis] ---
-        hv = data.get("hyvis", {})
-        hyvis = HyvisConfig(
-            log_level=str(hv.get("log_level", "WARNING")).upper(),
-        )
-
-        # --- [hydrus] ---
-        h = data.get("hydrus", {})
-        tag_queries = [
-            TagQueryConfig(
-                tags=list(q["tags"]),
-                tag_service_keys=list(q.get("tag_service_keys", [])),
-            )
-            for q in h.get("tag_queries", [])
-        ]
-
-        page_queries = [
-            PageQueryConfig(
-                name=str(q["name"]),
-                index=int(q["index"]) if "index" in q else None,
-            )
-            for q in h.get("page_queries", [])
-        ]
-
-        # Parse preview
-        preview = None
-        if "preview" in h:
-            p = h["preview"]
-            preview = PreviewConfig(
-                page_name=str(p["page_name"]) if p.get("page_name") else None,
-                page_index=int(p["page_index"]) if "page_index" in p else None,
-                rejected_page_name=str(p["rejected_page_name"]) if p.get("rejected_page_name") else None,
-                rejected_page_index=int(p["rejected_page_index"]) if "rejected_page_index" in p else None,
-            )
-
-        # Parse add_tags
-        add_tags = None
-        if "add_tags" in h:
-            a = h["add_tags"]
-            add_tags = AddTagConfig(
-                tags=list(a.get("tags", [])),
-                tag_service_keys=list(a.get("tag_service_keys", [])),
-            )
-
-        # Parse remove_tags
-        remove_tags = None
-        if "remove_tags" in h:
-            r = h["remove_tags"]
-            remove_tags = RemoveTagConfig(
-                tags=list(r.get("tags", [])),
-                tag_service_keys=list(r.get("tag_service_keys", [])),
-            )
-
-        ots_data = h.get("output_tag_services", {})
-        global_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []
-        global_output_services = [OutputTagService(key=str(k)) for k in global_keys]
-
-        hydrus = HydrusConfig(
-            api_url=str(h.get("api_url", "")).rstrip("/"),
-            api_key=str(h.get("api_key", "")),
-            tag_queries=tag_queries,
-            page_queries=page_queries,
-            preview=preview,
-            output_tag_services=global_output_services,
-            add_tags=add_tags,
-            remove_tags=remove_tags,
-        )
-
-        # --- [output_filter] ---
-        global_filter = _parse_output_filter(data.get("output_filter", {}))
-
-        # --- [inference] ---
-        inf = data.get("inference", {})
-        models = [_parse_model_config(m) for m in inf.get("models", [])]
-        inference = InferenceConfig(models=models)
-
-        # --- [database] ---
-        db_data = data.get("database", {})
-        database = DatabaseConfig(path=str(db_data.get("path", "data/hyvis.db")))
-
-        return cls(
-            hydrus=hydrus,
-            inference=inference,
-            output_filter=global_filter,
-            database=database,
-            hyvis=hyvis,
-        )
+    def from_toml_string(cls, toml_str: str) -> AppConfig:
+        try:
+            raw: dict[str, Any] = tomllib.loads(toml_str)
+            return cls.model_validate(raw)
+        except ValidationError as e:
+            raise SystemExit(f"Configuration error:\n{e}") from None
 
     # region Validation
 
-    def validate(self, *, has_extra_hashes: bool = False) -> list[str]:
-        """Return a list of human-readable validation errors (empty → OK)."""
-        errors: list[str] = []
+    def hyvis_validate(self, *, has_extra_hashes: bool = False) -> list[str]:
+        """
+        Return a list of human-readable validation errors (empty → OK).
 
-        if not self.hydrus.api_url:
-            errors.append("[hydrus] api_url is required")
-        if not self.hydrus.api_key:
-            errors.append("[hydrus] api_key is required")
+        Note: Most type/range validation is now handled automatically by Pydantic
+        at parse time. This method only checks cross-field business rules that
+        cannot be expressed as field-level constraints.
+        """
+        errors: list[str] = []
 
         if not self.hydrus.tag_queries and not self.hydrus.page_queries and not has_extra_hashes:
             errors.append(
@@ -435,181 +290,27 @@ class AppConfig:
                 "or an extra hash file must be supplied via --extra-hash-file CLI flag."
             )
 
-        for i, pq in enumerate(self.hydrus.page_queries):
-            if not pq.name:
-                errors.append(f"[[hydrus.page_queries]][{i}]: 'name' must be provided and cannot be empty")
-            if pq.index is not None and pq.index < 0:
-                errors.append(f"[[hydrus.page_queries]][{i}]: 'index' cannot be negative")
-
-        if self.hydrus.preview:
-            p = self.hydrus.preview
-            if p.page_index is not None and p.page_index < 0:
-                errors.append("[hydrus.preview] page_index cannot be negative")
-            if p.rejected_page_index is not None and p.rejected_page_index < 0:
-                errors.append("[hydrus.preview] rejected_page_index cannot be negative")
-
         all_models_override = bool(self.inference.models) and all(
             m.output_tag_services is not None for m in self.inference.models
         )
-        if not self.hydrus.output_tag_services and not all_models_override:
+        if not self.hydrus.output_tag_services.keys and not all_models_override:
             errors.append(
-                "[hydrus] At least one output service key is required under [hydrus.output_tag_services].keys "
+                "[hydrus] At least one output service key is required under [hydrus.output_tag_services] "
                 "(or every [[inference.models]] entry must define its own output_tag_services)"
             )
 
-        if self.hydrus.add_tags:
-            a = self.hydrus.add_tags
-            if not a.tags:
-                errors.append("[hydrus.add_tags] tags list cannot be empty if add_tags is specified")
-            if not a.tag_service_keys:
-                errors.append(
-                    "[hydrus.add_tags] tag_service_keys cannot be empty. You must specify at least one service key."
-                )
-
-        if self.hydrus.remove_tags:
-            r = self.hydrus.remove_tags
-            if not r.tags:
-                errors.append("[hydrus.remove_tags] tags list cannot be empty if remove_tags is specified")
-            if not r.tag_service_keys:
-                errors.append(
-                    "[hydrus.remove_tags] tag_service_keys cannot be empty. You must specify at least one service key."
-                )
-
-        if not self.inference.models:
-            errors.append("[inference] At least one [[inference.models]] entry is required")
-        for i, m in enumerate(self.inference.models):
-            if not m.model_id:
-                errors.append(f"[[inference.models]][{i}]: model_id is required")
-            if m.batch_size < 1:
-                errors.append(f"[[inference.models]][{i}]: batch_size must be ≥ 1")
-            if m.output_filter is not None:
-                resolved = self.resolved_output_filter(m)
-                errors += _validate_output_filter(
-                    resolved,
-                    f"[[inference.models]][{i}] output_filter (resolved)",
-                )
-
-        errors += _validate_output_filter(self.output_filter, "[output_filter]")
-
-        if self.hyvis.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
-            errors.append("[hyvis] log_level must be one of DEBUG, INFO, WARNING, ERROR")
+        # Cross-field rule: at least one emission path must exist
+        of = self.output_filter
+        if not of.output_categories and not of.include_tags:
+            errors.append(
+                "[output_filter] Both 'output_categories' and 'include_tags' are empty. "
+                "No tags will ever be emitted under this configuration."
+            )
 
         return errors
 
 
-# region Parsing helpers
-
-
-def _parse_output_filter(raw: dict[str, Any]) -> OutputFilterConfig:
-    """Parse an [output_filter] table (global or per-model)."""
-    category_thresholds: dict[str, CategoryThresholdConfig] = {}
-    for cat, val in raw.get("category_thresholds", {}).items():
-        category_thresholds[str(cat)] = _parse_cat_threshold_entry(val, cat)
-
-    tag_thresholds: dict[str, TagThresholdConfig] = {}
-    for tag, val in raw.get("tag_thresholds", {}).items():
-        entry = _parse_cat_threshold_entry(val, tag)
-        tag_thresholds[str(tag)] = TagThresholdConfig(threshold=entry.threshold, override_tlt=entry.override_tlt)
-
-    max_tags: dict[str, int] = {str(k): int(v) for k, v in raw.get("max_tags_per_category", {}).items()}
-
-    max_subsets = [
-        TagSubsetConfig(tags=[str(t) for t in g.get("tags", [])], limit=int(g.get("limit", 1)))
-        for g in raw.get("max_tags_per_subset", [])
-    ]
-
-    return OutputFilterConfig(
-        prefer_tag_level_thresholds=bool(raw.get("prefer_tag_level_thresholds", True)),
-        tag_level_threshold_relative_offset=float(raw.get("tag_level_threshold_relative_offset", 0.0)),
-        default_threshold=float(raw.get("default_threshold", 0.4)),
-        output_categories=list(raw.get("output_categories", [])),
-        include_tags=list(raw.get("include_tags", [])),
-        exclude_tags=list(raw.get("exclude_tags", [])),
-        category_thresholds=category_thresholds,
-        tag_thresholds=tag_thresholds,
-        category_tag_prefix_mapping={str(k): str(v) for k, v in raw.get("category_tag_prefix_mapping", {}).items()},
-        tag_prefix_overrides={str(k): str(v) for k, v in raw.get("tag_prefix_overrides", {}).items()},
-        max_tags_per_category=max_tags,
-        max_tags_per_subset=max_subsets,
-        _raw_keys=frozenset(raw.keys()),
-    )
-
-
-def _parse_cat_threshold_entry(val: Any, key: str) -> CategoryThresholdConfig:
-    """
-    Parse a threshold entry that is either:
-        key = 0.7                                       (plain float)
-        key = { threshold = 0.7, override_tlt = true }  (inline table)
-    """
-    if isinstance(val, (int, float)):
-        return CategoryThresholdConfig(threshold=float(val), override_tlt=False)
-    if isinstance(val, dict):
-        return CategoryThresholdConfig(
-            threshold=float(val["threshold"]),
-            override_tlt=bool(val.get("override_tlt", False)),
-        )
-    raise ValueError(f"'{key}': expected a number or {{threshold=…, override_tlt=…}}, got {type(val).__name__}")
-
-
-def _parse_model_config(raw: dict[str, Any]) -> ModelConfig:
-    per_model_filter: OutputFilterConfig | None = None
-    if "output_filter" in raw:
-        per_model_filter = _parse_output_filter(raw["output_filter"])
-
-    per_model_services: list[OutputTagService] | None = None
-    if "output_tag_services" in raw:
-        ots_data = raw["output_tag_services"]
-        model_keys = ots_data.get("keys", []) if isinstance(ots_data, dict) else []
-        per_model_services = [OutputTagService(key=str(k)) for k in model_keys]
-
-    return ModelConfig(
-        model_id=str(raw["model_id"]),
-        source=str(raw["source"]) if raw.get("source") else None,
-        device=str(raw.get("device", "auto")),
-        backend=str(raw["backend"]) if "backend" in raw else None,
-        precision=str(raw.get("precision", "auto")),
-        batch_size=int(raw.get("batch_size", 1)),
-        output_filter=per_model_filter,
-        output_tag_services=per_model_services,
-    )
-
-
-def _validate_output_filter(f: OutputFilterConfig, prefix: str) -> list[str]:
-    errors: list[str] = []
-
-    offset = f.tag_level_threshold_relative_offset
-    if not (-1.0 <= offset < 1.0):
-        errors.append(f"{prefix}: tag_level_threshold_relative_offset must be in [-1.0, 1.0)")
-
-    if not (0.0 <= f.default_threshold <= 1.0):
-        errors.append(f"{prefix}: default_threshold must be in [0.0, 1.0]")
-
-    for cat, cfg in f.category_thresholds.items():
-        if not (0.0 <= cfg.threshold <= 1.0):
-            errors.append(f"{prefix} category_thresholds '{cat}': threshold must be in [0.0, 1.0]")
-
-    for tag, cfg in f.tag_thresholds.items():
-        if not (0.0 <= cfg.threshold <= 1.0):
-            errors.append(f"{prefix} tag_thresholds '{tag}': threshold must be in [0.0, 1.0]")
-
-    # Error if both output_categories and include_tags are empty
-    if not f.output_categories and not f.include_tags:
-        errors.append(
-            f"{prefix}: Both 'output_categories' and 'include_tags' are empty. "
-            "No tags will ever be emitted under this configuration."
-        )
-
-    for cat, limit in f.max_tags_per_category.items():
-        if limit < 1:
-            errors.append(f"{prefix} max_tags_per_category '{cat}': must be ≥ 1")
-
-    for i, group in enumerate(f.max_tags_per_subset):
-        if not group.tags:
-            errors.append(f"{prefix} max_tags_per_subset[{i}]: 'tags' list cannot be empty")
-        if group.limit < 1:
-            errors.append(f"{prefix} max_tags_per_subset[{i}]: 'limit' must be ≥ 1")
-
-    return errors
+# region Connection Override
 
 
 def override_toml_connection_settings(toml_str: str, api_url: str | None, api_key: str | None) -> str:

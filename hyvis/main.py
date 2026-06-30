@@ -77,7 +77,7 @@ async def main() -> int:
 
     # Pass the presence of an extra hash file to the validator
     has_extra_hashes = args.extra_hash_file is not None
-    errors = cfg.validate(has_extra_hashes=has_extra_hashes)
+    errors = cfg.hyvis_validate(has_extra_hashes=has_extra_hashes)
     if errors:
         print(_c("ERROR: Invalid configuration:", RED), file=sys.stderr)
         for e in errors:

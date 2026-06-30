@@ -235,9 +235,9 @@ def print_confirmation(
     if mode != "infer_only":
         # Output services
         print(_c("  Output Tag Services (global)", BOLD))
-        for svc in hydrus.output_tag_services:
-            name = service_name_by_key.get(svc.key, "(unknown service)")
-            print(f"    {_c(name, BOLD, CYAN)} {_c(svc.key, DIM)}")
+        for svc_key in hydrus.output_tag_services.keys:
+            name = service_name_by_key.get(svc_key, "(unknown service)")
+            print(f"    {_c(name, BOLD, CYAN)} {_c(svc_key, DIM)}")
         print()
 
     # region Models
@@ -252,9 +252,9 @@ def print_confirmation(
         if m.output_tag_services is not None:
             eff_svcs = config.resolved_output_tag_services(m)
             print("       output services")
-            for s in eff_svcs:
-                name = service_name_by_key.get(s.key, s.key)
-                print(f"         {_c(name, BOLD, CYAN)} {_c(s.key, DIM)}")
+            for svc_key in eff_svcs:
+                name = service_name_by_key.get(svc_key, "(unknown service)")
+                print(f"         {_c(name, BOLD, CYAN)} {_c(svc_key, DIM)}")
         # Format overrides with their actual values
         if m.output_filter is not None:
             overrides_strs = []

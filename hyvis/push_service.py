@@ -71,10 +71,10 @@ def push_and_cleanup_file(
     Returns True on success, False if pushing failed.
     """
     try:
-        for svc in config.resolved_output_tag_services(model_cfg):
+        for svc_key in config.resolved_output_tag_services(model_cfg):
             hydrus.add_tags(
                 hashes=[file_hash],
-                service_key=svc.key,
+                service_key=svc_key,
                 tags=prefixed_tags,
             )
         db.record_push_result(
@@ -401,8 +401,8 @@ async def run_push_and_cleanup(
                         pushed = False
                         while not pushed:
                             try:
-                                for svc in cfg.resolved_output_tag_services(model_cfg):
-                                    run_hydrus.add_tags(hashes=[file_hash], service_key=svc.key, tags=prefixed_tags)
+                                for svc_key in cfg.resolved_output_tag_services(model_cfg):
+                                    run_hydrus.add_tags(hashes=[file_hash], service_key=svc_key, tags=prefixed_tags)
                                 db.record_push_result(file_hash=file_hash, model_id=model_id, success=True)
                                 db.commit()
                                 total_push_ok += 1
