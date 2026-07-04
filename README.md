@@ -10,13 +10,24 @@ Support for downloading the files remotely over API and processing them that way
 
 ## Table of Contents
 
+- [Some Key Features](#some-key-features)
 - [Installation](#installation)
 - [Updating](#updating)
 - [Usage](#usage)
   - [Configuration](#configuration)
     - [Supported and Recommended Models](#supported-and-recommended-models)
+  - [Running HyVis](#running-hyvis)
   - [Showcase](#showcase)
   - [Useful CLI Flags](#useful-cli-flags)
+
+---
+
+## Some Key Features
+
+- File Fetching: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries) or by supplying [`--extra-hash-file`](#extra-hash-file) (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
+- [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus
+- Multi-Model Support: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially.
+- A bunch of configuration settings for filtering and modifying the output before sending it to Hydrus
 
 ---
 
@@ -164,7 +175,7 @@ hyvis path/to/config.toml
   Skip any [configured page previews](CONFIGURATION.md#hydruspreview).
 - `--api-url` / `--api-key`
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
-- `--extra-hash-file PATH`
+- <a id="extra-hash-file"></a>`--extra-hash-file PATH`
   For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) Process a text file containing one SHA256 hash per line.
 
 >[!TIP]

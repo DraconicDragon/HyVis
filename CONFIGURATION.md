@@ -70,6 +70,8 @@ api_key = "your_api_key_here"
 
 *Array of tables (Can be defined multiple times).* Specifies what search parameters to use to collect candidate files from Hydrus.
 
+This is basically WYSIWYG (What You See Is What You Get) as what you can see in the Hydrus client page(s) is what HyVis will attempt to fetch and process - With the exception of unsupported file types of course. It is also useful if tag queries may not support what you are trying to do, but is perfectly possible to do using Hydrus' built-in functionality.
+
 > [!TIP]
 > You can use almost all Hydrus system predicates (e.g., `system:limit is 100`). For a technical breakdown and complete list of system predicates, see the [Hydrus Developer API Reference](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_files_search_files) (You may need to scroll down a bit until you see a purple-ish expandable section).
 
