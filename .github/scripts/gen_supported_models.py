@@ -143,7 +143,7 @@ def build_markdown() -> str:
             "",
             "| Model Name | Model ID | Description |",
             "| :--- | :--- | :--- |",
-            f"| **JTP-3 Hydra** | [{_code('jtp-3')}](#{_slugify('jtp-3')}) | The only supported model that outputs e621 tags, and the latest and possibly best to do so, too. PyTorch only.|",
+            f"| **Hydra 3.5** | [{_code('hydra-3.5')}](#{_slugify('hydra-3.5')}) | The successor to [JTP-3](#{_slugify('jtp-3')}), the only supported models that output e621 tags, and the latest and possibly best to do so, too. PyTorch only. |",
             "",
             "### Hugging Face Gated Repositories (AnimeTimm Models)",
             "",

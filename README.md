@@ -91,7 +91,7 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
 
 #### Option B: ONNX Backend
 
-*Note: Some models, such as [JTP-3](SUPPORTED_MODELS.md#jtp-3) or [animetimm's dbv4 ConvNeXt v2 Huge](SUPPORTED_MODELS.md#at-convnextv2-huge-dbv4-full), are not available in ONNX format.*
+*Note: Some models, such as [JTP-3](SUPPORTED_MODELS.md#jtp-3) / [Hydra 3.5](SUPPORTED_MODELS.md#hydra-35) or [animetimm's dbv4 ConvNeXt v2 Huge](SUPPORTED_MODELS.md#at-convnextv2-huge-dbv4-full), are not available in ONNX format.*
 
 - **CPU Only:**
 

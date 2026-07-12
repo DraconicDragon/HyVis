@@ -345,7 +345,7 @@ Maps specific raw tag names to custom prefixes, overriding any category-level pr
 <summary>💡 View <code>[output_filter.tag_prefix_overrides]</code> Example</summary>
 
 ```toml
-# This example would be for JTP-3 or similar taggers where the "rating" tags are in the meta category (in this case because of e621)
+# This example would be for JTP-3 / Hydra 3.5 or similar taggers where the "rating" tags are in the meta category (in this case because of e621)
 [output_filter.category_tag_prefix_mapping]
 meta = "meta:"
 
@@ -394,7 +394,7 @@ This setting works independently from `[output_filter.max_tags_per_category]`.
 
 ```toml
 # In contrast to other models like those that output rating tags in their own category (for which max_tags_per_category can be used)
-# you need to use this to achieve the same effect with JTP-3 since it's rating tags are all bunched up in the "meta" category.
+# you need to use this to achieve the same effect with JTP-3 / Hydra 3.5 since it's rating tags are all bunched up in the "meta" category.
 [[output_filter.max_tags_per_subset]]
 tags = ["safe", "questionable", "explicit"]
 limit = 1

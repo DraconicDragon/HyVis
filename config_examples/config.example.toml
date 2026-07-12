@@ -119,8 +119,8 @@ exclude_tags = [
 
 # Maximum tags to emit per subset of tags
 #
-# Example: limit JTP-3's rating to the single most-confident tag:
-# We have to do it this way for JTP-3 specifically because the rating tags are all in the "meta" category
+# Example: limit JTP-3's/Hydra 3.5's rating to the single most-confident tag:
+# We have to do it this way for JTP-3/Hydra 3.5 specifically because the rating tags are all in the "meta" category
 # [[output_filter.max_tags_per_subset]]
 # tags = ["safe", "questionable", "explicit"]
 # limit = 1
@@ -142,7 +142,7 @@ exclude_tags = [
 "contributor" = ""
 
 # Per-tag prefix mapping, overrides category mapping
-# Example below is for jtp-3/e6 rating tags which doesn't in the model don't have their own category/column 
+# Example below is for jtp-3/hydra 3.5/e6 rating tags which doesn't in the model don't have their own category/column 
 # [output_filter.tag_prefix_overrides]
 # "safe" = "rating:"
 # "questionable" = "rating:"

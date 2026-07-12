@@ -69,7 +69,7 @@ keys = ["model_specific_service_key_here"]
 
 ### Second model
 [[inference.models]]
-model_id = "jtp-3"
+model_id = "hydra-3.5"
 #source     = ""
 device = "cuda"
 batch_size = 2

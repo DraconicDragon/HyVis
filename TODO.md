@@ -15,7 +15,7 @@
   - what is this useful for
   - I'd have to calculate it using numel()/sfts metadata/onnx graph for each model
     - animetimm models already have info available on their readmes but not the rest
-    - No, jtp3 is not 400m params, thats the siglip2 naflex base, jtp3's hydra head and other custom stuff makes it 501m params
+    - No, jtp3/hydra 3.5 is not 400m params, thats the siglip2 naflex base, jtp3's hydra head and other custom stuff makes it 501m params
   - could use jupyter notebook + google colab i guess to download each model and calc count and save
 
 - (v2) its gonna be weird but: video/animation support, could support multiple modes
