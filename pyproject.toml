@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "requests",
     "hydrus-api",
-    "vibe @ git+https://github.com/DraconicDragon/vibe@ed167d0d1cd6351ad31d5e0ed75de9db864058f8",
+    "vibe @ git+https://github.com/DraconicDragon/vibe@e0fa3d016badb52758ff93a433466cd332f4d618",
     "tomli-w>=1.2.0",
     "pydantic>=2.13.4",
 ]
