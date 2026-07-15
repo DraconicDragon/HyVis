@@ -133,10 +133,10 @@ def build_markdown() -> str:
             "| Model Name | Model ID | Description |",
             "| :--- | :--- | :--- |",
             f"| **WD Eva02 Large v3** | [{_code('wd-eva02-large-v3')}](#{_slugify('wd-eva02-large-v3')}) | Good ol' reliable. With a bit of emphasis on old though. |",
-            f"| **WD SwinV2 v3** | [{_code('wd-swinv2-v3')}](#{_slugify('wd-swinv2-v3')}) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter.  |",
+            f"| **WD SwinV2 v3** | [{_code('wd-swinv2-v3')}](#{_slugify('wd-swinv2-v3')}) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter. |",
             f"| **AnimeTimm CaFormer B36** | [{_code('at-caformer-b36-dbv4-full')}](#{_slugify('at-caformer-b36-dbv4-full')}) | Lightweight option with an updated dataset. A tiny bit heavier than SwinV2 |",
             f"| **AnimeTimm Eva02 Large Patch14 448** | [{_code('at-eva02-large-patch14-448-dbv4-full')}](#{_slugify('at-eva02-large-patch14-448-dbv4-full')}) | As heavy as WD Eva02 Large v3, but with updated data. |",
-            f"| **AnimeTimm ConvNeXtV2 Huge** | [{_code('at-convnextv2-huge-dbv4-full')}](#{_slugify('at-convnextv2-huge-dbv4-full')}) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only.|",
+            f"| **AnimeTimm ConvNeXtV2 Huge** | [{_code('at-convnextv2-huge-dbv4-full')}](#{_slugify('at-convnextv2-huge-dbv4-full')}) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only. |",
             "",
             "> Newer and/or larger models do not automatically guarantee better accuracy.",
             "",
@@ -203,11 +203,10 @@ def build_markdown() -> str:
         for info in family_models:
             lines.append(_format_model_row(info))
 
-        lines.extend(["", ""])
+        lines.extend([""])
 
     lines.extend(
         [
-            "",
             "<details><summary>Experimental/Unsupported</summary>",
             "",
             "It is possible to set `source` in the config to a HuggingFace repo ID, and model_id to: `generic-timm-tags`.",

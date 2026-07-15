@@ -29,10 +29,10 @@ Please open an issue if you know of any models and want HyVis to support them.
 | Model Name | Model ID | Description |
 | :--- | :--- | :--- |
 | **WD Eva02 Large v3** | [`wd-eva02-large-v3`](#wd-eva02-large-v3) | Good ol' reliable. With a bit of emphasis on old though. |
-| **WD SwinV2 v3** | [`wd-swinv2-v3`](#wd-swinv2-v3) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter.  |
+| **WD SwinV2 v3** | [`wd-swinv2-v3`](#wd-swinv2-v3) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter. |
 | **AnimeTimm CaFormer B36** | [`at-caformer-b36-dbv4-full`](#at-caformer-b36-dbv4-full) | Lightweight option with an updated dataset. A tiny bit heavier than SwinV2 |
 | **AnimeTimm Eva02 Large Patch14 448** | [`at-eva02-large-patch14-448-dbv4-full`](#at-eva02-large-patch14-448-dbv4-full) | As heavy as WD Eva02 Large v3, but with updated data. |
-| **AnimeTimm ConvNeXtV2 Huge** | [`at-convnextv2-huge-dbv4-full`](#at-convnextv2-huge-dbv4-full) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only.|
+| **AnimeTimm ConvNeXtV2 Huge** | [`at-convnextv2-huge-dbv4-full`](#at-convnextv2-huge-dbv4-full) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only. |
 
 > Newer and/or larger models do not automatically guarantee better accuracy.
 
@@ -53,7 +53,7 @@ AnimeTimm (`at-`) models are hosted in gated repositories. For automatic downloa
 
 | Model Name | Model ID | Description |
 | :--- | :--- | :--- |
-| **Taggerine** | [`taggerine`](#taggerine) | A large (min. 6GB RAM/VRAM required by default) with the most tags trained out of any supported model (74 625) that outputs both Danbooru AND e621 tags (all tags use e621 category format). <br /> I haven't really tested this. It's likely it is inaccurate compared to the rest but being able to output so many tags may just be what you want. |
+| **Taggerine** | [`taggerine`](#taggerine) | A large (min. 6GB RAM/VRAM required by default) with the most tags trained out of any supported model (74 625) that outputs both Danbooru AND E621 tags (all tags use e621 category format). <br /> I haven't really tested this, it's likely it is inaccurate compared to the rest but being able to output so many tags may just be what you want. |
 
 ---
 
@@ -89,14 +89,12 @@ AnimeTimm (`at-`) models are hosted in gated repositories. For automatic downloa
 | **[AnimeTimm SwinV2 Base Window8 256 (with artist tags)](https://huggingface.co/animetimm/swinv2_base_window8_256.dbv4a-full)** | <a id="at-swinv2-base-window8-256-dbv4a-full"></a>`at-swinv2-base-window8-256-dbv4a-full` | ![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white) ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | ✔️ |
 | **[AnimeTimm ViT Base Patch16 224](https://huggingface.co/animetimm/vit_base_patch16_224.dbv4-full)** | <a id="at-vit-base-patch16-224-dbv4-full"></a>`at-vit-base-patch16-224-dbv4-full` | ![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white) ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | ✔️ |
 
-
 ## RedRocket JTP Hydra Taggers
 
 | Model Name | Model ID | Backends | [TLT](#legend) |
 | :--- | :--- | :--- | :---: |
 | **[Hydra 3.5](https://huggingface.co/RedRocket/Hydra)** | <a id="hydra-3.5"></a>`hydra-3.5` | ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | — |
 | **[JTP-3 Hydra](https://huggingface.co/RedRocket/Hydra)** | <a id="jtp-3"></a>`jtp-3` | ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | — |
-
 
 ## SmilingWolf WD Taggers
 
@@ -107,14 +105,11 @@ AnimeTimm (`at-`) models are hosted in gated repositories. For automatic downloa
 | **[WD SwinV2 Tagger v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)** | <a id="wd-swinv2-v3"></a>`wd-swinv2-v3` | ![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white) ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | — |
 | **[WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3)** | <a id="wd-vit-v3"></a>`wd-vit-v3` | ![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white) ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | — |
 
-
 ## Taggerine
 
 | Model Name | Model ID | Backends | [TLT](#legend) |
 | :--- | :--- | :--- | :---: |
 | **[Taggerine](https://huggingface.co/lodestones/taggerine)** | <a id="taggerine"></a>`taggerine` | ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) | — |
-
-
 
 <details><summary>Experimental/Unsupported</summary>
 
