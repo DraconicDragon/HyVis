@@ -116,7 +116,7 @@ def build_markdown() -> str:
     for family_name in sorted_families:
         count = len(grouped[family_name])
         slug = _slugify(family_name)
-        lines.append(f"- [{family_name} ({count} models)](#{slug})")
+        lines.append(f"- [{family_name} ({count} model{'s' if count != 1 else ''})](#{slug})")
 
     lines.append("")
     lines.append("---")
