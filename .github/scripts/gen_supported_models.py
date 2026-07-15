@@ -111,6 +111,7 @@ def build_markdown() -> str:
         "  - [Danbooru Taggers](#danbooru-taggers)",
         "  - [e621 Taggers](#e621-taggers)",
         "  - [Hugging Face Gated Repositories (AnimeTimm Models)](#hugging-face-gated-repositories-animetimm-models)",
+        "  - [Special Mentions](#special-mentions)",
     ]
 
     for family_name in sorted_families:
@@ -151,6 +152,13 @@ def build_markdown() -> str:
             "",
             "> [!NOTE]",
             "> Requesting access explicitly shares your email address with the repository owner. If you prefer to avoid this, maybe you can find a kind soul who will reupload the model.",
+            "",
+            "### Special Mentions",
+            "",
+            "| Model Name | Model ID | Description |",
+            "| :--- | :--- | :--- |",
+            f"| **Taggerine** | [{_code('taggerine')}](#{_slugify('taggerine')}) | A large (min. 6GB RAM/VRAM required by default) with the most tags trained out of any supported model (74 625) that outputs both Danbooru AND E621 tags (all tags use e621 category format). "
+            "<br /> I haven't really tested this, it's likely it is inaccurate compared to the rest but being able to output so many tags may just be what you want. |",
             "",
             "---",
             "",
