@@ -160,6 +160,7 @@ def run_preflight(
         file_infos, r_mimes, r_hashes = client.filter_by_mime(
             all_hashes,
             progress_callback=lambda d, t: _report("Filtering metadata by MIME...", d, t),
+            allow_videos=cfg.video.enabled,
         )
         rejected_mimes.update(r_mimes)
         rejected_hashes.extend(r_hashes)
@@ -170,6 +171,7 @@ def run_preflight(
         extra_infos, ex_mimes, ex_hashes = client.filter_by_mime(
             extra_hashes,
             progress_callback=lambda d, t: _report("Filtering extra hashes by MIME...", d, t),
+            allow_videos=cfg.video.enabled,
         )
         rejected_mimes.update(ex_mimes)
         rejected_hashes.extend(ex_hashes)

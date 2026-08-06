@@ -46,6 +46,12 @@ def _load_libraries(backends: set[str | None]) -> None:
         except Exception as exc:
             logger.debug("Failed to preload onnxruntime: %s", exc)
 
+    # OpenCV (video frame extraction)
+    try:
+        import cv2  # noqa: F401
+    except Exception as exc:
+        logger.debug("Failed to preload cv2: %s", exc)
+
     logger.debug("Finished preloading libraries in background.")
 
 

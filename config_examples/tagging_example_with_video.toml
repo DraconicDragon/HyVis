@@ -1,0 +1,103 @@
+# *** EXAMPLE CONFIGURATION FILE ***
+# This is an example config for tagging files in hydrus, including videos.
+# Videos are tagged by sampling frames and merging the per-frame results.
+# See CONFIGURATION.md#video for all video options.
+
+[hydrus]
+api_url = "http://127.0.0.1:45869"
+api_key = "your_api_key_here"
+
+[[hydrus.tag_queries]]
+tags = ["system:limit is 500"]
+tag_service_keys = []          # empty == "all known tags"
+
+[hydrus.output_tag_services]
+keys = ["your_service_key_here"]
+
+
+# *** Output filter  (global) ***
+
+[output_filter]
+prefer_tag_level_thresholds = true
+default_threshold = 0.35
+
+
+# *** Output selection ***
+
+output_categories = [
+    "rating",
+    "general",
+    #"artist",
+    "contributor",
+    "copyright",
+    "character",
+    "meta",
+    "species",
+    "lore",
+]
+
+[output_filter.max_tags_per_category]
+"rating" = 1
+
+
+# *** Tag prefix mapping ***
+
+[output_filter.category_tag_prefix_mapping]
+"rating" = "rating:"
+"general" = ""
+"artist" = "creator:"
+"copyright" = "series:"
+"character" = "character:"
+"meta" = "meta:"
+"species" = "species:"
+"lore" = "lore:"
+#"contributor" = ""
+
+
+# *** Models ***
+
+[[inference.models]]
+model_id = "wd-swinv2-v3"
+device = "auto"
+batch_size = 6
+
+
+[database]
+path = "data/hyvis.db"
+
+# *** Video support ***
+
+# Videos are tagged by sampling frames and merging the per-frame results.
+# Requires opencv-python-headless (installed automatically with HyVis).
+# See CONFIGURATION.md#video for details.
+[video]
+enabled = true                    # false to keep rejecting video files
+max_frames = 16                   # max sample frames per video; shorter videos sample proportionally less
+max_frames_at_seconds = 64.0      # duration (seconds) at which the full max_frames is used
+include_edges = true              # include the first and last frame (may be deduped if near-identical)
+dedupe = true                     # drop near-duplicate sampled frames (loops, static segments)
+dedupe_threshold = 0.03           # mean frame diff below which frames count as duplicates
+dedupe_change_level = 25          # pixels differing by more than this (gray levels) count as "changed"
+dedupe_max_changed_fraction = 0.01  # max fraction of changed pixels for frames to still be duplicates;
+                                  # elements smaller than this fraction of the frame survive dedupe
+write_frames = false              # debug: save sampled frames to frames/<file_hash>/ as PNGs
+exclude_fades = false             # replace frames that land in fade-to-black/white transitions
+
+# Drop sampled frames that are mostly nothingness (flat AND dark - e.g. black
+# frames, fade-outs the padding missed) so inference is not wasted on them.
+# Dark scenes with real detail are preserved.
+[video.low_interest]
+enabled = true                    # false to keep all sampled frames
+min_luminance = 0.15              # mean luminance below which a frame may count as empty
+min_std = 0.05                    # luminance std below which a frame counts as flat; only
+                                  # frames that are flat AND dark are dropped
+
+# Only used when exclude_fades = true
+# [video.fades]
+# dark_threshold = 0.10           # mean luminance below which a frame counts as "black"
+# light_threshold = 0.90          # mean luminance above which a frame counts as "white"
+# uniformity = 0.08               # luminance std below which a frame counts as flat (dark scenes with detail survive)
+# replacement_min_brightness = 0.30  # min mean luminance for frames near fades; raise (e.g. 0.4-0.5) if
+#                                  # the frame picked after a fade-in still looks dark
+# search_seconds = 2.0            # how far to look for a replacement frame
+

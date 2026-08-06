@@ -75,7 +75,7 @@ async def main() -> int:
         cfg = cfg.model_copy(update={"hydrus": new_hydrus})
 
     # region Logging Setup
-    effective_log_level = args.log_level or cfg.hyvis.log_level
+    effective_log_level = "DEBUG" if args.debug else (args.log_level or cfg.hyvis.log_level)
     log_file_path = setup_logging(
         effective_log_level,
         log_dir=cfg.hyvis.log_dir,

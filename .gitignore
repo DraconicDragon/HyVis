@@ -228,3 +228,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Debug frame dumps
+frames/

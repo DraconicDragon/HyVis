@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 import hydrus_api
 import hydrus_api.utils
 
-from hyvis.config import ALLOWED_MIMES, AppConfig, PageQueryConfig, TagQueryConfig
+from hyvis.config import ALLOWED_MIMES, AppConfig, PageQueryConfig, TagQueryConfig, is_video_mime
 
 if TYPE_CHECKING:
     from hyvis.db import TagActionType
@@ -367,9 +367,13 @@ class HydrusClient:
         self,
         hashes: list[str],
         progress_callback: Any | None = None,
+        allow_videos: bool = False,
     ) -> tuple[list[FileInfo], set[str], list[str]]:
         """
         Batch-fetch metadata for all hashes, retain only allowed MIME types.
+
+        When allow_videos is True, video/* MIME types are accepted in addition
+        to ALLOWED_MIMES (used for image files).
 
         Returns (accepted_infos, rejected_mimes, rejected_hashes).
         """
@@ -390,7 +394,8 @@ class HydrusClient:
 
             for meta in metas:
                 mime: str = meta.get("mime", "")
-                if mime not in ALLOWED_MIMES:
+                allowed = mime in ALLOWED_MIMES or (allow_videos and is_video_mime(mime))
+                if not allowed:
                     if mime:
                         rejected_mimes.add(mime)
                     rejected_hashes.append(meta["hash"])

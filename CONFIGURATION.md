@@ -529,3 +529,50 @@ min_cache_score = 0.01
 ```
 
 </details>
+
+---
+
+## `[video]`
+
+Settings for tagging video files by sampling frames.
+
+When `enabled` is `true`, files with a `video/*` MIME type are accepted alongside images. For each video, a set of frames is sampled (evenly distributed across the content duration, with padding around fade-ins/fade-outs and optional first/last frames), every frame is run through the configured models, and the per-frame results are merged into one result per file: a tag is kept if it appears in any sampled frame, using its highest score across frames. Everything downstream (thresholds, output filter, tag services, preview, push) behaves exactly like it does for images.
+
+Requires `opencv-python-headless`, which is installed automatically with HyVis.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Accept and tag video files. Set to `false` to keep rejecting videos like before this feature existed. <br> Defaults to `true`. |
+| `max_frames` | Integer | No | Maximum number of sample frames extracted per video. Videos shorter than `max_frames_at_seconds` are sampled proportionally less. <br> Defaults to `11`. |
+| `max_frames_at_seconds` | Number | No | Duration (seconds) at which the full `max_frames` is used. In `uniform` mode the interval between samples never exceeds `max_frames_at_seconds / max_frames` seconds. <br> Defaults to `60.0`. |
+| `include_edges` | Boolean | No | Include the first and last frame of the video. With dedupe enabled they may still be dropped if near-identical to another sampled frame (e.g. a loop's end frame duplicating its start). <br> Defaults to `true`. |
+| `dedupe` | Boolean | No | Drop sampled frames that are near-duplicates of an already-chosen frame. The main defence against looping animations (the same loop phase sampled at different timestamps) and long static segments wasting the `max_frames` budget. <br> Defaults to `true`. |
+| `dedupe_threshold` | Number | No | Normalized mean frame difference (0–1) below which two sampled frames count as duplicates. Lower = stricter (only near-identical frames are dropped). <br> Defaults to `0.03`. |
+| `dedupe_change_level` | Integer | No | Second, area-independent duplicate test: pixels differing by more than this (8-bit gray levels) count as "changed". Used with `dedupe_max_changed_fraction` to protect small-but-important changes (a character or water movement in a mostly static frame) that barely move the mean. <br> Defaults to `25`. |
+| `dedupe_max_changed_fraction` | Number | No | Max fraction (0–1) of pixels that may differ by more than `dedupe_change_level` for two frames to still count as duplicates. Elements smaller than this fraction of the frame survive dedupe; lower it to protect smaller elements. <br> Defaults to `0.01`. |
+| `write_frames` | Boolean | No | Debug aid: save the sampled frames as PNGs under `frames/<file_hash>/` (relative to the directory HyVis is run from) so you can inspect exactly which frames are being inferred. Only written for files that actually run inference this session. <br> Defaults to `false`. |
+| `exclude_fades` | Boolean | No | Replace sampled frames that land inside fade-to-black/fade-to-white transitions with the nearest non-fade frame. A fade frame is detected as near-uniform AND near-black/near-white, so dark scenes with detail are preserved. <br> Defaults to `false`. |
+| `low_interest` | Table | No | Drop sampled frames with little interesting content (flat AND dark — e.g. black frames and fade-outs the padding missed) so inference is not wasted on them. See `[video.low_interest]`. <br> Defaults to enabled. |
+
+### `[video.fades]`
+
+*Only read when `[video].exclude_fades = true`.* Thresholds for fade-frame detection.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `dark_threshold` | Number | No | Mean luminance (0–1) below which a frame counts as "black". Fade-to-black frames are typically below `0.05`. <br> Defaults to `0.10`. |
+| `light_threshold` | Number | No | Mean luminance (0–1) above which a frame counts as "white". <br> Defaults to `0.90`. |
+| `uniformity` | Number | No | Luminance std (0–1) below which a frame counts as flat/uniform. A dark scene with detail has a higher std and is therefore NOT treated as a fade. <br> Defaults to `0.08`. |
+| `replacement_min_brightness` | Number | No | Minimum mean luminance (0–1) for sampled frames near fades. Frames below this — whether flat fade frames or dim-but-detailed frames just past a fade — are replaced by the nearest sufficiently bright non-fade frame. This is the knob to tune when the frame picked after a fade-in still looks dark (raise it, e.g. `0.4`–`0.5`). Dark scenes are preserved: dim frames are only nudged when a fade-like frame actually exists nearby. <br> Defaults to `0.30`. |
+| `search_seconds` | Number | No | How far (seconds) to look in both directions for a replacement frame before giving up and keeping the original. <br> Defaults to `2.0`. |
+
+### `[video.low_interest]`
+
+*Only read when `[video].low_interest.enabled = true` (the default).* A post-sampling filter that **drops** frames with little interesting content — near-uniform AND dark, i.e. black / mostly-black empty frames (fade-ins/outs the fade padding or the fade filter missed). Dropped frames are not replaced; the frame budget simply shrinks. Dark scenes with real detail (high std) are preserved, matching the fade filter's philosophy, and bright frames are never dropped by this filter.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Set to `false` to keep all sampled frames. <br> Defaults to `true`. |
+| `min_luminance` | Number | No | Mean luminance (0–1) below which a frame may count as empty (the darkness gate). <br> Defaults to `0.15`. |
+| `min_std` | Number | No | Luminance std (0–1) below which a frame counts as flat/uniform (no detail). A frame is only dropped when it is flat AND dark. Raise it to also drop dim-but-slightly-noisy frames; lower it to keep them. <br> Defaults to `0.05`. |
+

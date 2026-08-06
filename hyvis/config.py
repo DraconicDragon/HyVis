@@ -63,6 +63,14 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
     }
 )
 
+#: Any MIME starting with this prefix is treated as a video when video support is enabled.
+VIDEO_MIME_PREFIX = "video/"
+
+
+def is_video_mime(mime: str | None) -> bool:
+    """Return True if the given Hydrus MIME type identifies a video file."""
+    return bool(mime and mime.startswith(VIDEO_MIME_PREFIX))
+
 
 def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
     """Recursively extract a BaseModel subclass from generic containers or unions."""
@@ -722,6 +730,147 @@ class HyvisConfig(StrictBaseModel):
         return v
 
 
+class VideoConfig(StrictBaseModel):
+    """
+    Settings for tagging video files by sampling frames.
+
+    enabled                Accept video/* MIME types and tag them. When false,
+                           videos are rejected exactly like before this feature.
+    max_frames             Maximum number of sample frames extracted per video.
+                           Shorter videos are sampled proportionally less.
+    max_frames_at_seconds  Duration (seconds) at which the full max_frames is
+                           used; videos shorter than this are sampled less,
+                           and the sampling interval never exceeds
+                           max_frames_at_seconds / max_frames.
+    include_edges          Include the first and last frame of the video. With
+                           dedupe enabled they may still be dropped if
+                           near-identical to another sampled frame (e.g. a
+                           loop's end frame duplicating its start).
+    write_frames           Debug aid: save the sampled frames as PNGs under
+                           frames/<file_hash>/ so you can inspect exactly what
+                           is being inferred. Defaults to false.
+    exclude_fades          Replace sampled frames that land inside
+                           fade-to-black/fade-to-white transitions with the
+                           nearest non-fade frame (see FadeFilterConfig).
+                           A fade frame is detected as near-uniform AND
+                           near-black/near-white, so dark scenes with detail
+                           are preserved. Defaults to false.
+    low_interest           Drop sampled frames with little interesting
+                           content (flat AND dark - e.g. black frames and
+                           fade-outs the padding missed) so inference is not
+                           wasted on them (see LowInterestFilterConfig).
+                           Defaults to enabled.
+    dedupe                 Drop sampled frames that are near-duplicates of an
+                           already-chosen frame. This is the main defence
+                           against looping animations (the same loop phase
+                           sampled at different times) and static segments
+                           wasting the max_frames budget. Applies to both
+                           sampling modes. Defaults to true.
+    dedupe_threshold       Normalized mean frame difference (0-1) below which
+                           two sampled frames count as duplicates. Lower =
+                           stricter (only near-identical frames dropped).
+                           Defaults to 0.03.
+    dedupe_change_level    Second, area-independent duplicate test: two frames
+                           are only duplicates if the fraction of pixels
+                           differing by more than this (8-bit gray levels) is
+                           below dedupe_max_changed_fraction. Protects small
+                           but important changes (a character or water
+                           movement in a mostly static frame) that barely
+                           move the mean. Lower = stricter. Defaults to 25.
+    dedupe_max_changed_fraction
+                           Max fraction (0-1) of pixels that may differ by
+                           more than dedupe_change_level for two frames to
+                           still count as duplicates. Elements smaller than
+                           this fraction of the frame survive dedupe; lower
+                           it to protect smaller elements. Defaults to 0.01.
+    """
+
+    enabled: bool = True
+    max_frames: int = Field(default=11, ge=1)
+    max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
+    include_edges: bool = True
+    write_frames: bool = False
+    exclude_fades: bool = False
+    dedupe: bool = True
+    dedupe_threshold: float = Field(default=0.03, ge=0.0, le=1.0)
+    dedupe_change_level: int = Field(default=25, ge=1, le=255)
+    dedupe_max_changed_fraction: float = Field(default=0.01, ge=0.0, le=1.0)
+    fades: "FadeFilterConfig" = Field(default_factory=lambda: FadeFilterConfig())
+    low_interest: "LowInterestFilterConfig" = Field(
+        default_factory=lambda: LowInterestFilterConfig()
+    )
+
+
+class FadeFilterConfig(StrictBaseModel):
+    """
+    Thresholds for excluding fade-to-black/fade-to-white frames (used only
+    when [video].exclude_fades = true).
+
+    A sampled frame is treated as a fade frame when its mean luminance is
+    below dark_threshold OR above light_threshold, AND its luminance std is
+    below uniformity (i.e. it is flat, not a detailed dark/bright scene).
+
+    Fade frames are replaced by the nearest frame that is both not fade-like
+    and at least replacement_min_brightness bright (so the replacement is
+    comfortably past the fade, not the dimmest frame that barely passes the
+    detection test), searching within search_seconds.
+
+    dark_threshold           Mean luminance (0-1) below which a frame counts
+                             as "black" for DETECTION. Fade-to-black frames
+                             are typically < 0.05.
+    light_threshold          Mean luminance (0-1) above which a frame counts
+                             as "white" for detection.
+    uniformity               Luminance std (0-1) below which a frame counts
+                             as flat/uniform. Dark scenes with detail have
+                             higher std and are therefore preserved.
+    replacement_min_brightness
+                             Minimum mean luminance (0-1) for sampled frames
+                             near fades. Frames below this - whether flat
+                             fade frames or merely dim-but-detailed frames
+                             just past a fade - are replaced by the nearest
+                             sufficiently bright non-fade frame within
+                             search_seconds. Tune this to control how bright
+                             the frames picked around fades are. Dark scenes
+                             are preserved: dim-but-detailed frames are only
+                             nudged when a fade-like frame actually exists
+                             nearby.
+    search_seconds           How far (seconds) to look in both directions for
+                             a replacement frame before giving up and keeping
+                             the original.
+    """
+
+    dark_threshold: float = Field(default=0.10, ge=0.0, le=1.0)
+    light_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    uniformity: float = Field(default=0.08, ge=0.0, le=1.0)
+    replacement_min_brightness: float = Field(default=0.30, ge=0.0, le=1.0)
+    search_seconds: float = Field(default=2.0, gt=0.0)
+
+
+class LowInterestFilterConfig(StrictBaseModel):
+    """
+    Filter for sampled frames with little interesting content (used only
+    when [video].low_interest.enabled = true, the default).
+
+    A sampled frame is DROPPED (not replaced - the frame budget shrinks)
+    when it is near-uniform AND dark: luminance std below min_std AND mean
+    luminance below min_luminance. That is a black / mostly-black empty
+    frame - e.g. a fade-in/out that the fade padding or fade filter missed.
+    A dark scene with real detail (high std) is preserved, matching the
+    fade filter's philosophy; bright frames are never dropped by this filter.
+
+    enabled              When true, drop low-interest sampled frames before
+                         inference. Defaults to true.
+    min_luminance        Mean luminance (0-1) below which a frame may count
+                         as empty. Defaults to 0.15.
+    min_std              Luminance std (0-1) below which a frame counts as
+                         flat/uniform (no detail). Defaults to 0.05.
+    """
+
+    enabled: bool = True
+    min_luminance: float = Field(default=0.15, ge=0.0, le=1.0)
+    min_std: float = Field(default=0.05, ge=0.0, le=1.0)
+
+
 class AppConfig(StrictBaseModel):
     hydrus: HydrusConfig = Field(
         ...,
@@ -748,6 +897,12 @@ class AppConfig(StrictBaseModel):
         title="Application Settings",
         description="Application-level execution behavior and logging verbosity.",
     )
+    video: VideoConfig = Field(
+        default_factory=VideoConfig,
+        title="Video",
+        description="Video tagging: frame sampling, near-duplicate removal, fade and low-interest frame filters.",
+    )
+
 
     # region Helpers
 

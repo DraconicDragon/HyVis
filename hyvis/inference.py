@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import vibe
-from vibe import InferenceCancelled, TagResult
+from vibe import InferenceCancelled, TagEntry, TagResult
 from vibe_result_transforms import (
     CleanTags,
     TagLevelThresholds,
@@ -389,6 +389,69 @@ class PhaseStats:
 # endregion
 
 
+# region Frame merging
+
+
+def _is_memory_error(exc: BaseException) -> bool:
+    """Return True when an exception looks like an out-of-memory condition."""
+    if isinstance(exc, MemoryError):
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "failed to allocate memory",
+            "out of memory",
+            "cuda error",
+            "not enough memory",
+            "std::bad_alloc",
+            "cannot allocate",
+        )
+    )
+
+
+def merge_frame_results(frame_results: list[dict[str, dict[str, float]]]) -> dict[str, dict[str, float]]:
+    """
+    Merge per-frame {category: {tag: score}} results into one per-file result.
+
+    Tags are unioned across frames and keep the highest score they reached in
+    any single frame, so a tag only has to be confident in one sampled frame.
+    """
+    merged: dict[str, dict[str, float]] = {}
+    for frame_result in frame_results:
+        for category, tag_scores in frame_result.items():
+            if not isinstance(tag_scores, dict):
+                continue
+            merged_category = merged.setdefault(str(category), {})
+            for tag, score in tag_scores.items():
+                try:
+                    score_value = float(score)
+                except (TypeError, ValueError):
+                    continue
+                if score_value > merged_category.get(tag, 0.0):
+                    merged_category[tag] = score_value
+    return merged
+
+
+def tagger_result_from_category_scores(category_scores: dict[str, dict[str, float]]) -> TagResult:
+    """
+    Rebuild a vibe TagResult from a {category: {tag: score}} mapping.
+
+    Video inference produces plain score mappings; wrapping them in a TagResult
+    lets them run through the same transform pipeline and tag extraction as
+    single-image results.
+    """
+    return TagResult(
+        categories={
+            category: [TagEntry(tag, score) for tag, score in tag_scores.items()]
+            for category, tag_scores in category_scores.items()
+        }
+    )
+
+
+# endregion
+
+
 # region Inference
 
 
@@ -460,8 +523,13 @@ async def infer_files(
     output_services = config.resolved_output_tag_services(model_cfg)
     configured_model_ids = [m.model_id for m in config.inference.models]
 
-    # Build inputs as (path, file_hash) tuples for inference backend.
-    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in valid_process}
+    from hyvis.config import is_video_mime
+
+    # Images go through the batch inference stream; videos are sampled frame
+    # by frame in a separate phase below.
+    image_files = [fi for fi in valid_process if not is_video_mime(fi.mime)]
+    video_files = [fi for fi in valid_process if is_video_mime(fi.mime)]
+    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in image_files}
 
     load_kwargs: dict[str, Any] = {
         "source": model_cfg.source,
@@ -535,100 +603,236 @@ async def infer_files(
 
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
 
-            async for chunk in session.infer_async(inputs, batch_size=model_cfg.batch_size):
-                batch_processed = 0
-                batch_errors = 0
-                last_file_hash = None
-                last_tag_count = 0
+            # region Persist one file result
 
-                for item in chunk:
-                    file_hash: str = str(item.input_ref)
-                    fi = file_info_map[file_hash]
+            def _persist_result(file_hash: str, fi: FileInfo, raw_result: TagResult) -> int:
+                """
+                Persist one file result and enqueue its tags.
+
+                Returns the number of tags enqueued. Shared by the image and
+                video phases so both go through the same raw cache, transform
+                pipeline, and tag extraction.
+                """
+                # 1. Upsert known_file FIRST to satisfy foreign key constraint!
+                db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
+
+                # 2. Save un-culled raw predictions to SQLite cache (ONLY if enabled)
+                if cache_raw_enabled:
+                    cache_result = raw_result.filter(lambda _tag, score, _cat, ms=min_cache_score: score >= ms)
+                    raw_cache_payload = cache_result.as_category_score_dict()
+                else:
+                    raw_cache_payload = {}
+
+                db.save_raw_cache(
+                    file_hash,
+                    model_cfg.model_id,
+                    raw_cache_payload,
+                    enabled=cache_raw_enabled,
+                )
+
+                # 3. Apply VRT transform pipeline on the full, un-culled raw result
+                filtered_result = pipeline(raw_result)
+
+                # 4. Extract final tags using the pre-compiled filter
+                tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
+                prefixed_tags = [tr.prefixed_tag for tr in tag_records]
+
+                # 5. Track zero-tag files or enqueue tags into push_queue for each configured service
+                if not prefixed_tags:
+                    stats.zero_tags += 1
+                else:
+                    for svc_key in output_services:
+                        db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
+
+                # 6. Check if all models configured for this file are complete using has_raw_cache
+                all_models_cached = True
+                for m_id in configured_model_ids:
+                    if m_id == model_cfg.model_id:
+                        continue
+                    if not db.has_raw_cache(file_hash, m_id):
+                        all_models_cached = False
+                        break
+
+                if all_models_cached:
+                    for a_cfg in config.hydrus.add_tags:
+                        for svc_key in a_cfg.tag_service_keys:
+                            db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
+                    for r_cfg in config.hydrus.remove_tags:
+                        for svc_key in r_cfg.tag_service_keys:
+                            db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
+
+                # Periodic commit to prevent disk sync thrashing
+                db.batch_tick(batch_size=50)
+
+                stats.ok += 1
+                stats.total_tags_cached += total_model_tags
+                stats.total_tags_enqueued += len(prefixed_tags)
+                return len(prefixed_tags)
+
+            # endregion
+
+            # region Image inference (with OOM batch-size retry)
+
+            if inputs:
+                stream_batch = model_cfg.batch_size
+                stream_processed = 0
+
+                while True:
+                    try:
+                        async for chunk in session.infer_async(inputs, batch_size=stream_batch):
+                            batch_processed = 0
+                            batch_errors = 0
+                            last_file_hash = None
+                            last_tag_count = 0
+
+                            for item in chunk:
+                                file_hash = str(item.input_ref)
+                                fi = file_info_map[file_hash]
+
+                                try:
+                                    raw_result = item.result
+                                    if not isinstance(raw_result, TagResult):
+                                        raise TypeError(
+                                            f"Expected TagResult from vibe, got {type(raw_result).__name__}"
+                                        )
+                                    last_tag_count = _persist_result(file_hash, fi, raw_result)
+                                    consecutive_errors = 0  # Reset on success
+                                    stream_processed += 1
+                                    batch_processed += 1
+                                    last_file_hash = file_hash
+                                except Exception as exc:
+                                    _handle_infer_error(
+                                        exc=exc,
+                                        file_hash=file_hash,
+                                        fi=fi,
+                                        db=db,
+                                        stats=stats,
+                                    )
+                                    consecutive_errors += 1
+                                    batch_errors += 1
+                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                        stats.aborted_early = True
+                                        stats.abort_reason = (
+                                            f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                        )
+                                        return stats
+                                    continue
+
+                            if last_file_hash is not None:
+                                progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
+                            if batch_processed or batch_errors:
+                                progress.tick(processed=batch_processed, errors=batch_errors)
+                        break
+                    except Exception as exc:
+                        # Retry the whole stream at a smaller batch size when the
+                        # model could not fit the first batch into memory. A
+                        # failure mid-stream stays fatal: files processed so far
+                        # may already be persisted, so restarting would redo work.
+                        if not (_is_memory_error(exc) and stream_batch > 1 and stream_processed == 0):
+                            raise
+                        logger.warning(
+                            "Model %s: out of memory at batch size %d, retrying with %d",
+                            model_cfg.model_id,
+                            stream_batch,
+                            max(1, stream_batch // 2),
+                        )
+                        stream_batch = max(1, stream_batch // 2)
+
+            # endregion
+
+            # region Video inference (sample frames, infer, merge)
+
+            if video_files and not stats.aborted_early:
+                from hyvis.video import dump_frames, extract_frames
+
+                video_cfg = config.video
+                print(f"  Tagging {len(video_files)} video(s) by sampling frames...")
+                print()
+
+                for fi in video_files:
+                    file_hash = fi.file_hash
+
+                    if session.is_cancellation_requested():
+                        stats.aborted_early = True
+                        stats.abort_reason = "Inference cancelled by user (press 'q')"
+                        break
 
                     try:
-                        raw_result = item.result
-                        if not isinstance(raw_result, TagResult):
-                            raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
+                        frames = extract_frames(
+                            fi.local_path,
+                            max_frames=video_cfg.max_frames,
+                            max_frames_at_seconds=video_cfg.max_frames_at_seconds,
+                            include_edges=video_cfg.include_edges,
+                            fades=video_cfg.fades if video_cfg.exclude_fades else None,
+                            low_interest=video_cfg.low_interest,
+                            dedupe=video_cfg.dedupe,
+                            dedupe_threshold=video_cfg.dedupe_threshold,
+                            dedupe_change_level=video_cfg.dedupe_change_level,
+                            dedupe_max_changed_fraction=video_cfg.dedupe_max_changed_fraction,
+                        )
+                        if not frames:
+                            raise RuntimeError("No usable frames could be sampled from the video")
 
-                        # 1. Upsert known_file FIRST to satisfy foreign key constraint!
-                        db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
+                        if video_cfg.write_frames:
+                            out_dir = dump_frames(frames, file_hash=file_hash)
+                            logger.info("Wrote %d debug frame(s) to %s", len(frames), out_dir)
 
-                        # 2. Save un-culled raw predictions to SQLite cache (ONLY if enabled)
-                        if cache_raw_enabled:
-                            cache_result = raw_result.filter(lambda _tag, score, _cat, ms=min_cache_score: score >= ms)
-                            raw_cache_payload = cache_result.as_category_score_dict()
-                        else:
-                            raw_cache_payload = {}
-
-                        db.save_raw_cache(
-                            file_hash,
+                        logger.info(
+                            "Model %s: %s sampled %d frame(s)",
                             model_cfg.model_id,
-                            raw_cache_payload,
-                            enabled=cache_raw_enabled,
+                            file_hash[:8],
+                            len(frames),
                         )
 
-                        # 3. Apply VRT transform pipeline on the full, un-culled raw result
-                        filtered_result = pipeline(raw_result)
+                        # infer_async expects a list: a bare tuple is parsed as one
+                        # (image, ref) pair.
+                        frame_inputs = list(frames)
+                        frame_scores: list[dict[str, dict[str, float]]] = []
+                        frame_batch = model_cfg.batch_size
 
-                        # 4. Extract final tags using the pre-compiled filter
-                        tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
-                        prefixed_tags = [tr.prefixed_tag for tr in tag_records]
-
-                        # 5. Track zero-tag files or enqueue tags into push_queue for each configured service (merges tags automatically)
-                        if not prefixed_tags:
-                            stats.zero_tags += 1
-                        else:
-                            for svc_key in output_services:
-                                db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
-
-                        # 6. Check if all models configured for this file are complete using has_raw_cache
-                        all_models_cached = True
-                        for m_id in configured_model_ids:
-                            if m_id == model_cfg.model_id:
-                                continue
-                            if not db.has_raw_cache(file_hash, m_id):
-                                all_models_cached = False
+                        while True:
+                            try:
+                                async for chunk in session.infer_async(frame_inputs, batch_size=frame_batch):
+                                    for item in chunk:
+                                        frame_scores.append(item.result.as_category_score_dict())
                                 break
+                            except InferenceCancelled:
+                                raise
+                            except Exception as exc:
+                                if not _is_memory_error(exc) or frame_batch <= 1:
+                                    raise
+                                logger.warning(
+                                    "Model %s: out of memory on %s at batch size %d, retrying with %d",
+                                    model_cfg.model_id,
+                                    file_hash[:8],
+                                    frame_batch,
+                                    max(1, frame_batch // 2),
+                                )
+                                frame_batch = max(1, frame_batch // 2)
+                                frame_scores = []
 
-                        if all_models_cached:
-                            for a_cfg in config.hydrus.add_tags:
-                                for svc_key in a_cfg.tag_service_keys:
-                                    db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
-                            for r_cfg in config.hydrus.remove_tags:
-                                for svc_key in r_cfg.tag_service_keys:
-                                    db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
+                        if not frame_scores:
+                            raise RuntimeError("All sampled frames failed inference")
 
-                        # Periodic commit to prevent disk sync thrashing
-                        db.batch_tick(batch_size=50)
+                        merged_scores = merge_frame_results(frame_scores)
+                        raw_result = tagger_result_from_category_scores(merged_scores)
+                        tag_count = _persist_result(file_hash, fi, raw_result)
 
                         consecutive_errors = 0
-                        stats.ok += 1
-                        stats.total_tags_cached += total_model_tags
-                        stats.total_tags_enqueued += len(prefixed_tags)
-                        batch_processed += 1
-                        last_file_hash = file_hash
-                        last_tag_count = len(prefixed_tags)
-
+                        progress.set_last_file_info(file_hash, model_cfg.model_id, tag_count)
+                        progress.tick(processed=1)
+                    except InferenceCancelled:
+                        raise
                     except Exception as exc:
-                        _handle_infer_error(
-                            exc=exc,
-                            file_hash=file_hash,
-                            fi=fi,
-                            db=db,
-                            stats=stats,
-                        )
+                        _handle_infer_error(exc=exc, file_hash=file_hash, fi=fi, db=db, stats=stats)
                         consecutive_errors += 1
-                        batch_errors += 1
+                        progress.tick(errors=1)
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                             stats.aborted_early = True
                             stats.abort_reason = f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
                             return stats
-                        continue
 
-                if last_file_hash is not None:
-                    progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
-                if batch_processed or batch_errors:
-                    progress.tick(processed=batch_processed, errors=batch_errors)
+            # endregion
 
             # Flush any uncommitted transactions from this run
             db.commit()
