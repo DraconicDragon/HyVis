@@ -5,10 +5,6 @@
 
 - (vibe - ModelPlugin Metadata) Recommended thresholds for each model, in extra column in SUPPORTED_MODELS.md
 
-- More QoL stuff
-  - Model info should be easier available, eg during errors or trying to discover them and stuff
-  - More info at runtime, eg what device ended up being used
-
 ## lower priority (in order, mostly)
 
 - (vibe) store param count for each model(-plugin)
@@ -31,7 +27,7 @@
 
 - configurable metadata fetch batch size (currently 256 hardcoded)
 
-- hydrus file download to memory for remote clients/file locations
+- more utilities for db like clear-cache? model_id specific stuff maybe?
 
 - option to set auto download (huggingface download) off since vibe has it too
   - or just tell people to prefix source option with `local:`
@@ -42,6 +38,8 @@
 - [x] Preview for tag queries using an open page in Hydrus
   - [ ] mark experimental since i think API says that these endpoints are experimental
 
+- hydrus file download to memory for remote clients/file locations
+
 - file domains - unlikely, i dont use them at all and dont plan to
 
 ## Interface/TUI for minimal stuff
@@ -49,4 +47,3 @@
 - hyvis without arg supplied:
   - opens model info getter
   - config chooser
-- hyvis-push-pending
