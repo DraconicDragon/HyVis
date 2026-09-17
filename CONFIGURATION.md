@@ -207,7 +207,7 @@ tag_service_keys = ["my_service_key_here"]
 
 Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing the `hyvis-push-pending` tool.
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing `hyvis <config> --push-only`.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -220,7 +220,7 @@ If tag removal fails for any reason, the tags remain in Hydrus. On the next run,
 ```toml
 [hydrus.remove_tags]
 tags = ["temp:tagme", "queue:ai processing"]
-tag_service_keys = []
+tag_service_keys = ["my_service_key_here"]
 ```
 
 </details>
@@ -476,6 +476,8 @@ Settings for the application's local state and cache storage.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
+| `cache_raw_predictions` | Boolean | No | Saves raw, un-culled model predictions in SQLite. Allows instant re-filtering when thresholds change without re-running GPU inference. <br> Defaults to `true`. |
+| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `1.0`) saved to the raw cache. **Warning**: setting this below 0.1 will increase DB size by a lot. Cache can be cleared with `--clear-cache` CLI arg. <br> Defaults to `0.01`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
@@ -483,6 +485,7 @@ Settings for the application's local state and cache storage.
 ```toml
 [database]
 path = "data/hyvis.db"
-```
+cache_raw_predictions = true
+min_cache_score = 0.01
 
 </details>

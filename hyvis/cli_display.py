@@ -307,7 +307,7 @@ def print_confirmation(
             _c(
                 "      Tip: File paths are resolved. You may close Hydrus now to free up memory if needed.\n"
                 + "             While Hydrus is closed/unreachable, no tags can be pushed to Hydrus, but inference will continue.\n"
-                + "             After run completion you may run 'hyvis-push-pending' to push any pending tags to Hydrus.",
+                + "             After run completion you may run 'hyvis <config> --push-only' to push any pending tags to Hydrus.",
                 YELLOW,
             )
         )
@@ -336,5 +336,5 @@ def print_run_summary(
     if mode == "default":
         print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
         if total_push_err:
-            print(_c("  Tip: Run 'hyvis-push-pending' to retry failed pushes and process cleanups.", DIM))
+            print(_c("  Tip: Run 'hyvis <config> --push-only' to retry failed pushes and process cleanups.", DIM))
     print()

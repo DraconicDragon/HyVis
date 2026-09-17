@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import functools
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, TypeVar, cast
 
 import hydrus_api
 import hydrus_api.utils
@@ -107,7 +108,7 @@ class HydrusConnectionError(HydrusError):
             msg += (
                 "\nSuggestions:\n"
                 "  1. Check if Hydrus is running.\n"
-                "  2. Verify that the Client API is enabled in Hydrus settings (services -> Manage services -> client api).\n"
+                "  2. Verify that the Client API is enabled in Hydrus (services -> Manage services -> client api).\n"
                 "  3. Check that the port in api_url matches Hydrus."
             )
         elif cause is not None and any(
@@ -124,7 +125,7 @@ class HydrusConnectionError(HydrusError):
         return msg
 
     @classmethod
-    def from_hydrus_api(cls, exc: hydrus_api.ConnectionError) -> "HydrusConnectionError":
+    def from_hydrus_api(cls, exc: hydrus_api.ConnectionError) -> HydrusConnectionError:
         return cls(exc)
 
 
@@ -144,7 +145,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 def _handle_hydrus_errors(func: F) -> F:
     """
-    Decorator that translates hydrus_api exceptions into local HydrusError subclasses."""
+    Decorator that translates hydrus_api exceptions into local HydrusError subclasses.
+    """
 
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -155,7 +157,7 @@ def _handle_hydrus_errors(func: F) -> F:
         except hydrus_api.APIError as exc:
             raise HydrusAPIError(exc) from exc
 
-    return wrapper  # type: ignore[return-value]
+    return cast(F, wrapper)
 
 
 # region FileInfo (lightweight metadata record)
@@ -164,7 +166,7 @@ def _handle_hydrus_errors(func: F) -> F:
 class FileInfo:
     """Minimal resolved metadata for one file."""
 
-    __slots__ = ("file_hash", "mime", "size", "local_path")
+    __slots__ = ("file_hash", "local_path", "mime", "size")
 
     def __init__(
         self,
@@ -315,7 +317,8 @@ class HydrusClient:
 
         # Attempt to create page (Hydrus v676+)
         try:
-            resp = self._client.new_page(page_type=6, page_name=name, hashes=hashes, focus_page=focus)  # ty:ignore[possibly-missing-attribute]
+            client: Any = self._client
+            resp = client.new_page(page_type=6, page_name=name, hashes=hashes, focus_page=focus)
             return resp["page_key"]
         except hydrus_api.APIError as exc:
             if exc.response.status_code == 404:
@@ -323,7 +326,7 @@ class HydrusClient:
                     f"No media page found with name '{name}' and page creation failed (HTTP Error 404). "
                     "Hydrus v676+ is required for automatic page creation. "
                     "Please create an empty page with this name manually."
-                )
+                ) from exc
             raise
 
     def collect_candidate_hashes(self, queries: list[TagQueryConfig]) -> tuple[set[str], list[int]]:
@@ -546,5 +549,5 @@ def validate_service_keys(
 
 def format_boot_time(timestamp: float) -> str:
     """Format a Hydrus boot_time value for display."""
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    dt = datetime.fromtimestamp(timestamp, tz=UTC)
     return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")

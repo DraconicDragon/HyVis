@@ -1,9 +1,9 @@
 """
 inference.py Inference orchestration.
 
-infer_files()             Run a model against files, store results in DB.
-                          Does NOT require Hydrus to be reachable.
-                          If Hydrus is reachable, pushes results (interleaved) and performs tag cleanups.
+infer_files()             Run a model against files, store raw results in DB cache,
+                          apply transforms, and enqueue tags into push_queue.
+                          Does NOT require Hydrus to be reachable during inference.
 
 FileSource abstraction
 ----------------------
@@ -18,9 +18,17 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
+
+import vibe
+from vibe.results import TagResult
+from vibe.session import InferenceCancelled
+from vibe_result_transforms import (
+    CleanTags,
+    TagLevelThresholds,
+    TransformPipeline,
+)
 
 from hyvis.logging_utils import BOLD, MAGENTA, _c
 
@@ -77,10 +85,13 @@ class LocalFileSource:
 # class RemoteFileSource:
 #     """Placeholder"""
 
+# endregion
+
+
 # region Tag extraction
 
 
-@dataclass
+@dataclass(slots=True)
 class TagRecord:
     """One tag destined for Hydrus, with its provenance."""
 
@@ -90,29 +101,48 @@ class TagRecord:
     score: float
 
 
+def _norm(tag: str) -> str:
+    """Normalize tag for flexible space/underscore matching."""
+    return tag.strip().replace("_", " ")
+
+
 def extract_tags(
-    result_dict: dict[str, Any],
+    result_input: TagResult | dict[str, Any],
     *,
     output_filter: OutputFilterConfig,
 ) -> list[TagRecord]:
     """
-    Convert a TagResult.to_dict() payload into TagRecord objects.
+    Convert a TagResult or dictionary representation into TagRecord objects.
 
-    result_dict["tags"] has the form:
-        { category: { tag_name: score, ... }, ... }
+    Applies inclusions, exclusions, category limits, namespace prefixes,
+    and joint subset limits. Normalizes tags to support both underscores and spaces.
     """
-    tags_by_category: dict[str, dict[str, float]] = result_dict.get("tags", {})
+    # Normalize input into {category: {tag: score}} mapping
+    tags_by_category: dict[str, dict[str, float]] = {}
+    if isinstance(result_input, TagResult):
+        for cat_name, entries in result_input.categories.items():
+            tags_by_category[cat_name] = {e.tag: float(e.score) for e in entries}
+    elif isinstance(result_input, dict):
+        raw_cats = result_input.get("categories") or result_input.get("tags") or {}
+        if isinstance(raw_cats, dict):
+            for cat_name, entries in raw_cats.items():
+                if isinstance(entries, list):
+                    tags_by_category[cat_name] = {
+                        e["tag"]: float(e.get("score", 0.0)) for e in entries if isinstance(e, dict) and "tag" in e
+                    }
+                elif isinstance(entries, dict):
+                    tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
+
     records: list[TagRecord] = []
 
     categories = output_filter.output_categories
-    # sets for fast lookups
-    include_set = set(output_filter.include_tags)
-    exclude_set = set(output_filter.exclude_tags)
+    # sets for fast lookups (normalized)
+    include_set = {_norm(t) for t in output_filter.include_tags}
+    exclude_set = {_norm(t) for t in output_filter.exclude_tags}
 
-    # set of all tags governed by custom subset limits
-    subset_managed_tags = set()
-    for group in output_filter.max_tags_per_subset:
-        subset_managed_tags.update(group.tags)
+    # set of all tags governed by custom subset limits (normalized)
+    subset_managed_tags = {_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags}
+    prefix_overrides = {_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()}
 
     standard_records_by_category: dict[str, list[TagRecord]] = {}
     subset_records: list[TagRecord] = []
@@ -122,20 +152,21 @@ def extract_tags(
         standard_records_by_category[category] = []
 
         for raw_tag, score in tag_scores.items():
+            norm_tag = _norm(raw_tag)
+
             # 1. Check Exclusions: Drop if explicitly excluded
-            if raw_tag in exclude_set:
+            if norm_tag in exclude_set:
                 continue
 
             # 2. Check Overrides: Always keep if explicitly included
-            is_allowed = raw_tag in include_set
+            is_allowed = norm_tag in include_set
 
             # 3. Check Categories: If not explicitly included, fallback to standard category checks
-            if not is_allowed:
-                if not categories or category not in categories:
-                    continue
+            if not is_allowed and (not categories or category not in categories):
+                continue
 
             # Determine effective prefix (individual override takes precedence)
-            prefix = output_filter.tag_prefix_overrides.get(raw_tag, category_prefix)
+            prefix = prefix_overrides.get(norm_tag, category_prefix)
             record = TagRecord(
                 category=category,
                 raw_tag=raw_tag,
@@ -144,7 +175,7 @@ def extract_tags(
             )
 
             # Isolate subset-managed tags from standard category limits
-            if raw_tag in subset_managed_tags:
+            if norm_tag in subset_managed_tags:
                 subset_records.append(record)
             else:
                 standard_records_by_category[category].append(record)
@@ -160,8 +191,8 @@ def extract_tags(
 
     # apply subset limits to isolated tags
     for group in output_filter.max_tags_per_subset:
-        group_tags_set = set(group.tags)
-        matching_subset_records = [r for r in subset_records if r.raw_tag in group_tags_set]
+        group_tags_set = {_norm(t) for t in group.tags}
+        matching_subset_records = [r for r in subset_records if _norm(r.raw_tag) in group_tags_set]
 
         if len(matching_subset_records) > group.limit:
             matching_subset_records.sort(key=lambda r: r.score, reverse=True)
@@ -178,100 +209,86 @@ def extract_tags(
     return records
 
 
+# endregion
+
+
 # region Processor chain
 
 
-def build_result_processors(
-    model_id: str,
-    *,
-    prefer_tag_level_thresholds: bool,
-    tlt_relative_offset: float,
-    default_threshold: float,
-    category_thresholds: dict[str, float],
-    output_filter: OutputFilterConfig | None = None,
-) -> list[Any]:
+def resolve_effective_thresholds(
+    session: vibe.ModelSession,
+    output_filter: OutputFilterConfig,
+) -> tuple[dict[str, float], float]:
     """
-    Build the result processor list for one model session.
+    Resolve exact, unambiguous per-tag thresholds honoring precedence,
+    relative offsets, override_tlt, and category/tag-level fallbacks.
     """
-    import vibe
-    from vibe.result_processors import CleanTags, ScoreThresholds, TagLevelThresholds
+    use_tlt = output_filter.prefer_tag_level_thresholds and TagLevelThresholds.is_supported(session)
+    base_calibrated = dict(session.tagger.thresholds.values) if (use_tlt and session.tagger.thresholds) else {}
 
-    processors: list[Any] = []
+    rel_scale = 1.0 + output_filter.tag_level_threshold_relative_offset
 
-    use_tlt = False
-    if prefer_tag_level_thresholds:
-        try:
-            model_info = vibe.describe(model_id)
-            if TagLevelThresholds.__name__ in model_info.supported_processors:
-                use_tlt = True
+    # Normalized user configuration lookups
+    tag_overrides = {_norm(k): v for k, v in output_filter.tag_thresholds.items()}
+    cat_overrides = output_filter.category_thresholds
+
+    final_map: dict[str, float] = {}
+
+    if session.tagger.catalog:
+        for info in session.tagger.catalog.labels:
+            raw_name = info.name
+            norm_name = _norm(raw_name)
+            cat_name = info.category
+
+            tag_cfg = tag_overrides.get(norm_name)
+            cat_cfg = cat_overrides.get(cat_name)
+
+            # Case A: Tag has a model-calibrated threshold
+            if raw_name in base_calibrated:
+                if tag_cfg and tag_cfg.override_tlt:
+                    thresh = tag_cfg.threshold  # User tag override (unscaled)
+                elif cat_cfg and cat_cfg.override_tlt:
+                    thresh = cat_cfg.threshold  # User category override (unscaled)
+                else:
+                    thresh = base_calibrated[raw_name] * rel_scale  # Calibrated model value (scaled)
+
+            # Case B: Tag has NO calibrated threshold (fallback path)
             else:
-                logger.info(
-                    "Model %s does not support TagLevelThresholds; falling back to ScoreThresholds",
-                    model_id,
-                )
-        except Exception as exc:
-            logger.warning(
-                "Could not determine processor support for %s (%s); falling back to ScoreThresholds",
-                model_id,
-                exc,
-            )
-
-    if use_tlt:
-        tlt_kwargs: dict[str, Any] = {"threshold_relative_offset": tlt_relative_offset}
-        if output_filter is not None:
-            cat_overrides = {
-                cat: cfg.threshold for cat, cfg in output_filter.category_thresholds.items() if cfg.override_tlt
-            }
-            tag_overrides = {
-                tag: cfg.threshold for tag, cfg in output_filter.tag_thresholds.items() if cfg.override_tlt
-            }
-
-            try:
-                import inspect
-
-                sig = inspect.signature(TagLevelThresholds.__init__)
-                supported_params = list(sig.parameters.keys())
-            except Exception:
-                supported_params = []
-
-            # Find matching parameters
-            cat_param_name = next((p for p in supported_params if "category" in p), None)
-            tag_param_name = next((p for p in supported_params if "tag" in p), None)
-
-            if cat_overrides:
-                if cat_param_name:
-                    tlt_kwargs[cat_param_name] = cat_overrides
+                if tag_cfg:
+                    thresh = tag_cfg.threshold  # Tag-specific fallback
+                elif cat_cfg:
+                    thresh = cat_cfg.threshold  # Category-specific fallback
                 else:
-                    logger.warning(
-                        "Model %s: TagLevelThresholds does not support category overrides; override_tlt has no effect",
-                        model_id,
-                    )
+                    thresh = output_filter.default_threshold  # Global fallback
 
-            if tag_overrides:
-                if tag_param_name:
-                    tlt_kwargs[tag_param_name] = tag_overrides
-                else:
-                    logger.warning(
-                        "Model %s: TagLevelThresholds does not support tag overrides; override_tlt has no effect",
-                        model_id,
-                    )
+            final_map[raw_name] = thresh
+            final_map[norm_name] = thresh
 
-        processors.append(TagLevelThresholds(**tlt_kwargs))
-        logger.info("Model %s: using TagLevelThresholds(relative_offset=%.2f)", model_id, tlt_relative_offset)
-    else:
-        kwargs: dict[str, Any] = {"threshold": default_threshold}
-        if category_thresholds:
-            kwargs["category_thresholds"] = category_thresholds
-        processors.append(ScoreThresholds(**kwargs))
-        logger.info(
-            "Model %s: using ScoreThresholds(threshold=%.2f, category_overrides=%s)",
-            model_id,
-            default_threshold,
-            category_thresholds or "{}",
-        )
+    return final_map, output_filter.default_threshold
 
-    processors.append(CleanTags())
-    return processors
+
+def build_transform_pipeline(
+    session: vibe.ModelSession,
+    output_filter: OutputFilterConfig,
+) -> TransformPipeline:
+    """
+    Build the TransformPipeline for one model session using vibe-result-transforms.
+    """
+    threshold_map, global_fallback = resolve_effective_thresholds(session, output_filter)
+
+    transforms = [
+        # Relative offsets were already applied during resolution to calibrated tags only.
+        # Passing relative_offset=0.0 prevents double-scaling or scaling explicit user values.
+        TagLevelThresholds(
+            threshold_map=threshold_map,
+            fallback=global_fallback,
+        ),
+        CleanTags(),
+    ]
+    return TransformPipeline(transforms)
+
+
+# endregion
 
 
 # region Run statistics
@@ -290,12 +307,16 @@ class PhaseStats:
 
     # inference-specific
     total_tags_cached: int = 0
+    total_tags_enqueued: int = 0
 
-    # push-specific (interleaved)
+    # push-specific (preserved for API compatibility with CLI summary)
     push_ok: int = 0
     total_tags_pushed: int = 0
     push_errors: int = 0
-    hydrus_suspended: bool = False  # True if push was cut short mid-inference
+    hydrus_suspended: bool = False
+
+
+# endregion
 
 
 # region P1: Inference
@@ -308,23 +329,17 @@ async def infer_files(
     config: AppConfig,
     db: Database,
     progress: Progress,
-    run_id: str,
     force: bool,
-    hydrus: "HydrusClient | None" = None,
+    run_id: str | None = None,
+    hydrus: HydrusClient | None = None,
 ) -> PhaseStats:
     """
     Run inference for one model against all eligible files.
 
-    Saves results to inference_cache and file_model_results (infer_success).
-
-    If `hydrus` is provided, tags are pushed to Hydrus immediately after each
-    file is inferred (interleaved) using the shared push_service.
-
-    If `hydrus` is None (--infer-only), no push is attempted at all.
+    Saves raw predictions to inference_cache in the database and enqueues
+    the resulting tags into push_queue for asynchronous or trailing pushing.
     """
-    import vibe
-    from vibe.session import InferenceCancelled
-
+    del run_id, hydrus  # Retained in signature for compatibility; pushing is handled via push_queue
     stats = PhaseStats(model_id=model_cfg.model_id)
 
     # Build file source from the pre-resolved local paths.
@@ -350,26 +365,18 @@ async def infer_files(
             stats.skipped,
         )
 
-    # Drop files with no local path.
-    no_path = [fi for fi in to_process if not source.has_path(fi.file_hash)]
-    if no_path:
-        logger.warning("Model %s: %d files have no local path, skipping", model_cfg.model_id, len(no_path))
-        for fi in no_path:
-            db.upsert_known_file(fi.file_hash, mime=fi.mime, file_path=None)
-            db.record_infer_result(
-                run_id=run_id,
-                file_hash=fi.file_hash,
-                model_id=model_cfg.model_id,
-                success=False,
-                duration_ms=0,
-                error_message="No local file path available",
-            )
-            db.commit()
+    # Drop files with no local path or missing files
+    valid_process: list[FileInfo] = []
+    for fi in to_process:
+        if not source.has_path(fi.file_hash):
+            logger.warning("Model %s: %s has no local path, marking missing", model_cfg.model_id, fi.file_hash[:8])
+            db.upsert_file(fi.file_hash, mime=fi.mime, file_path=None, status="missing_on_disk")
             progress.tick(errors=1)
             stats.errors += 1
-    to_process = [fi for fi in to_process if source.has_path(fi.file_hash)]
+        else:
+            valid_process.append(fi)
 
-    if not to_process:
+    if not valid_process:
         return stats
 
     print()
@@ -379,18 +386,12 @@ async def infer_files(
         print(f"  {stats.skipped} items already cached")
         print()
 
-    eff = config.resolved_output_filter(model_cfg)
-    processors = build_result_processors(
-        model_cfg.model_id,
-        prefer_tag_level_thresholds=eff.prefer_tag_level_thresholds,
-        tlt_relative_offset=eff.tag_level_threshold_relative_offset,
-        default_threshold=eff.default_threshold,
-        category_thresholds={cat: cfg.threshold for cat, cfg in eff.category_thresholds.items()},
-        output_filter=eff,
-    )
+    eff_filter = config.resolved_output_filter(model_cfg)
+    output_services = config.resolved_output_tag_services(model_cfg)
+    configured_model_ids = [m.model_id for m in config.inference.models]
 
-    # Build inputs as (path_or_bytes, file_hash) tuples for inference backend.
-    inputs = [(source.get_input(fi.file_hash), fi.file_hash) for fi in to_process]
+    # Build inputs as (path, file_hash) tuples for inference backend.
+    inputs = [(source.get_input(fi.file_hash), fi.file_hash) for fi in valid_process]
 
     load_kwargs: dict[str, Any] = {
         "source": model_cfg.source,
@@ -401,41 +402,87 @@ async def infer_files(
         load_kwargs["backend"] = model_cfg.backend
 
     consecutive_errors = 0
-    # Tracks whether Hydrus is still reachable. Flipped to False on first push
-    # error; stays False for the remainder of inference to avoid spam.
-    hydrus_reachable = hydrus is not None
-
     listener = None
     stop_cancel = threading.Event()
 
     try:
         with vibe.load(model_cfg.model_id, **load_kwargs) as session:
             progress.reset_start_time()
+            pipeline = build_transform_pipeline(session, eff_filter)
 
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
-            async for chunk in session.infer_async(
-                inputs,
-                batch_size=model_cfg.batch_size,
-                result_processors=processors,
-            ):
+
+            async for chunk in session.infer_async(inputs, batch_size=model_cfg.batch_size):
                 batch_processed = 0
                 batch_errors = 0
                 last_file_hash = None
                 last_tag_count = 0
 
                 for item in chunk:
-                    file_hash: str = item.input_ref
+                    file_hash: str = str(item.input_ref)
                     fi = file_info_map[file_hash]
-                    t_start = time.monotonic()
 
                     try:
-                        result_dict: dict[str, Any] = item.result.to_dict()
+                        raw_result = item.result
+                        if not isinstance(raw_result, TagResult):
+                            raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
+
+                        # 1. Upsert known_file FIRST to satisfy foreign key constraint!
+                        db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
+
+                        # 2. Save un-culled raw predictions to SQLite cache (if enabled)
+                        db.save_raw_cache(
+                            file_hash,
+                            model_cfg.model_id,
+                            raw_result.to_dict(),
+                            enabled=config.database.cache_raw_predictions,
+                        )
+
+                        # 3. Apply VRT transform pipeline (thresholds + clean tags)
+                        filtered_result = pipeline(raw_result)
+
+                        # 4. Extract final tags (prefixes, subset limits, and inclusions/exclusions)
+                        tag_records = extract_tags(filtered_result, output_filter=eff_filter)
+                        prefixed_tags = [tr.prefixed_tag for tr in tag_records]
+
+                        # 5. Enqueue tags into push_queue for each configured service (merges tags automatically)
+                        for svc_key in output_services:
+                            db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
+
+                        # 6. Check if all models configured for this file are complete using has_raw_cache
+                        all_models_cached = True
+                        for m_id in configured_model_ids:
+                            if m_id == model_cfg.model_id:
+                                continue
+                            if not db.has_raw_cache(file_hash, m_id):
+                                all_models_cached = False
+                                break
+
+                        if all_models_cached:
+                            if config.hydrus.add_tags:
+                                a_cfg = config.hydrus.add_tags
+                                for svc_key in a_cfg.tag_service_keys:
+                                    db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
+                            if config.hydrus.remove_tags:
+                                r_cfg = config.hydrus.remove_tags
+                                for svc_key in r_cfg.tag_service_keys:
+                                    db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
+
+                        # Periodic commit to prevent disk sync thrashing
+                        db.batch_tick(batch_size=50)
+
+                        consecutive_errors = 0
+                        stats.ok += 1
+                        stats.total_tags_cached += len(raw_result.tags)
+                        stats.total_tags_enqueued += len(prefixed_tags)
+                        batch_processed += 1
+                        last_file_hash = file_hash
+                        last_tag_count = len(prefixed_tags)
+
                     except Exception as exc:
                         _handle_infer_error(
                             exc=exc,
                             file_hash=file_hash,
-                            model_id=model_cfg.model_id,
-                            run_id=run_id,
                             fi=fi,
                             db=db,
                             stats=stats,
@@ -448,60 +495,13 @@ async def infer_files(
                             return stats
                         continue
 
-                    duration_ms = int((time.monotonic() - t_start) * 1000)
-
-                    # Count tags that will be available for pushing.
-                    tag_records = extract_tags(result_dict, output_filter=eff)
-
-                    try:
-                        db.upsert_known_file(file_hash, mime=fi.mime, file_path=fi.local_path)
-                        db.save_inference_cache(file_hash, model_cfg.model_id, run_id, result_dict)
-                        db.record_infer_result(
-                            run_id=run_id,
-                            file_hash=file_hash,
-                            model_id=model_cfg.model_id,
-                            success=True,
-                            duration_ms=duration_ms,
-                        )
-                        db.commit()
-                    except Exception as exc:
-                        logger.error("DB write failed for %s: %s", file_hash[:8], exc)
-
-                    # region Interleaved push
-                    if hydrus_reachable:
-                        assert hydrus is not None
-                        prefixed_tags = [tr.prefixed_tag for tr in tag_records]
-
-                        # Delegate pushing entirely to push_service module
-                        from hyvis.push_service import push_and_cleanup_file
-
-                        success = push_and_cleanup_file(
-                            db=db,
-                            hydrus=hydrus,
-                            config=config,
-                            model_cfg=model_cfg,
-                            file_hash=file_hash,
-                            prefixed_tags=prefixed_tags,
-                        )
-                        if success:
-                            stats.push_ok += 1
-                            stats.total_tags_pushed += len(prefixed_tags)
-                        else:
-                            hydrus_reachable = False
-                            stats.push_errors += 1
-
-                    consecutive_errors = 0
-                    stats.ok += 1
-                    stats.total_tags_cached += len(tag_records)
-
-                    batch_processed += 1
-                    last_file_hash = file_hash
-                    last_tag_count = len(tag_records)
-
                 if last_file_hash is not None:
                     progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
                 if batch_processed or batch_errors:
                     progress.tick(processed=batch_processed, errors=batch_errors)
+
+            # Flush any uncommitted transactions from this run
+            db.commit()
 
     except InferenceCancelled:
         stats.aborted_early = True
@@ -522,13 +522,12 @@ async def infer_files(
         stop_cancel.set()
         if listener is not None:
             listener.join(timeout=1.0)
-
-    # Record whether Hydrus became unreachable mid-run so the caller can
-    # decide to do a backlog push pass.
-    if hydrus is not None and not hydrus_reachable:
-        stats.hydrus_suspended = True
+        db.commit()
 
     return stats
+
+
+# endregion
 
 
 # region Helpers
@@ -538,8 +537,6 @@ def _handle_infer_error(
     *,
     exc: Exception,
     file_hash: str,
-    model_id: str,
-    run_id: str,
     fi: FileInfo,
     db: Database,
     stats: PhaseStats,
@@ -547,18 +544,10 @@ def _handle_infer_error(
     msg = str(exc)
     logger.error("Inference error for %s: %s", file_hash[:8], msg)
     try:
-        db.upsert_known_file(file_hash, mime=fi.mime, file_path=fi.local_path)
-        db.record_infer_result(
-            run_id=run_id,
-            file_hash=file_hash,
-            model_id=model_id,
-            success=False,
-            duration_ms=0,
-            error_message=msg[:500],
-        )
-        db.commit()
+        db.upsert_file(file_hash, mime=fi.mime, file_path=fi.local_path, status="error")
+        db.batch_tick(batch_size=10)
     except Exception as db_exc:
-        logger.error("Failed to record error for %s in DB: %s", file_hash[:8], db_exc)
+        logger.error("Failed to update status for %s in DB: %s", file_hash[:8], db_exc)
     stats.errors += 1
 
 
@@ -588,7 +577,11 @@ def _start_cancel_listener_unix(
 
     def _listen() -> None:
         fd = sys.stdin.fileno()
-        old_attrs = termios.tcgetattr(fd)
+        try:
+            old_attrs = termios.tcgetattr(fd)
+        except Exception:
+            return
+
         try:
             tty.setcbreak(fd)
             while not stop_event.is_set():
@@ -636,3 +629,6 @@ def _start_cancel_listener_windows(
     thread = threading.Thread(target=_listen, name="cancel-key-listener", daemon=True)
     thread.start()
     return thread, stop_event
+
+
+# endregion

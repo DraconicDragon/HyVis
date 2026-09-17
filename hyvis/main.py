@@ -5,11 +5,9 @@ main.py Entry point.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import logging
 import signal
 import sys
-import uuid
 from pathlib import Path
 
 from hyvis.bg_imports import start_imports, wait_for_imports
@@ -61,16 +59,78 @@ async def main() -> int:
         print(_c(f"ERROR: Failed to parse config: {exc}", RED), file=sys.stderr)
         return 1
 
-    # Merge CLI overrides into the config object
+    # Merge CLI overrides into the Pydantic config object
     if args.api_url or args.api_key:
-        cfg = dataclasses.replace(
-            cfg,
-            hydrus=dataclasses.replace(
-                cfg.hydrus,
-                api_url=(args.api_url or cfg.hydrus.api_url or "").rstrip("/"),
-                api_key=args.api_key or cfg.hydrus.api_key or "",
-            ),
-        )
+        hydrus_updates: dict[str, str] = {}
+        if args.api_url:
+            hydrus_updates["api_url"] = args.api_url.rstrip("/")
+        if args.api_key:
+            hydrus_updates["api_key"] = args.api_key
+
+        new_hydrus = cfg.hydrus.model_copy(update=hydrus_updates)
+        cfg = cfg.model_copy(update={"hydrus": new_hydrus})
+
+    from hyvis.db import Database
+    from hyvis.extra_hashes import load_extra_hashes
+
+    # Resolve database path upfront
+    db_path = Path(cfg.database.path)
+    if not db_path.is_absolute():
+        db_path = Path.cwd() / db_path
+
+    # region Early Action: Clear Cache
+    if args.clear_cache:
+        with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+            row = db.conn.execute("SELECT COUNT(*) FROM inference_cache").fetchone()
+            count = row[0] if row else 0
+            if count == 0:
+                print("Inference cache is already empty.")
+                return 0
+
+            print(_c(f"  Warning: This will delete {count} cached inference records.", YELLOW))
+            print("  Re-running models on these files will require full GPU inference.")
+            if not args.yes:
+                try:
+                    ans = input("  Proceed? [y/N]: ").strip().lower()
+                    if ans not in ("y", "yes"):
+                        print(_c("\nAborted.", YELLOW))
+                        return 0
+                except (KeyboardInterrupt, EOFError):
+                    print(_c("\n\nAborted.", YELLOW))
+                    return 0
+
+            deleted = db.clear_raw_cache()
+            print(_c(f"\n  Successfully cleared {deleted} cached records and reclaimed database space.", GREEN))
+            return 0
+
+    # region Early Action: Push Only
+    if args.push_only:
+        with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+            pending_count = db.get_pending_push_count()
+            if pending_count == 0:
+                print("Push queue is empty. All tags are already in Hydrus.")
+                return 0
+
+            hydrus, _, _, _, _ = connect_hydrus(cfg, args)
+
+            print()
+            print(_c(f"  Pending push operations: {pending_count}", BOLD, CYAN))
+            print()
+            from hyvis.push_service import drain_push_queue
+
+            push_progress = Progress(total=pending_count)
+            push_progress.reset_start_time()
+            ok, err = await drain_push_queue(
+                db,
+                hydrus,
+                wait_for_hydrus=not args.no_wait,
+                progress=push_progress,
+            )
+            push_progress.finish()
+
+            print()
+            print(_c(f"  Push Complete: {ok} succeeded, {err} failed", BOLD, GREEN if err == 0 else YELLOW))
+            return 0 if err == 0 else 1
 
     # preload heavy imports in background
     backends = [m.backend for m in cfg.inference.models]
@@ -90,17 +150,6 @@ async def main() -> int:
     effective_log_level = args.log_level or cfg.hyvis.log_level
     setup_logging(effective_log_level)
 
-    # CLI overrides for Hydrus connection
-    if args.api_url or args.api_key:
-        cfg = dataclasses.replace(
-            cfg,
-            hydrus=dataclasses.replace(
-                cfg.hydrus,
-                api_url=(args.api_url or cfg.hydrus.api_url).rstrip("/"),
-                api_key=args.api_key or cfg.hydrus.api_key,
-            ),
-        )
-
     # --- Connect to Hydrus (always needed: confirmation screen + file paths) ---
     hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg, args)
 
@@ -114,7 +163,8 @@ async def main() -> int:
     if cfg.hydrus.tag_queries and not any(q.tags for q in cfg.hydrus.tag_queries):
         print(
             _c(
-                "  Warning: all configured Hydrus tag queries are empty; only extra hashes or page queries can produce files.",
+                "  Warning: all configured Hydrus tag queries are empty; "
+                + "only extra hashes or page queries can produce files.",
                 YELLOW,
             )
         )
@@ -130,8 +180,6 @@ async def main() -> int:
     mime_rejected = 0
     rejected_mimes: set[str] = set()
     all_rejected_hashes: list[str] = []
-
-    from hyvis.extra_hashes import load_extra_hashes
 
     # Collect candidate files
     print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
@@ -181,16 +229,32 @@ async def main() -> int:
             print(_c("\nAll files were filtered by MIME type. Nothing to do.", YELLOW))
             return 0
 
-        try:
-            file_infos = hydrus.resolve_paths(
-                file_infos,
-                progress_callback=lambda d, t: inline_progress("Resolving paths", d, t),
-            )
-        except HydrusConnectionError as exc:
-            print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", RED), file=sys.stderr)
-            return 1
+        # Smart Path Resolution: Check local SQLite cache first to avoid 50k+ HTTP calls!
+        with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+            cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
 
-        clear_line()
+        files_to_resolve_online = []
+        for fi in file_infos:
+            cached_p = cached_paths.get(fi.file_hash)
+            if cached_p and Path(cached_p).is_file():
+                fi.local_path = cached_p
+            else:
+                files_to_resolve_online.append(fi)
+
+        if files_to_resolve_online:
+            try:
+                hydrus.resolve_paths(
+                    files_to_resolve_online,
+                    progress_callback=lambda d, t: inline_progress("Resolving paths online", d, t),
+                )
+                clear_line()
+                with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+                    for fi in files_to_resolve_online:
+                        if fi.local_path:
+                            db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
+            except HydrusConnectionError as exc:
+                print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", RED), file=sys.stderr)
+                return 1
 
         no_path_count = sum(1 for fi in file_infos if not fi.local_path)
         if no_path_count:
@@ -220,7 +284,25 @@ async def main() -> int:
                 rejected_mimes.update(extra_r_mimes)
                 all_rejected_hashes.extend(extra_r_hashes)
 
-                extra_infos = hydrus.resolve_paths(extra_infos)
+                # Smart Path Resolution for extra hashes
+                with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+                    extra_cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in extra_infos])
+
+                extra_online_resolve = []
+                for fi in extra_infos:
+                    cached_p = extra_cached_paths.get(fi.file_hash)
+                    if cached_p and Path(cached_p).is_file():
+                        fi.local_path = cached_p
+                    else:
+                        extra_online_resolve.append(fi)
+
+                if extra_online_resolve:
+                    hydrus.resolve_paths(extra_online_resolve)
+                    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+                        for fi in extra_online_resolve:
+                            if fi.local_path:
+                                db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
+
             except HydrusConnectionError as exc:
                 print(_c(f"\nERROR: Hydrus connection lost while fetching extra hashes: {exc}", RED), file=sys.stderr)
                 return 1
@@ -233,7 +315,11 @@ async def main() -> int:
             missing_extra = len(extra_hash_values) - extra_count
             if missing_extra:
                 print(
-                    f"\n  {_c(f'Warning: {missing_extra} extra hash(es) were not found or have no usable local path', YELLOW)}"
+                    "\n  "
+                    + _c(
+                        f"Warning: {missing_extra} extra hash(es) were not found or have no usable local path",
+                        YELLOW,
+                    )
                 )
 
             if extra_infos:
@@ -291,7 +377,8 @@ async def main() -> int:
             if p.rejected_page_name and all_rejected_hashes:
                 print(
                     _c(
-                        f"  Sending {len(all_rejected_hashes)} file(s) to rejected preview page '{p.rejected_page_name}'...",
+                        f"  Sending {len(all_rejected_hashes)} file(s) "
+                        + f"to rejected preview page '{p.rejected_page_name}'...",
                         DIM,
                     )
                 )
@@ -324,30 +411,7 @@ async def main() -> int:
     # Wait for background libraries to finish loading before starting database work
     wait_for_imports()
 
-    # region Database
-    from hyvis.db import Database
-
-    run_id = str(uuid.uuid4())
-    try:
-        config_toml = args.config.read_text()
-    except OSError as exc:
-        print(_c(f"ERROR: Failed to read config file: {exc}", RED), file=sys.stderr)
-        return 1
-
-    # Apply overrides to the saved TOML string
-    if args.api_url or args.api_key:
-        from hyvis.config import override_toml_connection_settings
-
-        config_toml = override_toml_connection_settings(
-            config_toml,
-            api_url=args.api_url,
-            api_key=args.api_key,
-        )
-
-    db_path = Path(cfg.database.path)
-    if not db_path.is_absolute():
-        db_path = Path.cwd() / db_path
-
+    # region Database & Inference Execution
     from hyvis.inference import PhaseStats, infer_files
 
     total_infer_ok = total_infer_err = 0
@@ -355,13 +419,11 @@ async def main() -> int:
     total_skipped = 0
     run_status = "done"
 
-    with Database(db_path) as db:
-        db.start_run(run_id=run_id, config_toml=config_toml)
-
-        if db.has_pending_push():
+    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+        if db.has_pending_pushes():
             print(
                 _c(
-                    "  Note: there are files with unpushed inference results. Run 'hyvis-push-pending' to push them.",
+                    "  Note: there are files with unpushed inference results. Run with --push-only to push them.",
                     YELLOW,
                 )
             )
@@ -372,7 +434,7 @@ async def main() -> int:
                 import vibe
 
                 model_info = vibe.describe(model_cfg.model_id)
-                display_name = model_info.display_name
+                display_name = model_info.identity.display_name
             except Exception:
                 display_name = model_cfg.model_id
             print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id})', DIM)}")
@@ -388,71 +450,54 @@ async def main() -> int:
                     config=cfg,
                     db=db,
                     progress=progress,
-                    run_id=run_id,
                     force=args.force,
-                    hydrus=hydrus if mode == "default" else None,
                 )
                 progress.finish()
 
                 total_infer_ok += infer_stats.ok
                 total_infer_err += infer_stats.errors
                 total_skipped += infer_stats.skipped
-                total_push_ok += infer_stats.push_ok
-                total_push_err += infer_stats.push_errors
 
                 print(f"\n  {_c('Inference summary:', BOLD)}")
                 print(f"    Cached OK : {infer_stats.ok}")
                 print(f"    Errors    : {infer_stats.errors}")
                 print(f"    Skipped   : {infer_stats.skipped}")
-                print(f"    Tags      : {infer_stats.total_tags_cached}")
-
-                if infer_stats.hydrus_suspended:
-                    pending = infer_stats.ok - infer_stats.push_ok
-                    print(_c(f"  Interleaved push suspended. {pending} file(s) pending push.", YELLOW))
-                elif infer_stats.push_errors:
-                    print(_c(f"  {infer_stats.push_errors} file(s) failed to push to Hydrus.", YELLOW))
+                print(f"    Raw tags  : {infer_stats.total_tags_cached}")
+                print(f"    Enqueued  : {infer_stats.total_tags_enqueued}")
 
                 if infer_stats.aborted_early:
                     run_status = "aborted"
                     print(_c(f"\n  ABORTED: {infer_stats.abort_reason}", RED))
                     break
 
-    # region Trailing Push & Cleanup
-    if run_status == "done" and mode == "default":
-        with Database(db_path) as db:
-            has_pending = db.has_pending_push() or bool(db.get_pending_cleanup())
+        # region Trailing Push & Cleanup
+        if run_status == "done" and mode == "default":
+            pending_count = db.get_pending_push_count()
 
-        if has_pending:
-            print()
-            print(_c("  ══ Trailing Push & Cleanup ══════════════════════════════", BOLD, CYAN))
-            print()
-            from hyvis.push_service import run_push_and_cleanup
+            if pending_count > 0:
+                print()
+                print(_c("  ══ Pushing Results to Hydrus ══════════════════════════════", BOLD, CYAN))
+                print()
+                from hyvis.push_service import drain_push_queue
 
-            await run_push_and_cleanup(
-                db_path=db_path,
-                api_url_override=cfg.hydrus.api_url,
-                api_key_override=cfg.hydrus.api_key,
-                wait_for_hydrus=not args.no_wait,
-                wait_interval=5.0,
-                skip_confirm=True,  # Bypasses prompt since user confirmed at start
-            )
+                push_progress = Progress(total=pending_count)
+                push_progress.reset_start_time()
 
-    # Re-calculate totals from DB in case trailing push modified them
-    if mode in ("default", "infer_only"):
-        with Database(db_path) as db:
-            rows = db.conn.execute(
-                "SELECT infer_success, push_success FROM file_model_results WHERE run_id = ?", (run_id,)
-            ).fetchall()
+                p_ok, p_err = await drain_push_queue(
+                    db,
+                    hydrus,
+                    wait_for_hydrus=not args.no_wait,
+                    progress=push_progress,
+                )
+                total_push_ok += p_ok
+                total_push_err += p_err
 
-            total_infer_ok = sum(1 for r in rows if r[0] == 1)
-            total_infer_err = sum(1 for r in rows if r[0] == 0)
-            total_push_ok = sum(1 for r in rows if r[1] == 1)
-            total_push_err = sum(1 for r in rows if r[0] == 1 and r[1] == 0)
+                push_progress.finish()
 
     # region Run summary
     print_run_summary(
         run_status=run_status,
-        run_id=run_id,
+        run_id="(queue)",
         mode=mode,
         total_infer_ok=total_infer_ok,
         total_infer_err=total_infer_err,

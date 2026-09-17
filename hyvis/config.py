@@ -244,6 +244,16 @@ class HydrusConfig(BaseModel, frozen=True):
 
 class DatabaseConfig(BaseModel, frozen=True):
     path: str = "data/hyvis.db"
+    cache_raw_predictions: bool = Field(
+        default=True,
+        description="Save un-culled model predictions in the database to allow re-filtering without re-running inference.",
+    )
+    min_cache_score: float = Field(
+        default=0.01,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold to store in raw cache. Drops zero-confidence noise.",
+    )
 
 
 class HyvisConfig(BaseModel, frozen=True):
