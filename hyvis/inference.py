@@ -30,7 +30,7 @@ from vibe_result_transforms import (
     TransformPipeline,
 )
 
-from hyvis.logging_utils import BOLD, MAGENTA, _c
+from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c
 
 if TYPE_CHECKING:
     from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig
@@ -319,7 +319,7 @@ class PhaseStats:
 # endregion
 
 
-# region P1: Inference
+# region Inference
 
 
 async def infer_files(
@@ -407,6 +407,25 @@ async def infer_files(
 
     try:
         with vibe.load(model_cfg.model_id, **load_kwargs) as session:
+            exec_info = session.execution_info()
+            runtime = exec_info.get("runtime", {})
+
+            if session.backend == vibe.Backend.PYTORCH:
+                prec = runtime.get("precision", {})
+                device = runtime.get("device", "unknown")
+                compute = prec.get("compute_dtype", "unknown")
+                autocast = " (autocast)" if prec.get("autocast_enabled") else ""
+                runtime_str = f"PyTorch on {device} │ Precision: {compute}{autocast}"
+            elif session.backend == vibe.Backend.ONNX:
+                providers = runtime.get("providers", [])
+                active_ep = providers[0] if providers else "unknown"
+                runtime_str = f"ONNX on {active_ep}"
+            else:
+                logger.error("Unsupported backend: %s", session.backend)
+
+            print(f"    Runtime: {_c(runtime_str, GREEN)}")
+            print()
+
             progress.reset_start_time()
             pipeline = build_transform_pipeline(session, eff_filter)
 
@@ -542,6 +561,9 @@ def _handle_infer_error(
     stats: PhaseStats,
 ) -> None:
     msg = str(exc)
+    # Clear active progress line before printing error so it doesn't overwrite
+    sys.stdout.write("\r" + " " * 80 + "\r")
+    sys.stdout.flush()
     logger.error("Inference error for %s: %s", file_hash[:8], msg)
     try:
         db.upsert_file(file_hash, mime=fi.mime, file_path=fi.local_path, status="error")
