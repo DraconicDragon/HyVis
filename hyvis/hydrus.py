@@ -307,7 +307,9 @@ class HydrusClient:
             media_info = info_data.get("media", {}) or info_data.get("page_info", {}).get("media", {})
             if media_info.get("num_files", 0) > 0:
                 raise HydrusError(
-                    f"The page '{name}' is not empty. Please clear it first (select all > right click > remove)."
+                    f"The page '{name}' is not empty.\n"
+                    + "Due to API limitations HyVis cannot close or clear it automatically.\n"
+                    + "Please close it manually or clear it first (select all > right click > remove > selected)."
                 )
 
             self.add_files_to_page(target_key, hashes)
