@@ -8,7 +8,14 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 # region Constants
 
@@ -61,7 +68,13 @@ def _format_validation_error(e: ValidationError, path: Path | str) -> str:
 # region Config Models
 
 
-class TagQueryConfig(BaseModel, frozen=True):
+class StrictBaseModel(BaseModel):
+    """Base model that strictly forbids extra/unrecognized fields to catch typos."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class TagQueryConfig(StrictBaseModel):
     """One tag search query issued to Hydrus to collect candidate files."""
 
     tags: list[Any]
@@ -71,7 +84,7 @@ class TagQueryConfig(BaseModel, frozen=True):
     """Tag service keys to search within. Empty → Hydrus default (all known tags)."""
 
 
-class PageQueryConfig(BaseModel, frozen=True):
+class PageQueryConfig(StrictBaseModel):
     """Target a specific open page in the Hydrus client."""
 
     name: str = Field(min_length=1)
@@ -87,7 +100,7 @@ class PageQueryConfig(BaseModel, frozen=True):
         return self
 
 
-class PreviewConfig(BaseModel, frozen=True):
+class PreviewConfig(StrictBaseModel):
     """Target specific open pages for file previewing before inference."""
 
     page_name: str | None = None
@@ -107,27 +120,27 @@ class PreviewConfig(BaseModel, frozen=True):
         return self
 
 
-class OutputTagServices(BaseModel, frozen=True):
+class OutputTagServices(StrictBaseModel):
     """A Hydrus tag service where inference results will be written."""
 
     keys: list[str] = Field(default_factory=list, min_length=1)
 
 
-class AddTagConfig(BaseModel, frozen=True):
+class AddTagConfig(StrictBaseModel):
     """Rule specifying tags to add to successfully processed files."""
 
     tags: list[str] = Field(min_length=1)
     tag_service_keys: list[str] = Field(min_length=1)
 
 
-class RemoveTagConfig(BaseModel, frozen=True):
+class RemoveTagConfig(StrictBaseModel):
     """Rule specifying tags to remove from successful files."""
 
     tags: list[str] = Field(min_length=1)
     tag_service_keys: list[str] = Field(min_length=1)
 
 
-class CategoryThresholdConfig(BaseModel, frozen=True):
+class CategoryThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one output category.
 
@@ -140,7 +153,7 @@ class CategoryThresholdConfig(BaseModel, frozen=True):
     override_tlt: bool = False
 
 
-class TagThresholdConfig(BaseModel, frozen=True):
+class TagThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one specific tag.
 
@@ -153,7 +166,7 @@ class TagThresholdConfig(BaseModel, frozen=True):
     override_tlt: bool = False
 
 
-class TagSubsetConfig(BaseModel, frozen=True):
+class TagSubsetConfig(StrictBaseModel):
     """
     A collection of tags subject to a collective output limit.
     Used to isolate and limit tags that belong to the same logical category.
@@ -163,7 +176,7 @@ class TagSubsetConfig(BaseModel, frozen=True):
     limit: int = Field(default=1, ge=1)
 
 
-class OutputFilterConfig(BaseModel, frozen=True):
+class OutputFilterConfig(StrictBaseModel):
     """
     Controls which tags are emitted and how they are transformed.
 
@@ -209,7 +222,7 @@ class OutputFilterConfig(BaseModel, frozen=True):
         return self
 
 
-class ModelConfig(BaseModel, frozen=True):
+class ModelConfig(StrictBaseModel):
     """Per-model configuration."""
 
     model_id: str = Field(min_length=1)
@@ -223,13 +236,14 @@ class ModelConfig(BaseModel, frozen=True):
     output_tag_services: OutputTagServices | None = None
 
 
-class InferenceConfig(BaseModel, frozen=True):
+class InferenceConfig(StrictBaseModel):
     """Model list and per-model configuration."""
 
     models: list[ModelConfig] = Field(min_length=1)
+    infer_only: bool = Field(default=False, description="Run model inference only; do not push results to Hydrus.")
 
 
-class HydrusConfig(BaseModel, frozen=True):
+class HydrusConfig(StrictBaseModel):
     """Hydrus connection + search/preview/output settings."""
 
     api_url: str = Field(min_length=1)
@@ -243,7 +257,7 @@ class HydrusConfig(BaseModel, frozen=True):
     remove_tags: RemoveTagConfig | None = None
 
 
-class DatabaseConfig(BaseModel, frozen=True):
+class DatabaseConfig(StrictBaseModel):
     path: str = "data/hyvis.db"
     cache_raw_predictions: bool = Field(
         default=True,
@@ -257,7 +271,7 @@ class DatabaseConfig(BaseModel, frozen=True):
     )
 
 
-class HyvisConfig(BaseModel, frozen=True):
+class HyvisConfig(StrictBaseModel):
     """Application-level settings."""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
@@ -270,7 +284,7 @@ class HyvisConfig(BaseModel, frozen=True):
         return v
 
 
-class AppConfig(BaseModel, frozen=True):
+class AppConfig(StrictBaseModel):
     hydrus: HydrusConfig
     inference: InferenceConfig
     output_filter: OutputFilterConfig
