@@ -13,7 +13,7 @@ from pathlib import Path
 from hyvis.bg_imports import start_imports, wait_for_imports
 from hyvis.cli import parse_args
 from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
-from hyvis.hydrus import HydrusConnectionError, HydrusError, validate_service_keys
+from hyvis.hydrus import FileInfo, HydrusConnectionError, HydrusError, validate_service_keys
 from hyvis.logging_utils import (  # noqa: F401
     BOLD,
     CYAN,
@@ -327,8 +327,18 @@ async def main() -> int:
 
             if extra_infos:
                 file_infos.extend(extra_infos)
+
+                # Deduplicate file_infos by file_hash preserving first-seen order
+                seen_hashes: set[str] = set()
+                unique_file_infos: list[FileInfo] = []
+                for fi in file_infos:
+                    if fi.file_hash not in seen_hashes:
+                        seen_hashes.add(fi.file_hash)
+                        unique_file_infos.append(fi)
+                file_infos = unique_file_infos
+
                 actionable_count = sum(1 for fi in file_infos if fi.local_path)
-                touched_hashes.update(fi.file_hash for fi in extra_infos if fi.local_path)
+                touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
         else:
             print(_c("  Warning: extra hash file was empty.", YELLOW))
 
