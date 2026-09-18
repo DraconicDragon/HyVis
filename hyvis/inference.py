@@ -396,7 +396,7 @@ async def infer_files(
     configured_model_ids = [m.model_id for m in config.inference.models]
 
     # Build inputs as (path, file_hash) tuples for inference backend.
-    inputs = [(source.get_input(fi.file_hash), fi.file_hash) for fi in valid_process]
+    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in valid_process}
 
     load_kwargs: dict[str, Any] = {
         "source": model_cfg.source,
