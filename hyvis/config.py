@@ -247,7 +247,7 @@ class OutputFilterConfig(StrictBaseModel):
 
     # --- Threshold settings ---
     prefer_tag_level_thresholds: bool = True
-    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, lt=1.0)
+    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, le=1.0)
     default_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     output_categories: list[str] = Field(default_factory=list)
     include_tags: list[str] = Field(default_factory=list)
