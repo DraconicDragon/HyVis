@@ -51,16 +51,17 @@ def setup_logging(level: str) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(ColorFormatter("%(asctime)s  %(levelname)s %(name)s  %(message)s", datefmt="%H:%M:%S"))
 
-    logging.basicConfig(level=logging.WARNING, handlers=[handler])
     root = logging.getLogger()
-    root.setLevel(getattr(logging, level.upper()))
-    logging.getLogger("vibe").setLevel(getattr(logging, level.upper()))
+    root.handlers.clear()
+    root.addHandler(handler)
+    target_level = getattr(logging, level.upper(), logging.WARNING)
+    root.setLevel(target_level)
 
-    # testing log messages, only log if loglevel is debug
-    if level.upper() == "DEBUG":
-        logger = logging.getLogger("hyvis")
-        logger.debug("Logging initialized successfully")
-        logger.info("Logging initialized successfully")
-        logger.warning("Logging initialized successfully")
-        logger.error("Logging initialized successfully")
-        logger.critical("Logging initialized successfully")
+    # Keep vibe aligned with hyvis
+    logging.getLogger("vibe").setLevel(target_level)
+    logging.getLogger("vibe_result_transforms").setLevel(target_level)
+
+    # Silence noisy third-party libraries even in DEBUG mode
+    logging.getLogger("PIL").setLevel(logging.INFO)
+    logging.getLogger("urllib3").setLevel(logging.INFO)
+    #logging.getLogger("huggingface_hub").setLevel(logging.WARNING)

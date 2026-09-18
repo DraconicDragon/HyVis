@@ -1,15 +1,30 @@
+"""
+Script to automatically generate SUPPORTED_MODELS.md for HyVis using vibe metadata.
+"""
+
 from __future__ import annotations
 
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import vibe
+from vibe import OutputKind, StandardConsumerSettingId
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _find_root() -> Path:
+    """Find repository root by looking for pyproject.toml or SUPPORTED_MODELS.md."""
+    cur = Path(__file__).resolve().parent
+    for p in [cur, *cur.parents]:
+        if (p / "pyproject.toml").exists() or (p / "SUPPORTED_MODELS.md").exists():
+            return p
+    return Path(__file__).resolve().parents[1]
+
+
+ROOT = _find_root()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
 
 OUTPUT_PATH = ROOT / "SUPPORTED_MODELS.md"
 GITHUB_HF_BASE = "https://huggingface.co"
@@ -29,68 +44,105 @@ def _code(text: str) -> str:
 
 
 def _slugify(text: str) -> str:
-    """Creates a markdown-compatible anchor slug for headers or model IDs."""
-    return text.lower().replace(" ", "-").replace("/", "").replace("(", "").replace(")", "")
+    """Creates a GitHub/markdownlint-compatible anchor slug."""
+    slug = text.lower()
+    # Remove all punctuation (apostrophes, quotes, parentheses, brackets, etc.)
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    # Replace spaces with hyphens
+    slug = re.sub(r"\s+", "-", slug)
+    return slug
 
 
-def _format_backends(info: vibe.ModelPluginInfo) -> str:
+def _format_backends(desc: vibe.ModelDescriptor) -> str:
+    backends = sorted({v.backend.value if hasattr(v.backend, "value") else str(v.backend) for v in desc.variants})
     badges = []
-    for backend in info.supported_backends:
+    for backend in backends:
         if backend == "pytorch":
             badges.append("![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white)")
         elif backend == "onnx":
             badges.append("![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white)")
         else:
-            badges.append(_code(backend.value if hasattr(backend, "value") else str(backend)))
+            badges.append(_code(backend))
     return " ".join(badges) if badges else "—"
 
 
-def _format_optional_text(value: str | None) -> str:
-    if value is None or not value.strip():
+def _format_recommended(desc: vibe.ModelDescriptor) -> str:
+    """Format author-recommended baseline and category thresholds compactly."""
+    spec = desc.get_consumer_setting(StandardConsumerSettingId.TAG_FILTER)
+    if not spec or not spec.recommended:
         return "—"
-    return _escape_markdown_cell(value.strip())
 
-
-def _format_model_row(info: vibe.ModelPluginInfo) -> str:
-    """Formats a single model's metadata as a row in a streamlined markdown table."""
-    if info.default_hf_repo:
-        repo_url = f"{GITHUB_HF_BASE}/{info.default_hf_repo}"
-        display_name = f"**{_link(info.display_name, repo_url)}**"
+    rec = spec.recommended
+    if hasattr(rec, "global_threshold"):
+        global_th = rec.global_threshold
+        cat_ths = dict(getattr(rec, "category_thresholds", {}))
+    elif isinstance(rec, dict):
+        global_th = rec.get("global_threshold")
+        cat_ths = dict(rec.get("category_thresholds", {}))
     else:
-        display_name = f"**{_escape_markdown_cell(info.display_name)}**"
+        return "—"
+
+    parts: list[str] = []
+    if global_th is not None:
+        parts.append(f"`{global_th}`")
+
+    if cat_ths:
+        cat_items = []
+        for cat, th in cat_ths.items():
+            cat_name = cat.value if hasattr(cat, "value") else str(cat)
+            cat_items.append(f"{cat_name}: `{th}`")
+        # Subordinate category overrides using <small> to keep table rows clean
+        parts.append(f"<small>({', '.join(cat_items)})</small>")
+
+    if not parts:
+        return "—"
+
+    return "<br>".join(parts)
+
+
+def _format_model_row(desc: vibe.ModelDescriptor) -> str:
+    """Formats a single model's metadata as a row in a streamlined markdown table."""
+    model_id = desc.identity.model_id
+    display_name = desc.identity.display_name
+
+    if desc.default_repo_id:
+        repo_url = f"{GITHUB_HF_BASE}/{desc.default_repo_id}"
+        name_cell = f"**{_link(display_name, repo_url)}**"
+    else:
+        name_cell = f"**{_escape_markdown_cell(display_name)}**"
 
     # Assign an anchor to the model ID so recommended models can link to it directly
-    model_id_slug = _slugify(info.model_id)
-    model_id = f'<a id="{model_id_slug}"></a>`{info.model_id}`'
+    model_id_slug = _slugify(model_id)
+    id_cell = f'<a id="{model_id_slug}"></a>`{model_id}`'
 
-    backends = _format_backends(info)
+    backends = _format_backends(desc)
 
-    has_tlt = "TagLevelThresholds" in info.supported_processors
+    has_tlt = "ThresholdProvider" in desc.capabilities
     tlt_val = "✔️" if has_tlt else "—"
 
-    # description = _format_optional_text(info.description)
+    recommended = _format_recommended(desc)
 
     columns = [
-        display_name,
-        model_id,
+        name_cell,
+        id_cell,
         backends,
         tlt_val,
-        # description,
+        recommended,
     ]
     return "| " + " | ".join(columns) + " |"
 
 
 def build_markdown() -> str:
-    infos = [
-        info
-        for info in vibe.describe_all()
-        if info.output_type == "tags" and not info.model_id.startswith("generic-timm")
+    descriptors = [
+        desc
+        for desc in vibe.describe_all()
+        if desc.output.kind == OutputKind.TAGS and not desc.identity.model_id.startswith("generic-timm")
     ]
-    infos.sort(key=lambda info: info.model_id)
+    descriptors.sort(key=lambda d: d.identity.model_id)
 
-    grouped: dict[str, list[vibe.ModelPluginInfo]] = defaultdict(list)
-    for info in infos:
-        grouped[info.family_name].append(info)
+    grouped: dict[str, list[vibe.ModelDescriptor]] = defaultdict(list)
+    for desc in descriptors:
+        grouped[desc.family_name].append(desc)
 
     sorted_families = sorted(grouped.keys())
 
@@ -99,7 +151,7 @@ def build_markdown() -> str:
         "",
         f"This file is generated by [{_code('gen_supported_models.py')}](.github/scripts/gen_supported_models.py).",
         "",
-        f"Total models: {len(infos)}.",
+        f"Total models: {len(descriptors)}.",
         "",
         "The currently supported models are trained with exclusive focus on illustrations and artwork.",
         "Performance will naturally degrade when processing photographic or real-world content, though results may still be usable.",
@@ -111,12 +163,13 @@ def build_markdown() -> str:
         "  - [Danbooru Taggers](#danbooru-taggers)",
         "  - [e621 Taggers](#e621-taggers)",
         "  - [Hugging Face Gated Repositories (AnimeTimm Models)](#hugging-face-gated-repositories-animetimm-models)",
+        "  - [Special Mentions](#special-mentions)",
     ]
 
     for family_name in sorted_families:
         count = len(grouped[family_name])
         slug = _slugify(family_name)
-        lines.append(f"- [{family_name} ({count} models)](#{slug})")
+        lines.append(f"- [{family_name} ({count} model{'s' if count != 1 else ''})](#{slug})")
 
     lines.append("")
     lines.append("---")
@@ -132,10 +185,10 @@ def build_markdown() -> str:
             "| Model Name | Model ID | Description |",
             "| :--- | :--- | :--- |",
             f"| **WD Eva02 Large v3** | [{_code('wd-eva02-large-v3')}](#{_slugify('wd-eva02-large-v3')}) | Good ol' reliable. With a bit of emphasis on old though. |",
-            f"| **WD SwinV2 v3** | [{_code('wd-swinv2-v3')}](#{_slugify('wd-swinv2-v3')}) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter.  |",
+            f"| **WD SwinV2 v3** | [{_code('wd-swinv2-v3')}](#{_slugify('wd-swinv2-v3')}) | Like WD Eva02 Large v3: Good ol' reliable - but roughly 2x lighter. |",
             f"| **AnimeTimm CaFormer B36** | [{_code('at-caformer-b36-dbv4-full')}](#{_slugify('at-caformer-b36-dbv4-full')}) | Lightweight option with an updated dataset. A tiny bit heavier than SwinV2 |",
             f"| **AnimeTimm Eva02 Large Patch14 448** | [{_code('at-eva02-large-patch14-448-dbv4-full')}](#{_slugify('at-eva02-large-patch14-448-dbv4-full')}) | As heavy as WD Eva02 Large v3, but with updated data. |",
-            f"| **AnimeTimm ConvNeXtV2 Huge** | [{_code('at-convnextv2-huge-dbv4-full')}](#{_slugify('at-convnextv2-huge-dbv4-full')}) | Heaviest + Largest + Latest available model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only.|",
+            f"| **AnimeTimm ConvNeXtV2 Huge** | [{_code('at-convnextv2-huge-dbv4-full')}](#{_slugify('at-convnextv2-huge-dbv4-full')}) | Heaviest & Largest available danbooru tagger model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only. |",
             "",
             "> Newer and/or larger models do not automatically guarantee better accuracy.",
             "",
@@ -143,7 +196,8 @@ def build_markdown() -> str:
             "",
             "| Model Name | Model ID | Description |",
             "| :--- | :--- | :--- |",
-            f"| **Hydra 3.5** | [{_code('hydra-3.5')}](#{_slugify('hydra-3.5')}) | The successor to [JTP-3](#{_slugify('jtp-3')}), the only supported models that output e621 tags, and the latest and possibly best to do so, too. PyTorch only. |",
+            f"| **Hydra 3.5** | [{_code('hydra-3.5')}](#{_slugify('hydra-3.5')}) | The successor to [JTP-3](#{_slugify('jtp-3')}), the only supported models that output e621 tags, and the latest and possibly best to do so, too "
+            + f"(with a special exception being [{_code('taggerine')}](#{_slugify('special-mentions')})). PyTorch only. |",
             "",
             "### Hugging Face Gated Repositories (AnimeTimm Models)",
             "",
@@ -151,6 +205,13 @@ def build_markdown() -> str:
             "",
             "> [!NOTE]",
             "> Requesting access explicitly shares your email address with the repository owner. If you prefer to avoid this, maybe you can find a kind soul who will reupload the model.",
+            "",
+            "### Special Mentions",
+            "",
+            "| Model Name | Model ID | Description |",
+            "| :--- | :--- | :--- |",
+            f"| **Taggerine** | [{_code('taggerine')}](#{_slugify('taggerine')}) | A large (min. 6GB RAM/VRAM required by default) with the most tags trained out of any supported model (74 625) that outputs *both* Danbooru AND E621 tags (e621 tags take precedence). "
+            + "<br /> I haven't really tested this, it's likely inaccurate compared to the rest but being able to output so many tags may just be what you want. |",
             "",
             "---",
             "",
@@ -164,50 +225,43 @@ def build_markdown() -> str:
             "- **Model Name:** Just a human-friendly display name. Click it to go to a model's source HuggingFace repository.",
             "- **Model ID:** Unique identifier to use in HyVis config to select which model to run.",
             "- **Backends:** ![ONNX](https://img.shields.io/badge/-%23005C99?logo=onnx&logoColor=white) = ONNX | ![PyTorch](https://img.shields.io/badge/-%23EE4C2C?logo=pytorch&logoColor=white) = PyTorch",
-            "- **TLT (Tag-Level Thresholds):** Indicates support for per-tag thresholds.",
-            # "- **Description Column:** WIP, currently not really useful but maybe in the future, or not, open for ideas. My current idea is to replace description with keywords instead",
+            "- **TLT (Tag-Level Thresholds):** Indicates support for calibrated per-tag decision thresholds.",
+            "- **Recommended:** Model author or community recommended baseline threshold and category overrides.",
             "",
         ]
     )
 
     # Generate Table Sections
     for family_name in sorted_families:
-        family_models = sorted(grouped[family_name], key=lambda info: info.display_name.lower() or info.model_id)
+        family_models = sorted(
+            grouped[family_name],
+            key=lambda d: d.identity.display_name.lower() or d.identity.model_id,
+        )
 
-        # todo: keep description stuff for now, but maybe itll change in future
-        # lines.extend(
-        #     [
-        #         f"## {family_name}",
-        #         "",
-        #         "| Model Name | Model ID | Backends | [TLT](#legend) | Description |",
-        #         "| :--- | :--- | :--- | :---: | :--- |",
-        #     ]
-        # )
         lines.extend(
             [
                 f"## {family_name}",
                 "",
-                "| Model Name | Model ID | Backends | [TLT](#legend) |",
-                "| :--- | :--- | :--- | :---: |",
+                "| Model Name | Model ID | Backends | [TLT](#legend) | [Recommended](#legend) |",
+                "| :--- | :--- | :--- | :---: | :--- |",
             ]
         )
 
-        for info in family_models:
-            lines.append(_format_model_row(info))
+        for desc in family_models:
+            lines.append(_format_model_row(desc))
 
-        lines.extend(["", ""])
+        lines.extend([""])
 
     lines.extend(
         [
-            "",
             "<details><summary>Experimental/Unsupported</summary>",
             "",
             "It is possible to set `source` in the config to a HuggingFace repo ID, and model_id to: `generic-timm-tags`.",
-            "This feature is completely untested and unsupported, but in theory it will allow you to use any model from Huggingface, "
-            "so long as it is compatible with the `timm` library, which would handle all the architecture stuff. "
+            "This feature is completely untested and unsupported, but in theory it will allow you to use any model from Huggingface, ",
+            "so long as it is compatible with the `timm` library, which would handle all the architecture stuff. ",
             "This would be useful when attempting to use custom models not directly supported by HyVis and exposed as model ID.",
-            "I belive this to be a handy feature and would allow the model support to go with the times without requiring a HyVis update. "
-            "If you decide to try it out and encounter issues, please open an issue - "
+            "I believe this to be a handy feature and would allow the model support to go with the times without requiring a HyVis update. ",
+            "If you decide to try it out and encounter issues, please open an issue - ",
             "However I cannot promise fixes on this since, at least at the time of writing this, I am not really interested in messing with this.",
             "</details>",
             "",

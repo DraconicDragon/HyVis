@@ -25,6 +25,7 @@ HyVis application settings.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `log_level` | String | No | Logging verbosity. Options: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. Defaults to `"WARNING"`. |
+| `infer_only` | Boolean | No | Run model inference and cache predictions, but do not push any tags to Hydrus. Can be overridden using the `--infer-only` CLI flag. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[hyvis]</code> Example</summary>
@@ -32,6 +33,7 @@ HyVis application settings.
 ```toml
 [hyvis]
 log_level = "WARNING"
+infer_only = false
 ```
 
 </details>
@@ -49,6 +51,7 @@ Configuration for connecting to your Hydrus client and defining tag/page query a
 | :-------- | :--- | :------- | :---------- |
 | `api_url` | String | **Yes** | The base URL of your Hydrus client API |
 | `api_key` | String | **Yes** | Your Hydrus API key with appropriate permissions to read files and write tags. |
+| `no_wait` | Boolean | No | Do not wait for Hydrus if it is offline or unreachable; fail fast instead. Can be overridden using the `--no-wait` CLI flag. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[hydrus]</code> Example</summary>
@@ -57,6 +60,7 @@ Configuration for connecting to your Hydrus client and defining tag/page query a
 [hydrus]
 api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
+no_wait = false
 ```
 
 </details>
@@ -207,7 +211,7 @@ tag_service_keys = ["my_service_key_here"]
 
 Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing the `hyvis-push-pending` tool.
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing `hyvis <config> --push-only`.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
@@ -220,7 +224,7 @@ If tag removal fails for any reason, the tags remain in Hydrus. On the next run,
 ```toml
 [hydrus.remove_tags]
 tags = ["temp:tagme", "queue:ai processing"]
-tag_service_keys = []
+tag_service_keys = ["my_service_key_here"]
 ```
 
 </details>
@@ -358,6 +362,30 @@ meta = "meta:"
 
 </details>
 
+### `[output_filter.tag_replacements]`
+
+> Required: No
+
+Replaces specific predicted tag names with alternative names before prefixing and output limits are applied. Useful for converting abbreviated ratings (e.g., `g` → `general`) or mapping tags to your preferred spelling.
+
+- **Keys**: Predicted tag name (supports spaces or underscores)
+- **Values**: Replacement tag name
+
+<details>
+<summary>💡 View <code>[output_filter.tag_replacements]</code> Example</summary>
+
+```toml
+[output_filter.tag_replacements]
+"rating:g" = "general" 
+# NOTE: If rating:g is part of rating category for example, and category prefix mapping or such is set (eg r: for rating category)
+# then the result tag will be r:general instead of r:rating:g
+"rating:s" = "sensitive"
+"q" = "questionable"
+"looking over shoulder" = "looking back"
+```
+
+</details>
+
 ### `[output_filter.max_tags_per_category]`
 
 > Required: No
@@ -476,6 +504,8 @@ Settings for the application's local state and cache storage.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
+| `cache_raw_predictions` | Boolean | No | Saves raw, un-culled* model predictions to the DB. Allows instant re-filtering when thresholds change without re-running GPU inference. \*By default there's minimal culling, see `min_cache_score`. <br> Defaults to `true`. |
+| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `1.0`) saved to the raw cache. **Warning**: setting this below 0.01 will increase DB size by a lot. Cache can be cleared with `--clear-cache` CLI arg. <br> Defaults to `0.01`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
@@ -483,6 +513,8 @@ Settings for the application's local state and cache storage.
 ```toml
 [database]
 path = "data/hyvis.db"
+cache_raw_predictions = true
+min_cache_score = 0.01
 ```
 
 </details>

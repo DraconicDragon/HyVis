@@ -277,6 +277,11 @@ def print_confirmation(
         for cat, cfg_ in of.category_thresholds.items():
             tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
             print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
+    if of.tag_thresholds:
+        print("    tag thresholds")
+        for tag, cfg_ in of.tag_thresholds.items():
+            tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
+            print(f"      {tag:<24} {cfg_.threshold:.2f}{tlt_note}")
     cats = of.output_categories
     print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
@@ -299,6 +304,17 @@ def print_confirmation(
             display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
             print(f"      {cat:<14} → {display_prefix}")
         print()
+    if of.tag_prefix_overrides:
+        print("    tag prefix overrides")
+        for tag, prefix in of.tag_prefix_overrides.items():
+            display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
+            print(f"      {tag:<24} → {display_prefix}")
+        print()
+    if of.tag_replacements:
+        print("    tag replacements")
+        for src, dst in of.tag_replacements.items():
+            print(f"      {src:<14} → '{dst}'")
+        print()
 
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED, BOLD))
@@ -307,7 +323,7 @@ def print_confirmation(
             _c(
                 "      Tip: File paths are resolved. You may close Hydrus now to free up memory if needed.\n"
                 + "             While Hydrus is closed/unreachable, no tags can be pushed to Hydrus, but inference will continue.\n"
-                + "             After run completion you may run 'hyvis-push-pending' to push any pending tags to Hydrus.",
+                + "             After run completion you may run 'hyvis <config> --push-only' to push any pending tags to Hydrus.",
                 YELLOW,
             )
         )
@@ -336,5 +352,5 @@ def print_run_summary(
     if mode == "default":
         print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
         if total_push_err:
-            print(_c("  Tip: Run 'hyvis-push-pending' to retry failed pushes and process cleanups.", DIM))
+            print(_c("  Tip: Run 'hyvis <config> --push-only' to retry failed pushes and process cleanups.", DIM))
     print()

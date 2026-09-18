@@ -4,11 +4,19 @@ config.py Configuration models and TOML loading via Pydantic V2.
 
 from __future__ import annotations
 
+import difflib
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 # region Constants
 
@@ -29,10 +37,50 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
 )
 
 
+def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
+    """Recursively extract a BaseModel subclass from generic containers or unions."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    origin = get_origin(annotation)
+    if origin is not None:
+        for arg in get_args(annotation):
+            res = _extract_model_cls(arg)
+            if res is not None:
+                return res
+    return None
+
+
+def _get_valid_fields_for_loc(root_cls: type[BaseModel], loc: tuple[Any, ...]) -> list[str]:
+    """Traverse the schema model hierarchy along loc[:-1] to extract valid field names."""
+    if not loc:
+        return list(root_cls.model_fields.keys())
+
+    current: type[BaseModel] | None = root_cls
+
+    for segment in loc[:-1]:
+        if current is None:
+            break
+
+        if isinstance(segment, int):
+            # Indexing into a list; current remains the item model class
+            continue
+
+        segment_str = str(segment)
+        field_info = current.model_fields.get(segment_str)
+        if field_info is not None:
+            current = _extract_model_cls(field_info.annotation)
+        else:
+            current = None
+
+    if current is not None and issubclass(current, BaseModel):
+        return list(current.model_fields.keys())
+    return []
+
+
 def _format_validation_error(e: ValidationError, path: Path | str) -> str:
     import pydantic
 
-    from hyvis.logging_utils import BOLD, CYAN, RED, _c
+    from hyvis.logging_utils import BOLD, CYAN, RED, YELLOW, _c
 
     lines = [_c(f"Configuration error in {path}:", RED, BOLD), ""]
 
@@ -43,15 +91,32 @@ def _format_validation_error(e: ValidationError, path: Path | str) -> str:
     version_tag = f"{major}.{minor}"
 
     for err in e.errors():
-        loc = ".".join(str(p) for p in err["loc"])
+        loc_tuple = err["loc"]
+        loc_str = ".".join(str(p) for p in loc_tuple)
         msg = err["msg"]
         err_type = err["type"]
 
         url = f"https://errors.pydantic.dev/{version_tag}/v/{err_type}"
         hyperlink = f"\033]8;;{url}\033\\{err_type}\033]8;;\033\\"
 
-        lines.append(_c(loc, BOLD, CYAN))
-        lines.append(f"  {msg}")
+        lines.append(_c(loc_str, BOLD, CYAN))
+
+        # Human-friendly formatting for unknown/misspelled keys with fuzzy matching
+        if err_type == "extra_forbidden":
+            unknown_key = str(loc_tuple[-1]) if loc_tuple else "key"
+            valid_fields = _get_valid_fields_for_loc(AppConfig, loc_tuple)
+            suggestions = difflib.get_close_matches(unknown_key, valid_fields, n=2, cutoff=0.45)
+
+            lines.append(f"  Unknown setting or table name: '{unknown_key}'")
+            if suggestions:
+                sugg_str = ", ".join(f"'{s}'" for s in suggestions)
+                lines.append(_c(f"  Did you mean: {sugg_str}?", YELLOW))
+        elif err_type == "missing":
+            missing_key = str(loc_tuple[-1]) if loc_tuple else "field"
+            lines.append(f"  Missing required setting: '{missing_key}'")
+        else:
+            lines.append(f"  {msg}")
+
         # lines.append(_c(f"  [{hyperlink}]", DIM))
         lines.append("")
 
@@ -61,7 +126,13 @@ def _format_validation_error(e: ValidationError, path: Path | str) -> str:
 # region Config Models
 
 
-class TagQueryConfig(BaseModel, frozen=True):
+class StrictBaseModel(BaseModel):
+    """Base model that strictly forbids extra/unrecognized fields to catch typos."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class TagQueryConfig(StrictBaseModel):
     """One tag search query issued to Hydrus to collect candidate files."""
 
     tags: list[Any]
@@ -71,7 +142,7 @@ class TagQueryConfig(BaseModel, frozen=True):
     """Tag service keys to search within. Empty → Hydrus default (all known tags)."""
 
 
-class PageQueryConfig(BaseModel, frozen=True):
+class PageQueryConfig(StrictBaseModel):
     """Target a specific open page in the Hydrus client."""
 
     name: str = Field(min_length=1)
@@ -87,7 +158,7 @@ class PageQueryConfig(BaseModel, frozen=True):
         return self
 
 
-class PreviewConfig(BaseModel, frozen=True):
+class PreviewConfig(StrictBaseModel):
     """Target specific open pages for file previewing before inference."""
 
     page_name: str | None = None
@@ -107,53 +178,53 @@ class PreviewConfig(BaseModel, frozen=True):
         return self
 
 
-class OutputTagServices(BaseModel, frozen=True):
+class OutputTagServices(StrictBaseModel):
     """A Hydrus tag service where inference results will be written."""
 
     keys: list[str] = Field(default_factory=list, min_length=1)
 
 
-class AddTagConfig(BaseModel, frozen=True):
+class AddTagConfig(StrictBaseModel):
     """Rule specifying tags to add to successfully processed files."""
 
     tags: list[str] = Field(min_length=1)
     tag_service_keys: list[str] = Field(min_length=1)
 
 
-class RemoveTagConfig(BaseModel, frozen=True):
+class RemoveTagConfig(StrictBaseModel):
     """Rule specifying tags to remove from successful files."""
 
     tags: list[str] = Field(min_length=1)
     tag_service_keys: list[str] = Field(min_length=1)
 
 
-class CategoryThresholdConfig(BaseModel, frozen=True):
+class CategoryThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one output category.
 
     threshold    Threshold score (0.0–1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
-                 this category, not just ScoreThresholds.
+                 this category.
     """
 
     threshold: float = Field(ge=0.0, le=1.0)
     override_tlt: bool = False
 
 
-class TagThresholdConfig(BaseModel, frozen=True):
+class TagThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one specific tag.
 
     threshold    Threshold score (0.0–1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
-                 this tag, not just ScoreThresholds.
+                 this tag.
     """
 
     threshold: float = Field(ge=0.0, le=1.0)
     override_tlt: bool = False
 
 
-class TagSubsetConfig(BaseModel, frozen=True):
+class TagSubsetConfig(StrictBaseModel):
     """
     A collection of tags subject to a collective output limit.
     Used to isolate and limit tags that belong to the same logical category.
@@ -163,7 +234,7 @@ class TagSubsetConfig(BaseModel, frozen=True):
     limit: int = Field(default=1, ge=1)
 
 
-class OutputFilterConfig(BaseModel, frozen=True):
+class OutputFilterConfig(StrictBaseModel):
     """
     Controls which tags are emitted and how they are transformed.
 
@@ -176,7 +247,7 @@ class OutputFilterConfig(BaseModel, frozen=True):
 
     # --- Threshold settings ---
     prefer_tag_level_thresholds: bool = True
-    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, lt=1.0)
+    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, le=1.0)
     default_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     output_categories: list[str] = Field(default_factory=list)
     include_tags: list[str] = Field(default_factory=list)
@@ -197,6 +268,7 @@ class OutputFilterConfig(BaseModel, frozen=True):
     # --- Output selection ---
     category_tag_prefix_mapping: dict[str, str] = Field(default_factory=dict)
     tag_prefix_overrides: dict[str, str] = Field(default_factory=dict)
+    tag_replacements: dict[str, str] = Field(default_factory=dict)
     max_tags_per_category: dict[str, int] = Field(default_factory=dict)
     max_tags_per_subset: list[TagSubsetConfig] = Field(default_factory=list)
 
@@ -208,7 +280,7 @@ class OutputFilterConfig(BaseModel, frozen=True):
         return self
 
 
-class ModelConfig(BaseModel, frozen=True):
+class ModelConfig(StrictBaseModel):
     """Per-model configuration."""
 
     model_id: str = Field(min_length=1)
@@ -222,17 +294,21 @@ class ModelConfig(BaseModel, frozen=True):
     output_tag_services: OutputTagServices | None = None
 
 
-class InferenceConfig(BaseModel, frozen=True):
+class InferenceConfig(StrictBaseModel):
     """Model list and per-model configuration."""
 
     models: list[ModelConfig] = Field(min_length=1)
 
 
-class HydrusConfig(BaseModel, frozen=True):
+class HydrusConfig(StrictBaseModel):
     """Hydrus connection + search/preview/output settings."""
 
     api_url: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
+    no_wait: bool = Field(
+        default=False,
+        description="Do not wait for Hydrus if it is offline/unreachable; fail fast instead.",
+    )
 
     tag_queries: list[TagQueryConfig] = Field(default_factory=list)
     page_queries: list[PageQueryConfig] = Field(default_factory=list)
@@ -242,14 +318,25 @@ class HydrusConfig(BaseModel, frozen=True):
     remove_tags: RemoveTagConfig | None = None
 
 
-class DatabaseConfig(BaseModel, frozen=True):
+class DatabaseConfig(StrictBaseModel):
     path: str = "data/hyvis.db"
+    cache_raw_predictions: bool = Field(
+        default=True,
+        description="Save un-culled model predictions in the database to allow re-filtering without re-running inference.",
+    )
+    min_cache_score: float = Field(
+        default=0.01,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold to store in raw cache. Drops zero-confidence noise.",
+    )
 
 
-class HyvisConfig(BaseModel, frozen=True):
+class HyvisConfig(StrictBaseModel):
     """Application-level settings."""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
+    infer_only: bool = Field(default=False, description="Run model inference only; do not push results to Hydrus.")
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -259,7 +346,7 @@ class HyvisConfig(BaseModel, frozen=True):
         return v
 
 
-class AppConfig(BaseModel, frozen=True):
+class AppConfig(StrictBaseModel):
     hydrus: HydrusConfig
     inference: InferenceConfig
     output_filter: OutputFilterConfig

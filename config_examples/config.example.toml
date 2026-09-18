@@ -6,10 +6,12 @@
 # Related CLI args: --log-level
 # Options: "DEBUG" | "INFO" | "WARNING" | "ERROR"
 log_level = "WARNING"
+infer_only = false
 
 [hydrus]
 api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
+no_wait = false
 
 # The tag queries to make to get the files to run inference on. 
 [[hydrus.tag_queries]]
@@ -49,8 +51,8 @@ keys = ["your_service_key_here"]
 # These values apply to all models unless you define a model's own [output_filter]
 [output_filter]
 
-# Prefer TagLevelThresholds (TLT) over ScoreThresholds when the model supports it.
-# Falls back to ScoreThresholds automatically if not supported.
+# Prefer TagLevelThresholds (TLT) when the model supports it.
+# Falls back to default threshold settings automatically if not supported.
 ### You can usually ignore this.
 prefer_tag_level_thresholds = true
 
@@ -60,8 +62,8 @@ prefer_tag_level_thresholds = true
 ### You can usually ignore this.
 tag_level_threshold_relative_offset = 0.0
 
-# Default threshold used unless overwritten (eg by category_thresholds).
-# TLT uses this if it has missing data.
+# Default threshold used unless overwritten (eg by category_thresholds or tag_thresholds).
+# TLT uses this as a fallback.
 default_threshold = 0.4
 
 
@@ -148,6 +150,12 @@ exclude_tags = [
 # "questionable" = "rating:"
 # "explicit" = "rating:"
 
+# [output_filter.tag_replacements]
+# "rating:g" = "general" 
+# "rating:s" = "sensitive"
+# "q" = "questionable"
+# "looking over shoulder" = "looking back"
+
 
 # *** Models ***
 
@@ -184,3 +192,5 @@ batch_size = 4  # higher = more VRAM usage. Not useful if device resolved to CPU
 # Path for the SQLite database.
 # Relative paths are resolved from the directory where you run hyvis.
 path = "data/hyvis.db"
+cache_raw_predictions = true
+min_cache_score = 0.01 # below 0.01 may increase database size significantly
