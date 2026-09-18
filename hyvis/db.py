@@ -350,7 +350,7 @@ class Database:
             self.conn.execute(
                 """
                 UPDATE push_queue
-                SET tags_json = ?, created_at = ?
+                SET tags_json = ?, attempts = 0, last_error = NULL, created_at = ?
                 WHERE file_hash = ? AND service_key = ? AND action = ?
                 """,
                 (json.dumps(merged), _now_iso(), file_hash, service_key, action),
