@@ -38,8 +38,6 @@ logger = logging.getLogger(__name__)
 async def main() -> int:
     args = parse_args()
 
-    mode = "infer_only" if args.infer_only else "default"
-
     # Every file hash processed/targeted during entire script run
     touched_hashes: set[str] = set()
 
@@ -69,6 +67,11 @@ async def main() -> int:
 
         new_hydrus = cfg.hydrus.model_copy(update=hydrus_updates)
         cfg = cfg.model_copy(update={"hydrus": new_hydrus})
+
+    # Resolve CLI vs. TOML precedence (CLI flag overrides TOML setting)
+    effective_infer_only = args.infer_only or cfg.hyvis.infer_only
+    effective_no_wait = args.no_wait or cfg.hydrus.no_wait
+    mode = "infer_only" if effective_infer_only else "default"
 
     from hyvis.db import Database
     from hyvis.extra_hashes import load_extra_hashes
@@ -123,7 +126,7 @@ async def main() -> int:
             ok, err = await drain_push_queue(
                 db,
                 hydrus,
-                wait_for_hydrus=not args.no_wait,
+                wait_for_hydrus=not effective_no_wait,
                 progress=push_progress,
             )
             push_progress.finish()
@@ -486,7 +489,7 @@ async def main() -> int:
                 p_ok, p_err = await drain_push_queue(
                     db,
                     hydrus,
-                    wait_for_hydrus=not args.no_wait,
+                    wait_for_hydrus=not effective_no_wait,
                     progress=push_progress,
                 )
                 total_push_ok += p_ok

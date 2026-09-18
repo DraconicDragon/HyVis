@@ -298,7 +298,6 @@ class InferenceConfig(StrictBaseModel):
     """Model list and per-model configuration."""
 
     models: list[ModelConfig] = Field(min_length=1)
-    infer_only: bool = Field(default=False, description="Run model inference only; do not push results to Hydrus.")
 
 
 class HydrusConfig(StrictBaseModel):
@@ -306,6 +305,10 @@ class HydrusConfig(StrictBaseModel):
 
     api_url: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
+    no_wait: bool = Field(
+        default=False,
+        description="Do not wait for Hydrus if it is offline/unreachable; fail fast instead.",
+    )
 
     tag_queries: list[TagQueryConfig] = Field(default_factory=list)
     page_queries: list[PageQueryConfig] = Field(default_factory=list)
@@ -333,6 +336,7 @@ class HyvisConfig(StrictBaseModel):
     """Application-level settings."""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
+    infer_only: bool = Field(default=False, description="Run model inference only; do not push results to Hydrus.")
 
     @field_validator("log_level", mode="before")
     @classmethod
