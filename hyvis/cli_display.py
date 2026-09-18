@@ -304,6 +304,12 @@ def print_confirmation(
             display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
             print(f"      {cat:<14} → {display_prefix}")
         print()
+    if of.tag_prefix_overrides:
+        print("    tag prefix overrides")
+        for tag, prefix in of.tag_prefix_overrides.items():
+            display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
+            print(f"      {tag:<24} → {display_prefix}")
+        print()
     if of.tag_replacements:
         print("    tag replacements")
         for src, dst in of.tag_replacements.items():
