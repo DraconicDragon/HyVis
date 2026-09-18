@@ -4,9 +4,10 @@ config.py Configuration models and TOML loading via Pydantic V2.
 
 from __future__ import annotations
 
+import difflib
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -36,10 +37,50 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
 )
 
 
+def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
+    """Recursively extract a BaseModel subclass from generic containers or unions."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    origin = get_origin(annotation)
+    if origin is not None:
+        for arg in get_args(annotation):
+            res = _extract_model_cls(arg)
+            if res is not None:
+                return res
+    return None
+
+
+def _get_valid_fields_for_loc(root_cls: type[BaseModel], loc: tuple[Any, ...]) -> list[str]:
+    """Traverse the schema model hierarchy along loc[:-1] to extract valid field names."""
+    if not loc:
+        return list(root_cls.model_fields.keys())
+
+    current: type[BaseModel] | None = root_cls
+
+    for segment in loc[:-1]:
+        if current is None:
+            break
+
+        if isinstance(segment, int):
+            # Indexing into a list; current remains the item model class
+            continue
+
+        segment_str = str(segment)
+        field_info = current.model_fields.get(segment_str)
+        if field_info is not None:
+            current = _extract_model_cls(field_info.annotation)
+        else:
+            current = None
+
+    if current is not None and issubclass(current, BaseModel):
+        return list(current.model_fields.keys())
+    return []
+
+
 def _format_validation_error(e: ValidationError, path: Path | str) -> str:
     import pydantic
 
-    from hyvis.logging_utils import BOLD, CYAN, RED, _c
+    from hyvis.logging_utils import BOLD, CYAN, RED, YELLOW, _c
 
     lines = [_c(f"Configuration error in {path}:", RED, BOLD), ""]
 
@@ -50,15 +91,32 @@ def _format_validation_error(e: ValidationError, path: Path | str) -> str:
     version_tag = f"{major}.{minor}"
 
     for err in e.errors():
-        loc = ".".join(str(p) for p in err["loc"])
+        loc_tuple = err["loc"]
+        loc_str = ".".join(str(p) for p in loc_tuple)
         msg = err["msg"]
         err_type = err["type"]
 
         url = f"https://errors.pydantic.dev/{version_tag}/v/{err_type}"
         hyperlink = f"\033]8;;{url}\033\\{err_type}\033]8;;\033\\"
 
-        lines.append(_c(loc, BOLD, CYAN))
-        lines.append(f"  {msg}")
+        lines.append(_c(loc_str, BOLD, CYAN))
+
+        # Human-friendly formatting for unknown/misspelled keys with fuzzy matching
+        if err_type == "extra_forbidden":
+            unknown_key = str(loc_tuple[-1]) if loc_tuple else "key"
+            valid_fields = _get_valid_fields_for_loc(AppConfig, loc_tuple)
+            suggestions = difflib.get_close_matches(unknown_key, valid_fields, n=2, cutoff=0.45)
+
+            lines.append(f"  Unknown setting or table name: '{unknown_key}'")
+            if suggestions:
+                sugg_str = ", ".join(f"'{s}'" for s in suggestions)
+                lines.append(_c(f"  Did you mean: {sugg_str}?", YELLOW))
+        elif err_type == "missing":
+            missing_key = str(loc_tuple[-1]) if loc_tuple else "field"
+            lines.append(f"  Missing required setting: '{missing_key}'")
+        else:
+            lines.append(f"  {msg}")
+
         # lines.append(_c(f"  [{hyperlink}]", DIM))
         lines.append("")
 
