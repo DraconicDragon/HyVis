@@ -6,6 +6,7 @@ Features:
   - Automatically suspends if Hydrus goes offline, leaving the queue intact.
   - Increments attempt counter on unrecoverable errors so the queue never enters an infinite loop.
   - Catches 404s (deleted files) and cleans them from the queue permanently.
+  - Guarantees successful tasks are always flushed from SQLite on error, disconnect, or Ctrl+C.
 """
 
 from __future__ import annotations
@@ -93,7 +94,7 @@ async def drain_push_queue(
                     if wait_for_hydrus:
                         print(_c("\n  Hydrus connection lost during push.", RED))
                         await _wait_for_hydrus_reconnect(hydrus, wait_interval)
-                        break  # Retry remaining items after reconnection
+                        break  # Retry remaining items in next while loop iteration
                     else:
                         logger.warning("Hydrus offline. Suspending push: %s", exc)
                         return total_ok, total_err
@@ -103,21 +104,19 @@ async def drain_push_queue(
                     if progress:
                         progress.tick(errors=1)
 
+                    # 404: File was deleted from Hydrus!
                     if hasattr(exc, "status_code") and exc.status_code == 404:
                         logger.warning("File %s was deleted from Hydrus; purging from queue.", file_hash[:8])
                         db.mark_file_status(file_hash, "deleted_from_hydrus")
                         db.clear_file_from_push_queue(file_hash)
                     else:
                         logger.error("Failed pushing to Hydrus for %s: %s", file_hash[:8], exc)
+                        # Increment attempts so this broken item does not stall the queue forever
                         db.record_push_attempt_error(file_hash, service_key, action, str(exc))
 
         finally:
-            # always clear successful tasks, even on disconnect, error, or Ctrl+C
+            # 2. Always clear successful tasks, even on early return, disconnect, or Ctrl+C
             if successful_tasks:
                 db.remove_from_push_queue(successful_tasks)
-
-        # 2. Clear successfully processed tasks from the queue
-        if successful_tasks:
-            db.remove_from_push_queue(successful_tasks)
 
     return total_ok, total_err
