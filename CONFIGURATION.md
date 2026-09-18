@@ -515,5 +515,6 @@ Settings for the application's local state and cache storage.
 path = "data/hyvis.db"
 cache_raw_predictions = true
 min_cache_score = 0.01
+```
 
 </details>
