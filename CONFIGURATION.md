@@ -25,6 +25,7 @@ HyVis application settings.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `log_level` | String | No | Logging verbosity. Options: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. Defaults to `"WARNING"`. |
+| `infer_only` | Boolean | No | Run model inference and cache predictions, but do not push any tags to Hydrus. Can be overridden using the `--infer-only` CLI flag. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[hyvis]</code> Example</summary>
@@ -32,6 +33,7 @@ HyVis application settings.
 ```toml
 [hyvis]
 log_level = "WARNING"
+infer_only = false
 ```
 
 </details>
@@ -49,6 +51,7 @@ Configuration for connecting to your Hydrus client and defining tag/page query a
 | :-------- | :--- | :------- | :---------- |
 | `api_url` | String | **Yes** | The base URL of your Hydrus client API |
 | `api_key` | String | **Yes** | Your Hydrus API key with appropriate permissions to read files and write tags. |
+| `no_wait` | Boolean | No | Do not wait for Hydrus if it is offline or unreachable; fail fast instead. Can be overridden using the `--no-wait` CLI flag. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[hydrus]</code> Example</summary>
@@ -57,6 +60,7 @@ Configuration for connecting to your Hydrus client and defining tag/page query a
 [hydrus]
 api_url = "http://127.0.0.1:45869"
 api_key = "your_api_key_here"
+no_wait = false
 ```
 
 </details>
