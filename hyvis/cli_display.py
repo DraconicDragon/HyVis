@@ -277,6 +277,11 @@ def print_confirmation(
         for cat, cfg_ in of.category_thresholds.items():
             tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
             print(f"      {cat:<14} {cfg_.threshold:.2f}{tlt_note}")
+    if of.tag_thresholds:
+        print("    tag thresholds")
+        for tag, cfg_ in of.tag_thresholds.items():
+            tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
+            print(f"      {tag:<24} {cfg_.threshold:.2f}{tlt_note}")
     cats = of.output_categories
     print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
 
