@@ -505,7 +505,7 @@ Settings for the application's local state and cache storage.
 | :-------- | :--- | :------- | :---------- |
 | `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
 | `cache_raw_predictions` | Boolean | No | Saves raw, un-culled* model predictions to the DB. Allows instant re-filtering when thresholds change without re-running GPU inference. \*By default there's minimal culling, see `min_cache_score`. <br> Defaults to `true`. |
-| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `1.0`) saved to the raw cache. **Warning**: setting this below 0.1 will increase DB size by a lot. Cache can be cleared with `--clear-cache` CLI arg. <br> Defaults to `0.01`. |
+| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `1.0`) saved to the raw cache. **Warning**: setting this below 0.01 will increase DB size by a lot. Cache can be cleared with `--clear-cache` CLI arg. <br> Defaults to `0.01`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
