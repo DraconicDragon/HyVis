@@ -204,7 +204,7 @@ class CategoryThresholdConfig(StrictBaseModel):
 
     threshold    Threshold score (0.0–1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
-                 this category, not just ScoreThresholds.
+                 this category.
     """
 
     threshold: float = Field(ge=0.0, le=1.0)
@@ -217,7 +217,7 @@ class TagThresholdConfig(StrictBaseModel):
 
     threshold    Threshold score (0.0–1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
-                 this tag, not just ScoreThresholds.
+                 this tag.
     """
 
     threshold: float = Field(ge=0.0, le=1.0)
