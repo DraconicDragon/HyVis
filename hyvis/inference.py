@@ -205,7 +205,7 @@ def extract_tags(
         records.extend(matching_subset_records)
 
         # Remove processed records to avoid double-evaluation
-        subset_records = [r for r in subset_records if r not in matching_subset_records]
+        subset_records = [r for r in subset_records if _norm(r.raw_tag) not in group_tags_set]
 
     # add any fallback subset records that didn't match a defined subset group
     records.extend(subset_records)
