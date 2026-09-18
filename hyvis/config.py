@@ -197,6 +197,7 @@ class OutputFilterConfig(BaseModel, frozen=True):
     # --- Output selection ---
     category_tag_prefix_mapping: dict[str, str] = Field(default_factory=dict)
     tag_prefix_overrides: dict[str, str] = Field(default_factory=dict)
+    tag_replacements: dict[str, str] = Field(default_factory=dict)
     max_tags_per_category: dict[str, int] = Field(default_factory=dict)
     max_tags_per_subset: list[TagSubsetConfig] = Field(default_factory=list)
 

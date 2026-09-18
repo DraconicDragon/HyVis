@@ -143,6 +143,7 @@ def extract_tags(
     # set of all tags governed by custom subset limits (normalized)
     subset_managed_tags = {_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags}
     prefix_overrides = {_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()}
+    tag_replacements = {_norm(k): v for k, v in output_filter.tag_replacements.items()}
 
     standard_records_by_category: dict[str, list[TagRecord]] = {}
     subset_records: list[TagRecord] = []
@@ -154,28 +155,32 @@ def extract_tags(
         for raw_tag, score in tag_scores.items():
             norm_tag = _norm(raw_tag)
 
-            # 1. Check Exclusions: Drop if explicitly excluded
-            if norm_tag in exclude_set:
+            # Apply tag replacement if configured (e.g. "g" -> "general")
+            effective_tag = tag_replacements.get(norm_tag, raw_tag)
+            norm_effective = _norm(effective_tag)
+
+            # 1. Check Exclusions: Drop if explicitly excluded (checks both raw and replaced name)
+            if norm_tag in exclude_set or norm_effective in exclude_set:
                 continue
 
             # 2. Check Overrides: Always keep if explicitly included
-            is_allowed = norm_tag in include_set
+            is_allowed = norm_tag in include_set or norm_effective in include_set
 
             # 3. Check Categories: If not explicitly included, fallback to standard category checks
             if not is_allowed and (not categories or category not in categories):
                 continue
 
             # Determine effective prefix (individual override takes precedence)
-            prefix = prefix_overrides.get(norm_tag, category_prefix)
+            prefix = prefix_overrides.get(norm_tag, prefix_overrides.get(norm_effective, category_prefix))
             record = TagRecord(
                 category=category,
-                raw_tag=raw_tag,
-                prefixed_tag=f"{prefix}{raw_tag}",
+                raw_tag=effective_tag,
+                prefixed_tag=f"{prefix}{effective_tag}",
                 score=float(score),
             )
 
             # Isolate subset-managed tags from standard category limits
-            if norm_tag in subset_managed_tags:
+            if norm_tag in subset_managed_tags or norm_effective in subset_managed_tags:
                 subset_records.append(record)
             else:
                 standard_records_by_category[category].append(record)

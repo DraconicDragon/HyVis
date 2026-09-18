@@ -299,6 +299,11 @@ def print_confirmation(
             display_prefix = f"'{prefix}'" if prefix else _c("(none)", DIM)
             print(f"      {cat:<14} → {display_prefix}")
         print()
+    if of.tag_replacements:
+        print("    tag replacements")
+        for src, dst in of.tag_replacements.items():
+            print(f"      {src:<14} → '{dst}'")
+        print()
 
     # Backup Reminder
     print(_c("      It is strongly recommended to create/update your Hydrus backup.", RED, BOLD))

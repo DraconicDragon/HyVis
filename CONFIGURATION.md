@@ -358,6 +358,30 @@ meta = "meta:"
 
 </details>
 
+### `[output_filter.tag_replacements]`
+
+> Required: No
+
+Replaces specific predicted tag names with alternative names before prefixing and output limits are applied. Useful for converting abbreviated ratings (e.g., `g` → `general`) or mapping tags to your preferred spelling.
+
+- **Keys**: Predicted tag name (supports spaces or underscores)
+- **Values**: Replacement tag name
+
+<details>
+<summary>💡 View <code>[output_filter.tag_replacements]</code> Example</summary>
+
+```toml
+[output_filter.tag_replacements]
+"rating:g" = "general" 
+# NOTE: If rating:g is part of rating category for example, and category prefix mapping or such is set (eg r: for rating category)
+# then the result tag will be r:general instead of r:rating:g
+"rating:s" = "sensitive"
+"q" = "questionable"
+"looking over shoulder" = "looking back"
+```
+
+</details>
+
 ### `[output_filter.max_tags_per_category]`
 
 > Required: No
