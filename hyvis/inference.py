@@ -113,8 +113,11 @@ def extract_tags(
     """
     Convert a TagResult or dictionary representation into TagRecord objects.
 
-    Applies inclusions, exclusions, category limits, namespace prefixes,
-    and joint subset limits. Normalizes tags to support both underscores and spaces.
+    Follows a strict Two-Stage architecture:
+      Stage 1 (Decision Engine): Evaluates exclusions, inclusions, categories,
+              subsets, and category limits using the model's native vocabulary.
+      Stage 2 (Presentation Layer): Cleans underscores to spaces, applies tag
+              replacements, deduplicates by max score, and applies namespace prefixes.
     """
     # Normalize input into {category: {tag: score}} mapping
     tags_by_category: dict[str, dict[str, float]] = {}
@@ -132,8 +135,6 @@ def extract_tags(
                 elif isinstance(entries, dict):
                     tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
 
-    records: list[TagRecord] = []
-
     categories = output_filter.output_categories
     # sets for fast lookups (normalized)
     include_set = {_norm(t) for t in output_filter.include_tags}
@@ -141,48 +142,48 @@ def extract_tags(
 
     # set of all tags governed by custom subset limits (normalized)
     subset_managed_tags = {_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags}
+
     prefix_overrides = {_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()}
+    category_prefixes = output_filter.category_tag_prefix_mapping
     tag_replacements = {_norm(k): v for k, v in output_filter.tag_replacements.items()}
+
+    # region Stage 1
+    # Decision engine
 
     standard_records_by_category: dict[str, list[TagRecord]] = {}
     subset_records: list[TagRecord] = []
 
     for category, tag_scores in tags_by_category.items():
-        category_prefix = output_filter.category_tag_prefix_mapping.get(category) or ""
         standard_records_by_category[category] = []
 
         for raw_tag, score in tag_scores.items():
             norm_tag = _norm(raw_tag)
 
-            # Apply tag replacement if configured (e.g. "g" -> "general")
-            effective_tag = tag_replacements.get(norm_tag, raw_tag)
-            norm_effective = _norm(effective_tag)
-
-            # 1. Check Exclusions: Drop if explicitly excluded (checks both raw and replaced name)
-            if norm_tag in exclude_set or norm_effective in exclude_set:
+            # 1. Exclusions: Drop if explicitly excluded
+            if norm_tag in exclude_set:
                 continue
 
-            # 2. Check Overrides: Always keep if explicitly included
-            is_allowed = norm_tag in include_set or norm_effective in include_set
+            # 2. Inclusions: Always keep if explicitly included
+            is_allowed = norm_tag in include_set
 
-            # 3. Check Categories: If not explicitly included, fallback to standard category checks
+            # 3. Category Whitelist: If not explicitly included, check category allowance
             if not is_allowed and (not categories or category not in categories):
                 continue
 
-            # Determine effective prefix (individual override takes precedence)
-            prefix = prefix_overrides.get(norm_tag, prefix_overrides.get(norm_effective, category_prefix))
             record = TagRecord(
                 category=category,
-                raw_tag=effective_tag,
-                prefixed_tag=f"{prefix}{effective_tag}",
+                raw_tag=raw_tag,
+                prefixed_tag=raw_tag,  # Formatted in Stage 2
                 score=float(score),
             )
 
             # Isolate subset-managed tags from standard category limits
-            if norm_tag in subset_managed_tags or norm_effective in subset_managed_tags:
+            if norm_tag in subset_managed_tags:
                 subset_records.append(record)
             else:
                 standard_records_by_category[category].append(record)
+
+    surviving_records: list[TagRecord] = []
 
     # apply category limits
     for category, cat_records in standard_records_by_category.items():
@@ -191,7 +192,7 @@ def extract_tags(
             # sort descending by score, keep top-N
             cat_records.sort(key=lambda r: r.score, reverse=True)
             cat_records = cat_records[:limit]
-        records.extend(cat_records)
+        surviving_records.extend(cat_records)
 
     # apply subset limits to isolated tags
     for group in output_filter.max_tags_per_subset:
@@ -202,15 +203,46 @@ def extract_tags(
             matching_subset_records.sort(key=lambda r: r.score, reverse=True)
             matching_subset_records = matching_subset_records[: group.limit]
 
-        records.extend(matching_subset_records)
+        surviving_records.extend(matching_subset_records)
 
-        # Remove processed records to avoid double-evaluation
+        # Purge ALL records belonging to this subset group so dropped ones cannot leak into fallback
         subset_records = [r for r in subset_records if _norm(r.raw_tag) not in group_tags_set]
 
-    # add any fallback subset records that didn't match a defined subset group
-    records.extend(subset_records)
+    # Add any remaining subset records that were not covered by a defined group
+    surviving_records.extend(subset_records)
 
-    return records
+    # region Stage 2
+    # Presentation layer
+
+    cleaner = CleanTags()
+    formatted_map: dict[str, TagRecord] = {}
+
+    for r in surviving_records:
+        norm_raw = _norm(r.raw_tag)
+
+        # 1. Clean underscores to spaces while preserving kaomojis
+        cleaned_tag = cleaner.clean_text(r.raw_tag)
+        norm_cleaned = _norm(cleaned_tag)
+
+        # 2. Tag replacement (checks both normalized raw and cleaned versions)
+        replaced_tag = tag_replacements.get(norm_cleaned, tag_replacements.get(norm_raw, cleaned_tag))
+
+        # 3. Namespace prefixing (individual overrides take precedence over category prefixes)
+        prefix = prefix_overrides.get(
+            norm_raw, prefix_overrides.get(norm_cleaned, category_prefixes.get(r.category, ""))
+        )
+        prefixed_tag = f"{prefix}{replaced_tag}"
+
+        # 4. Merge duplicates by taking the maximum confidence score
+        if prefixed_tag not in formatted_map or r.score > formatted_map[prefixed_tag].score:
+            formatted_map[prefixed_tag] = TagRecord(
+                category=r.category,
+                raw_tag=replaced_tag,
+                prefixed_tag=prefixed_tag,
+                score=r.score,
+            )
+
+    return list(formatted_map.values())
 
 
 # endregion
