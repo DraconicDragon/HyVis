@@ -22,8 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import vibe
-from vibe.results import TagResult
-from vibe.session import InferenceCancelled
+from vibe import InferenceCancelled, TagResult
 from vibe_result_transforms import (
     CleanTags,
     TagLevelThresholds,
