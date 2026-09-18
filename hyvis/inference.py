@@ -417,16 +417,41 @@ async def infer_files(
 
             if session.backend == vibe.Backend.PYTORCH:
                 prec = runtime.get("precision", {})
-                device = runtime.get("device", "unknown")
-                compute = prec.get("compute_dtype", "unknown")
+                weight_dt = prec.get("weight_dtype", "unknown")
+                compute_dt = prec.get("compute_dtype", "unknown")
                 autocast = " (autocast)" if prec.get("autocast_enabled") else ""
-                runtime_str = f"PyTorch on {device} │ Precision: {compute}{autocast}"
+
+                # Device formatting: e.g. cuda:0 (NVIDIA GeForce RTX 3060)
+                device_str = str(runtime.get("device", "unknown"))
+                try:
+                    import torch
+
+                    if device_str.startswith("cuda") and torch.cuda.is_available():
+                        idx = int(device_str.split(":")[1]) if ":" in device_str else torch.cuda.current_device()
+                        device_str = f"cuda:{idx} ({torch.cuda.get_device_name(idx)})"
+                except Exception:
+                    pass
+
+                runtime_str = f"PyTorch on {device_str} │ Weights: {weight_dt} │ Compute: {compute_dt}{autocast}"
+
             elif session.backend == vibe.Backend.ONNX:
                 providers = runtime.get("providers", [])
                 active_ep = providers[0] if providers else "unknown"
+
+                # If running on CUDA EP, optionally show the GPU name
+                # ep_extra = ""
+                # if "cuda" in active_ep.lower():
+                #     try:
+                #         import torch
+                #         if torch.cuda.is_available():
+                #             ep_extra = f" ({torch.cuda.get_device_name()})"
+                #     except Exception:
+                #         pass
+
                 runtime_str = f"ONNX on {active_ep}"
+
             else:
-                logger.error("Unsupported backend: %s", session.backend)
+                runtime_str = f"{session.backend}"
 
             print(f"    Runtime: {_c(runtime_str, GREEN)}")
             print()
