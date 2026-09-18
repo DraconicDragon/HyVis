@@ -304,7 +304,17 @@ class Database:
         count = count_row[0] if count_row else 0
         self.conn.execute("DELETE FROM inference_cache")
         self.commit()
-        self.conn.execute("VACUUM")
+
+        # NOTE: Currently supporting python 3.11+, if was 3.12+ we could use autocommit here
+
+        # Temporarily switch to autocommit mode to allow VACUUM to run
+        old_isolation = self.conn.isolation_level
+        try:
+            self.conn.isolation_level = None
+            self.conn.execute("VACUUM")
+        finally:
+            self.conn.isolation_level = old_isolation
+
         return count
 
     # endregion
