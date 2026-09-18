@@ -72,45 +72,49 @@ async def drain_push_queue(
 
         successful_tasks: list[tuple[str, str, str]] = []
 
-        for file_hash, service_key, action, tags in tasks:
-            if not tags:
-                successful_tasks.append((file_hash, service_key, action))
-                continue
+        try:
+            for file_hash, service_key, action, tags in tasks:
+                if not tags:
+                    successful_tasks.append((file_hash, service_key, action))
+                    continue
 
-            try:
-                if action == "add_tags":
-                    hydrus.add_tags([file_hash], service_key, tags)
-                elif action == "delete_tags":
-                    hydrus.delete_tags([file_hash], [service_key], tags)
+                try:
+                    if action == "add_tags":
+                        hydrus.add_tags([file_hash], service_key, tags)
+                    elif action == "delete_tags":
+                        hydrus.delete_tags([file_hash], [service_key], tags)
 
-                successful_tasks.append((file_hash, service_key, action))
-                total_ok += 1
-                if progress:
-                    progress.tick(processed=1)
+                    successful_tasks.append((file_hash, service_key, action))
+                    total_ok += 1
+                    if progress:
+                        progress.tick(processed=1)
 
-            except HydrusConnectionError as exc:
-                if wait_for_hydrus:
-                    print(_c("\n  Hydrus connection lost during push.", RED))
-                    await _wait_for_hydrus_reconnect(hydrus, wait_interval)
-                    break  # Retry this batch after reconnection
-                else:
-                    logger.warning("Hydrus offline. Suspending push: %s", exc)
-                    return total_ok, total_err
+                except HydrusConnectionError as exc:
+                    if wait_for_hydrus:
+                        print(_c("\n  Hydrus connection lost during push.", RED))
+                        await _wait_for_hydrus_reconnect(hydrus, wait_interval)
+                        break  # Retry remaining items after reconnection
+                    else:
+                        logger.warning("Hydrus offline. Suspending push: %s", exc)
+                        return total_ok, total_err
 
-            except HydrusError as exc:
-                total_err += 1
-                if progress:
-                    progress.tick(errors=1)
+                except HydrusError as exc:
+                    total_err += 1
+                    if progress:
+                        progress.tick(errors=1)
 
-                # 404: File was deleted from Hydrus!
-                if hasattr(exc, "status_code") and exc.status_code == 404:
-                    logger.warning("File %s was deleted from Hydrus; purging from queue.", file_hash[:8])
-                    db.mark_file_status(file_hash, "deleted_from_hydrus")
-                    db.clear_file_from_push_queue(file_hash)
-                else:
-                    logger.error("Failed pushing to Hydrus for %s: %s", file_hash[:8], exc)
-                    # Increment attempts so this broken item does not stall the queue forever
-                    db.record_push_attempt_error(file_hash, service_key, action, str(exc))
+                    if hasattr(exc, "status_code") and exc.status_code == 404:
+                        logger.warning("File %s was deleted from Hydrus; purging from queue.", file_hash[:8])
+                        db.mark_file_status(file_hash, "deleted_from_hydrus")
+                        db.clear_file_from_push_queue(file_hash)
+                    else:
+                        logger.error("Failed pushing to Hydrus for %s: %s", file_hash[:8], exc)
+                        db.record_push_attempt_error(file_hash, service_key, action, str(exc))
+
+        finally:
+            # always clear successful tasks, even on disconnect, error, or Ctrl+C
+            if successful_tasks:
+                db.remove_from_push_queue(successful_tasks)
 
         # 2. Clear successfully processed tasks from the queue
         if successful_tasks:
