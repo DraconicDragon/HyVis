@@ -1,5 +1,7 @@
 # TODO
 
+- supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
+
 - Character IP mapping support
   - (vibe) also find out how to make my own or if i just need full metadata for that and have the math done on full post metadata to see how often series tags are together with what character tags, maybe some of the e6 people already have some process open source
 
