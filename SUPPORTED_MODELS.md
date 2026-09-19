@@ -34,7 +34,7 @@ Please open an issue if you know of any models and want HyVis to support them.
 | **AnimeTimm CaFormer B36** | [`at-caformer-b36-dbv4-full`](#at-caformer-b36-dbv4-full) | Lightweight option with an updated dataset. A tiny bit heavier than SwinV2 |
 | **AnimeTimm Eva02 Large Patch14 448** | [`at-eva02-large-patch14-448-dbv4-full`](#at-eva02-large-patch14-448-dbv4-full) | As heavy as WD Eva02 Large v3, but with updated data. |
 | **AnimeTimm ConvNeXtV2 Huge** | [`at-convnextv2-huge-dbv4-full`](#at-convnextv2-huge-dbv4-full) | Heaviest & Largest available danbooru tagger model. Requires a minimum of 6GB RAM/VRAM at batch size 1. PyTorch only. |
-| **PixAI Tagger v1.0** | [`pixai-tagger-v1.0`](#pixai-tagger-v10) | As of September 2026 the latest danbooru tagger with ~30.8k tags and data cutoff in May 2026. *On benchmarks* (see HF repo) it beats any AnimeTimm model, meaning it is likely the currently best available danbooru tagger. Requires minimum 4GB RAM/VRAM free to run. PyTorch only. |
+| **PixAI Tagger v1.0** | [`pixai-tagger-v1.0`](#pixai-tagger-v10) | As of September 2026 the latest danbooru tagger with ~30.8k tags and data cutoff in May 2026. *On benchmarks* (see HF repo) it beats any AnimeTimm model, meaning it is likely the currently best available danbooru tagger (except in speed). Requires minimum 4GB RAM/VRAM free to run. PyTorch only. |
 
 > Newer and/or larger models do not automatically guarantee better accuracy.
 
