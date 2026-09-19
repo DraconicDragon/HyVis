@@ -18,6 +18,33 @@ from pydantic import (
     model_validator,
 )
 
+# region Schema Metadata Definition
+
+FieldSource = Literal["hydrus:tag_services", "vibe:models"]
+FieldPicker = Literal["file", "directory"]
+
+
+def field_meta(
+    *,
+    source: FieldSource | None = None,
+    picker: FieldPicker | None = None,
+) -> dict[str, Any]:
+    """
+    Helper returning a typed dict[str, Any] for Field(json_schema_extra=...).
+
+    Provides type-checked discovery of UI sources and pickers without
+    triggering TypedDict invariance errors with type checkers.
+    """
+    meta: dict[str, Any] = {}
+    if source is not None:
+        meta["source"] = source
+    if picker is not None:
+        meta["picker"] = picker
+    return meta
+
+
+# endregion
+
 # region Constants
 
 #: MIME types
@@ -135,21 +162,39 @@ class StrictBaseModel(BaseModel):
 class TagQueryConfig(StrictBaseModel):
     """One tag search query issued to Hydrus to collect candidate files."""
 
-    tags: list[Any]
-    """Each tag is a separate string. Nested lists evaluate as OR predicates."""
+    tags: list[Any] = Field(
+        ...,
+        title="Tag Search Query",
+        description="List of tags to query files with. Each tag is a string. Nested lists evaluate as OR predicates.",
+        examples=[["system:untagged", "type:illustration"], [["dog", "cat"], "-type:photo"]],
+    )
 
-    tag_service_keys: list[str] = Field(default_factory=list)
-    """Tag service keys to search within. Empty → Hydrus default (all known tags)."""
+    tag_service_keys: list[str] = Field(
+        default_factory=list,
+        title="Tag Service Keys",
+        description="Hydrus tag service keys to limit the query to. If empty, defaults to all known tags.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
 
 
 class PageQueryConfig(StrictBaseModel):
     """Target a specific open page in the Hydrus client."""
 
-    name: str = Field(min_length=1)
-    """The exact name of the page tab in Hydrus."""
+    name: str = Field(
+        ...,
+        min_length=1,
+        title="Page Tab Name",
+        description="The exact name of the page tab in your Hydrus client.",
+        examples=["memes", "inbox"],
+    )
 
-    index: int | None = None
-    """Optional index (0-based) to disambiguate if multiple pages share the same name."""
+    index: int | None = Field(
+        default=None,
+        ge=0,
+        title="Disambiguation Index",
+        description="Optional 0-based index to disambiguate if multiple pages share the same name.",
+        examples=[0, 1],
+    )
 
     @model_validator(mode="after")
     def _validate_index(self) -> PageQueryConfig:
@@ -161,10 +206,30 @@ class PageQueryConfig(StrictBaseModel):
 class PreviewConfig(StrictBaseModel):
     """Target specific open pages for file previewing before inference."""
 
-    page_name: str | None = None
-    page_index: int | None = None
-    rejected_page_name: str | None = None
-    rejected_page_index: int | None = None
+    page_name: str | None = Field(
+        default=None,
+        title="Candidate Preview Page",
+        description="Optional target page name in Hydrus to preview candidate files before processing begins.",
+        examples=["hyvis preview"],
+    )
+    page_index: int | None = Field(
+        default=None,
+        ge=0,
+        title="Candidate Page Index",
+        description="Disambiguation index if multiple pages share the candidate preview page name.",
+    )
+    rejected_page_name: str | None = Field(
+        default=None,
+        title="Rejected Preview Page",
+        description="Optional target page name in Hydrus to preview rejected files (e.g. unsupported MIME types).",
+        examples=["hyvis rejected"],
+    )
+    rejected_page_index: int | None = Field(
+        default=None,
+        ge=0,
+        title="Rejected Page Index",
+        description="Disambiguation index for the rejected preview page.",
+    )
 
     @model_validator(mode="after")
     def _validate_indices(self) -> PreviewConfig:
@@ -181,21 +246,51 @@ class PreviewConfig(StrictBaseModel):
 class OutputTagServices(StrictBaseModel):
     """A Hydrus tag service where inference results will be written."""
 
-    keys: list[str] = Field(default_factory=list, min_length=1)
+    keys: list[str] = Field(
+        default_factory=list,
+        min_length=1,
+        title="Destination Service Keys",
+        description="A list of Hydrus tag service keys representing the destination service(s) to push tags to.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
 
 
 class AddTagConfig(StrictBaseModel):
     """Rule specifying tags to add to successfully processed files."""
 
-    tags: list[str] = Field(min_length=1)
-    tag_service_keys: list[str] = Field(min_length=1)
+    tags: list[str] = Field(
+        ...,
+        min_length=1,
+        title="Extra Tags to Add",
+        description="List of tags to apply to files after all configured models have processed them successfully.",
+        examples=[["ai:tagged"]],
+    )
+    tag_service_keys: list[str] = Field(
+        ...,
+        min_length=1,
+        title="Target Service Keys",
+        description="Hydrus tag service keys to write the added tags to.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
 
 
 class RemoveTagConfig(StrictBaseModel):
     """Rule specifying tags to remove from successful files."""
 
-    tags: list[str] = Field(min_length=1)
-    tag_service_keys: list[str] = Field(min_length=1)
+    tags: list[str] = Field(
+        ...,
+        min_length=1,
+        title="Tags to Remove",
+        description="List of temporary queue/status tags to remove from files after all models succeed.",
+        examples=[["temp:tagme", "queue:ai"]],
+    )
+    tag_service_keys: list[str] = Field(
+        ...,
+        min_length=1,
+        title="Target Service Keys",
+        description="Hydrus tag service keys to remove the tags from.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
 
 
 class CategoryThresholdConfig(StrictBaseModel):
@@ -207,8 +302,19 @@ class CategoryThresholdConfig(StrictBaseModel):
                  this category.
     """
 
-    threshold: float = Field(ge=0.0, le=1.0)
-    override_tlt: bool = False
+    threshold: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        title="Category Threshold",
+        description="Minimum confidence threshold score (0.0 to 1.0) for this category.",
+        examples=[0.40],
+    )
+    override_tlt: bool = Field(
+        default=False,
+        title="Override TLT",
+        description="If True, this threshold also overrides model-calibrated Tag-Level Thresholds (TLT) for this category.",
+    )
 
 
 class TagThresholdConfig(StrictBaseModel):
@@ -220,8 +326,19 @@ class TagThresholdConfig(StrictBaseModel):
                  this tag.
     """
 
-    threshold: float = Field(ge=0.0, le=1.0)
-    override_tlt: bool = False
+    threshold: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        title="Tag Threshold",
+        description="Minimum confidence threshold score (0.0 to 1.0) for this specific tag.",
+        examples=[0.50],
+    )
+    override_tlt: bool = Field(
+        default=False,
+        title="Override TLT",
+        description="If True, this threshold also overrides model-calibrated Tag-Level Thresholds (TLT) for this tag.",
+    )
 
 
 class TagSubsetConfig(StrictBaseModel):
@@ -230,8 +347,20 @@ class TagSubsetConfig(StrictBaseModel):
     Used to isolate and limit tags that belong to the same logical category.
     """
 
-    tags: list[str]
-    limit: int = Field(default=1, ge=1)
+    tags: list[str] = Field(
+        ...,
+        min_length=1,
+        title="Subset Tags",
+        description="Explicit list of raw tags that belong to this subset group.",
+        examples=[["safe", "questionable", "explicit"]],
+    )
+    limit: int = Field(
+        default=1,
+        ge=1,
+        title="Max Output Limit",
+        description="Maximum number of tags from this subset to retain, prioritized by highest confidence score.",
+        examples=[1],
+    )
 
 
 class OutputFilterConfig(StrictBaseModel):
@@ -246,14 +375,53 @@ class OutputFilterConfig(StrictBaseModel):
     """
 
     # --- Threshold settings ---
-    prefer_tag_level_thresholds: bool = True
-    tag_level_threshold_relative_offset: float = Field(default=0.0, ge=-1.0, le=1.0)
-    default_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
-    output_categories: list[str] = Field(default_factory=list)
-    include_tags: list[str] = Field(default_factory=list)
-    exclude_tags: list[str] = Field(default_factory=list)
-    category_thresholds: dict[str, CategoryThresholdConfig] = Field(default_factory=dict)
-    tag_thresholds: dict[str, TagThresholdConfig] = Field(default_factory=dict)
+    prefer_tag_level_thresholds: bool = Field(
+        default=True,
+        title="Prefer Tag-Level Thresholds (TLT)",
+        description="Uses model-specific per-tag thresholds if supported. Falls back to default_threshold if unsupported or if data is missing.",
+    )
+    tag_level_threshold_relative_offset: float = Field(
+        default=0.0,
+        ge=-1.0,
+        le=1.0,
+        title="TLT Relative Offset",
+        description="Relative offset applied to tag-level thresholds (-1.0 to 1.0). For example, 0.1 lowers threshold requirements by 10%.",
+        examples=[0.0],
+    )
+    default_threshold: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        title="Default Threshold (Fallback)",
+        description="Fallback confidence threshold (0.0 to 1.0) when tag-level thresholds are disabled or unavailable.",
+        examples=[0.40],
+    )
+    output_categories: list[str] = Field(
+        default_factory=list,
+        title="Output Categories",
+        description="Limit output tags to specified categories (e.g. general, character, rating). Empty list allows all categories via inclusions.",
+        examples=[["general", "character"]],
+    )
+    include_tags: list[str] = Field(
+        default_factory=list,
+        title="Include Tags",
+        description="Explicit list of tags to always include, bypassing any output_categories restriction (exact matches).",
+    )
+    exclude_tags: list[str] = Field(
+        default_factory=list,
+        title="Exclude Tags",
+        description="Explicit list of tags to always discard, even if their category is allowed (exact matches).",
+    )
+    category_thresholds: dict[str, CategoryThresholdConfig] = Field(
+        default_factory=dict,
+        title="Category Threshold Overrides",
+        description="Static threshold overrides for specific output categories.",
+    )
+    tag_thresholds: dict[str, TagThresholdConfig] = Field(
+        default_factory=dict,
+        title="Tag Threshold Overrides",
+        description="Static threshold overrides for specific raw tag names.",
+    )
 
     @field_validator("category_thresholds", "tag_thresholds", mode="before")
     @classmethod
@@ -266,11 +434,34 @@ class OutputFilterConfig(StrictBaseModel):
         return v
 
     # --- Output selection ---
-    category_tag_prefix_mapping: dict[str, str] = Field(default_factory=dict)
-    tag_prefix_overrides: dict[str, str] = Field(default_factory=dict)
-    tag_replacements: dict[str, str] = Field(default_factory=dict)
-    max_tags_per_category: dict[str, int] = Field(default_factory=dict)
-    max_tags_per_subset: list[TagSubsetConfig] = Field(default_factory=list)
+    category_tag_prefix_mapping: dict[str, str] = Field(
+        default_factory=dict,
+        title="Category Tag Prefix Mapping",
+        description="Maps model output categories to custom namespace prefixes (e.g. character -> character:).",
+        examples=[{"character": "character:", "artist": "creator:"}],
+    )
+    tag_prefix_overrides: dict[str, str] = Field(
+        default_factory=dict,
+        title="Tag Prefix Overrides",
+        description="Maps specific raw tag names to custom prefixes, overriding category prefixes.",
+    )
+    tag_replacements: dict[str, str] = Field(
+        default_factory=dict,
+        title="Tag Replacements",
+        description="Replaces specific predicted tag names with alternative names before prefixing and output limits are applied.",
+        examples=[{"rating:g": "general", "rating:s": "sensitive"}],
+    )
+    max_tags_per_category: dict[str, int] = Field(
+        default_factory=dict,
+        title="Max Tags Per Category",
+        description="Limits the maximum number of tags emitted per category, keeping only the highest-scoring tags.",
+        examples=[{"general": 15, "character": 5}],
+    )
+    max_tags_per_subset: list[TagSubsetConfig] = Field(
+        default_factory=list,
+        title="Joint Subset Limits",
+        description="Joint output limits on arbitrary tag groups (e.g. only 1 tag among safe/questionable/explicit).",
+    )
 
     @model_validator(mode="after")
     def _validate_max_tags(self) -> OutputFilterConfig:
@@ -283,60 +474,161 @@ class OutputFilterConfig(StrictBaseModel):
 class ModelConfig(StrictBaseModel):
     """Per-model configuration."""
 
-    model_id: str = Field(min_length=1)
-    source: str | None = None
-    device: str = "auto"
-    backend: str | None = None
-    precision: str = "auto"
-    batch_size: int = Field(default=1, ge=1)
+    model_id: str = Field(
+        ...,
+        min_length=1,
+        title="Model ID",
+        description="The ID or name of the model to run.",
+        json_schema_extra=field_meta(source="vibe:models"),
+        examples=["wd-swinv2-v3"],
+    )
+    source: str | None = Field(
+        default=None,
+        title="Source Path / Repo",
+        description="Path to local folder containing model weights, or a HuggingFace repo ID. Defaults to standard HF download.",
+        json_schema_extra=field_meta(picker="directory"),
+    )
+    device: str = Field(
+        default="auto",
+        title="Hardware Device",
+        description="Hardware device to run inference on (e.g. auto, cuda, cpu, mps, xpu).",
+        examples=["auto", "cuda", "cpu"],
+    )
+    backend: str | None = Field(
+        default=None,
+        title="Execution Backend",
+        description="Execution engine backend",
+        examples=["pytorch"],
+    )
+    precision: str = Field(
+        default="auto",
+        title="Precision",
+        description="Numerical precision: fp16, bf16, fp32, or auto. Lower precision reduces memory usage. Ignored if backend is onnx.",
+        examples=["auto", "fp16", "bf16", "fp32"],
+    )
+    batch_size: int = Field(
+        default=1,
+        ge=1,
+        title="Batch Size", # todo: add batch_method setting to force cpu to use true batching?
+        description="Number of files processed simultaneously in a single forward pass. Higher values increase memory usage. If device is CPU, batch_size is always 1.",
+        examples=[1, 4],
+    )
 
-    output_filter: OutputFilterConfig | None = None
-    output_tag_services: OutputTagServices | None = None
+    output_filter: OutputFilterConfig | None = Field(
+        default=None,
+        title="Model Output Filter Overrides",
+        description="Optional per-model overrides for output filtering. Missing/Unset keys fall back to global output_filter.",
+    )
+    output_tag_services: OutputTagServices | None = Field(
+        default=None,
+        title="Model Destination Tag Services",
+        description="Optional per-model override for destination tag services. Completely replaces global services when set.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
 
 
 class InferenceConfig(StrictBaseModel):
     """Model list and per-model configuration."""
 
-    models: list[ModelConfig] = Field(min_length=1)
+    models: list[ModelConfig] = Field(
+        ...,
+        min_length=1,
+        title="Configured Models",
+        description="List of model sessions to load and execute sequentially.",
+    )
 
 
 class HydrusConfig(StrictBaseModel):
     """Hydrus connection + search/preview/output settings."""
 
-    api_url: str = Field(min_length=1)
-    api_key: str = Field(min_length=1)
+    api_url: str = Field(
+        ...,
+        min_length=1,
+        title="Hydrus API URL",
+        description="The base URL of your Hydrus client API.",
+        examples=["http://127.0.0.1:45869"],
+    )
+    api_key: str = Field(
+        ...,
+        min_length=1,
+        title="Hydrus API Key",
+        description="Your Hydrus API key.",
+    )
     no_wait: bool = Field(
         default=False,
-        description="Do not wait for Hydrus if it is offline/unreachable; fail fast instead.",
+        title="Fail Fast (No Wait)",
+        description="Do not wait for Hydrus if it is offline or unreachable; fail fast instead.",
     )
 
-    tag_queries: list[TagQueryConfig] = Field(default_factory=list)
-    page_queries: list[PageQueryConfig] = Field(default_factory=list)
-    preview: PreviewConfig | None = None
-    output_tag_services: OutputTagServices = Field(default_factory=OutputTagServices)
-    add_tags: AddTagConfig | None = None
-    remove_tags: RemoveTagConfig | None = None
+    tag_queries: list[TagQueryConfig] = Field(
+        default_factory=list,
+        title="Tag Queries",
+        description="Search queries based on tags and service keys to collect candidate files.",
+    )
+    page_queries: list[PageQueryConfig] = Field(
+        default_factory=list,
+        title="Page Queries",
+        description="Queries targeting open pages/tabs in the Hydrus client.",
+    )
+    preview: PreviewConfig | None = Field(
+        default=None,
+        title="Client Previews",
+        description="Optional settings to send candidate and/or rejected files to preview pages in Hydrus.",
+    )
+    output_tag_services: OutputTagServices = Field(
+        default_factory=OutputTagServices,
+        title="Destination Tag Services (Global)",
+        description="Hydrus tag services where inferred tags will be written.",
+        json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
+    add_tags: AddTagConfig | None = Field(
+        default=None,
+        title="Post-Run Additional Tags",
+        description="Extra tags to apply to files after all configured models have processed them successfully.",
+    )
+    remove_tags: RemoveTagConfig | None = Field(
+        default=None,
+        title="Post-Run Cleanup Tags",
+        description="Cleanup rules for removing temporary search/queue tags from Hydrus after all models succeed.",
+    )
 
 
 class DatabaseConfig(StrictBaseModel):
-    path: str = "data/hyvis.db"
+    path: str = Field(
+        default="data/hyvis.db",
+        title="Database File Path",
+        description="Desired path to the SQLite database for HyVis to use.",
+        json_schema_extra=field_meta(picker="file"),
+        examples=["data/hyvis.db"],
+    )
     cache_raw_predictions: bool = Field(
         default=True,
-        description="Save un-culled model predictions in the database to allow re-filtering without re-running inference.",
+        title="Cache Raw Predictions",
+        description="Save un-culled model predictions in the database to allow instant re-filtering without re-running inference.",
     )
     min_cache_score: float = Field(
         default=0.01,
         ge=0.0,
         le=1.0,
-        description="Minimum confidence threshold to store in raw cache. Drops zero-confidence noise.",
+        title="Min. Raw Cache Score",
+        description="Minimum confidence score stored in raw cache. The default of 0.01 prunes zero-confidence noise to save disk space. Values below 0.01 may increase database size significantly.",
+        examples=[0.01],
     )
 
 
 class HyvisConfig(StrictBaseModel):
     """Application-level settings."""
 
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
-    infer_only: bool = Field(default=False, description="Run model inference only; do not push results to Hydrus.")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="WARNING",
+        title="Console Log Level",
+        description="Console logging verbosity level.",
+    )
+    infer_only: bool = Field(
+        default=False,
+        title="Inference Only Mode",
+        description="Run model inference only; do not push results to Hydrus.",
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -347,11 +639,31 @@ class HyvisConfig(StrictBaseModel):
 
 
 class AppConfig(StrictBaseModel):
-    hydrus: HydrusConfig
-    inference: InferenceConfig
-    output_filter: OutputFilterConfig
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    hyvis: HyvisConfig = Field(default_factory=HyvisConfig)
+    hydrus: HydrusConfig = Field(
+        ...,
+        title="Hydrus & Queries",
+        description="Hydrus client connection parameters, queries, and destination tag services.",
+    )
+    inference: InferenceConfig = Field(
+        ...,
+        title="Inference Models",
+        description="Definitions of model sessions to load and execute.",
+    )
+    output_filter: OutputFilterConfig = Field(
+        ...,
+        title="Global Output Filter",
+        description="Global settings for filtering, thresholding, and transforming tags before pushing to Hydrus.",
+    )
+    database: DatabaseConfig = Field(
+        default_factory=DatabaseConfig,
+        title="Database",
+        description="Local SQLite state, file tracking, and prediction cache settings.",
+    )
+    hyvis: HyvisConfig = Field(
+        default_factory=HyvisConfig,
+        title="Application Settings",
+        description="Application-level execution behavior and logging verbosity.",
+    )
 
     # region Helpers
 
@@ -411,8 +723,8 @@ class AppConfig(StrictBaseModel):
         """
         Return a list of human-readable validation errors (empty → OK).
 
-        Note: Most type/range validation is now handled automatically by Pydantic
-        at parse time. This method only checks cross-field business rules that
+        Note: Most type/range validation is handled automatically by Pydantic
+        at parse time. This method checks cross-field business rules that
         cannot be expressed as field-level constraints.
         """
         errors: list[str] = []
