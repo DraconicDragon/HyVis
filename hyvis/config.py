@@ -509,7 +509,7 @@ class ModelConfig(StrictBaseModel):
     batch_size: int = Field(
         default=1,
         ge=1,
-        title="Batch Size", # todo: add batch_method setting to force cpu to use true batching?
+        title="Batch Size",  # todo: add batch_method setting to force cpu to use true batching?
         description="Number of files processed simultaneously in a single forward pass. Higher values increase memory usage. If device is CPU, batch_size is always 1.",
         examples=[1, 4],
     )
@@ -550,7 +550,6 @@ class HydrusConfig(StrictBaseModel):
     )
     api_key: str = Field(
         ...,
-        min_length=1,
         title="Hydrus API Key",
         description="Your Hydrus API key.",
     )
