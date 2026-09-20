@@ -17,10 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 def _prune_none(obj: Any) -> Any:
-    """Recursively prune None values from dictionaries since TOML does not support null."""
+    """Recursively prune None values from dictionaries and collections since TOML does not support null."""
     if isinstance(obj, dict):
-        return {k: _prune_none(v) for k, v in obj.items() if v is not None}
-    if isinstance(obj, list):
+        cleaned: dict[str, Any] = {}
+        for k, v in obj.items():
+            if v is not None:
+                pruned = _prune_none(v)
+                if pruned is not None:
+                    cleaned[k] = pruned
+        return cleaned
+    if isinstance(obj, (list, tuple)):
         return [_prune_none(v) for v in obj if v is not None]
     return obj
 
