@@ -31,7 +31,7 @@ def _prune_none(obj: Any) -> Any:
     return obj
 
 
-# Minimal starter template for new configurations
+# Minimal starter template for new configurations (starts with clean empty categories)
 _DEFAULT_CONFIG_DICT: dict[str, Any] = {
     "hydrus": {
         "api_url": "http://127.0.0.1:45869",
@@ -52,7 +52,7 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
     "output_filter": {
         "default_threshold": 0.4,
         "prefer_tag_level_thresholds": True,
-        "output_categories": ["general", "character", "rating"],
+        "output_categories": [],
     },
     "database": {
         "path": "data/hyvis.db",

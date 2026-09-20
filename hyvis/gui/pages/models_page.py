@@ -4,6 +4,7 @@ models_page.py — Model session management with dynamic discovery from vibe.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from PySide6.QtCore import Signal
@@ -33,6 +34,7 @@ class ModelsPage(QWidget):
     """Configuration page for [[inference.models]]."""
 
     changed = Signal()
+    request_filter_scope = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -159,6 +161,21 @@ class ModelsPage(QWidget):
         svc_layout.addWidget(self.model_services_editor)
         self.form_layout.addWidget(self.svc_group)
 
+        # Model Output Filter Status Card
+        self.filter_card = QGroupBox("Model Output Filter", right_container)
+        filter_card_layout = QHBoxLayout(self.filter_card)
+        filter_card_layout.setContentsMargins(10, 8, 10, 8)
+
+        self.filter_status_label = QLabel("Inheriting all settings from Global Filter", self.filter_card)
+        filter_card_layout.addWidget(self.filter_status_label, stretch=1)
+
+        self.edit_filter_btn = QPushButton("⚙ Configure Filter Overrides...", self.filter_card)
+        self.edit_filter_btn.setToolTip("Switch to Filters page and edit custom overrides for this model")
+        self.edit_filter_btn.clicked.connect(self._on_edit_filter_clicked)
+        filter_card_layout.addWidget(self.edit_filter_btn)
+
+        self.form_layout.addWidget(self.filter_card)
+
         self.form_layout.addStretch()
         right_scroll.setWidget(right_container)
         splitter.addWidget(right_scroll)
@@ -256,6 +273,9 @@ class ModelsPage(QWidget):
         self.batch_spin.blockSignals(False)
         self.svc_group.blockSignals(False)
 
+        # Update output filter status card
+        self._update_filter_status_card(m)
+
     def _save_form_to_model(self, index: int) -> None:
         if index < 0 or index >= len(self._models_data):
             return
@@ -322,3 +342,31 @@ class ModelsPage(QWidget):
         next_row = max(0, row - 1)
         self.model_list.setCurrentRow(next_row)
         self.changed.emit()
+
+    def _update_filter_status_card(self, m: dict[str, Any]) -> None:
+        """Update the filter status card label based on active overrides."""
+        m_filter = m.get("output_filter")
+        if m_filter:
+            override_count = len(m_filter)
+            self.filter_status_label.setText(
+                f"<span style='color: #4fc3f7;'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
+            )
+        else:
+            self.filter_status_label.setText(
+                "<span style='color: #888;'>Inheriting all settings from Global Filter</span>"
+            )
+
+    def update_filter_overrides(self, models_data: list[dict[str, Any]]) -> None:
+        """Sync output_filter overrides modified in FiltersPage back into model data."""
+        for i, m_src in enumerate(models_data):
+            if i < len(self._models_data):
+                self._models_data[i]["output_filter"] = (
+                    copy.deepcopy(m_src.get("output_filter")) if m_src.get("output_filter") else None
+                )
+
+        if 0 <= self._current_index < len(self._models_data):
+            self._update_filter_status_card(self._models_data[self._current_index])
+
+    def _on_edit_filter_clicked(self) -> None:
+        if self._current_index >= 0:
+            self.request_filter_scope.emit(self._current_index)

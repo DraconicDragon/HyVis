@@ -8,8 +8,9 @@ Includes:
   - KeyValueEditor: Reusable table for prefix mappings and tag replacements.
   - ThresholdTableEditor: Table for category and tag thresholds with TLT override checkboxes.
   - SubsetListEditor: Table for managing max_tags_per_subset rule groups.
-  - setup_field_tooltip: Helper to wire Pydantic Field descriptions directly to Qt tooltips.
-  - bind_field_metadata: Helper to wire tooltips and example placeholders simultaneously.
+  - CategoryTagEditor: Dynamic category list editor starting empty with vibe suggestions.
+  - SectionCard: Card container with inline header, checkable toggle, and title tooltip.
+  - setup_field_tooltip / bind_field_metadata / add_form_row: Metadata wiring helpers.
 """
 
 from __future__ import annotations
@@ -18,11 +19,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -36,18 +40,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-DEFAULT_SUGGESTIONS = [
-    "general",
-    "character",
-    "rating",
-    "artist",
-    "copyright",
-    "meta",
-    "species",
-    "lore",
-    "contributor",
-]
 
 
 def setup_field_tooltip(widget: QWidget, field_info: Any) -> None:
@@ -68,13 +60,180 @@ def bind_field_metadata(widget: QWidget, field_info: Any, set_placeholder: bool 
             widget.setPlaceholderText(str(first_example))
 
 
+# region Form Helpers & Styling
+
+STYLE_OVERRIDDEN = "border: 1.5px solid #38bdf8 !important; background-color: rgba(56, 189, 248, 0.08) !important;"
+STYLE_ERROR = "border: 1.5px solid #f85149 !important; background-color: rgba(248, 81, 73, 0.08) !important;"
+
+
+def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bool = False) -> None:
+    """Apply or clear visual override/error highlighting on an input widget or table/list."""
+    target = widget
+    if hasattr(widget, "list_widget"):
+        target = widget.list_widget
+    elif hasattr(widget, "table"):
+        target = widget.table
+
+    if is_error:
+        target.setStyleSheet(STYLE_ERROR)
+    elif is_overridden:
+        target.setStyleSheet(STYLE_OVERRIDDEN)
+    else:
+        target.setStyleSheet("")
+
+
+def add_form_row(
+    layout: QFormLayout,
+    field_info: Any,
+    widget: QWidget,
+    label_text: str | None = None,
+) -> QLabel:
+    """
+    Add a row to a QFormLayout, assigning field_info.description tooltip
+    to BOTH the newly created QLabel and the input widget simultaneously.
+    """
+    title = label_text or getattr(field_info, "title", None) or "Field"
+    label = QLabel(f"{title}:")
+    setup_field_tooltip(label, field_info)
+    bind_field_metadata(widget, field_info)
+    layout.addRow(label, widget)
+    return label
+
+
+# endregion
+
+
+# region Section Card
+
+
+class SectionCard(QFrame):
+    """
+    A structured card with an inline header:
+    [ Optional CheckBox ] [ Title Label (with tooltip) ] [ Stretch ] [ Status Badge ]
+    Clicking the title label toggles the checkbox when checkable.
+    """
+
+    toggled = Signal(bool)
+
+    def __init__(
+        self,
+        title: str = "",
+        tooltip: str = "",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._is_checkable = False
+
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(
+            "SectionCard {"
+            "  border: 1px solid rgba(255, 255, 255, 0.10);"
+            "  border-radius: 6px;"
+            "  background: rgba(255, 255, 255, 0.015);"
+            "}"
+        )
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(10, 8, 10, 10)
+        card_layout.setSpacing(8)
+
+        # Header row
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+
+        self._checkbox = QCheckBox(self)
+        self._checkbox.setVisible(False)
+        self._checkbox.toggled.connect(self._on_check_toggled)
+        header_layout.addWidget(self._checkbox)
+
+        self._title_label = QLabel(title, self)
+        self._title_label.setStyleSheet("font-weight: 650;")
+        if tooltip:
+            self._title_label.setToolTip(tooltip)
+        self._title_label.mousePressEvent = self._on_title_clicked
+        header_layout.addWidget(self._title_label)
+
+        header_layout.addStretch(1)
+
+        self._badge_label = QLabel(self)
+        self._badge_label.setStyleSheet("font-size: 12px; font-weight: 500;")
+        self._badge_label.setVisible(False)
+        header_layout.addWidget(self._badge_label)
+
+        card_layout.addLayout(header_layout)
+
+        # Content container
+        self._content_widget = QWidget(self)
+        self._content_layout = QVBoxLayout(self._content_widget)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(6)
+        card_layout.addWidget(self._content_widget)
+
+    @property
+    def content_layout(self) -> QVBoxLayout:
+        return self._content_layout
+
+    def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
+        """Replace internal content layout with a specialized layout."""
+        QWidget().setLayout(self._content_layout)
+        self._content_layout = layout  # type: ignore[assignment]
+        self._content_widget.setLayout(layout)
+
+    def setCheckable(self, checkable: bool) -> None:
+        self._is_checkable = checkable
+        self._checkbox.setVisible(checkable)
+        self._title_label.setCursor(Qt.CursorShape.PointingHandCursor if checkable else Qt.CursorShape.ArrowCursor)
+        if not checkable:
+            self._content_widget.setEnabled(True)
+
+    def setChecked(self, checked: bool) -> None:
+        self._checkbox.blockSignals(True)
+        self._checkbox.setChecked(checked)
+        self._checkbox.blockSignals(False)
+        self._content_widget.setEnabled(checked if self._is_checkable else True)
+
+    def isChecked(self) -> bool:
+        return self._checkbox.isChecked() if self._is_checkable else True
+
+    def setTitle(self, title: str) -> None:
+        self._title = title
+        self._title_label.setText(title)
+
+    def setBadge(self, text: str, color: str = "#38bdf8") -> None:
+        if text:
+            self._badge_label.setText(f"<span style='color: {color};'>{text}</span>")
+            self._badge_label.setVisible(True)
+        else:
+            self._badge_label.clear()
+            self._badge_label.setVisible(False)
+
+    def set_info_tooltip(self, tooltip: str) -> None:
+        """Set the tooltip directly on the title label."""
+        self._title_label.setToolTip(tooltip)
+
+    def _on_check_toggled(self, checked: bool) -> None:
+        self._content_widget.setEnabled(checked)
+        self.toggled.emit(checked)
+
+    def _on_title_clicked(self, event: QMouseEvent) -> None:
+        if self._is_checkable and event.button() == Qt.MouseButton.LeftButton:
+            self._checkbox.toggle()
+        else:
+            QLabel.mousePressEvent(self._title_label, event)
+
+
+# endregion
+
+
 # region String List Editor
 
 
 class StringListEditor(QWidget):
     """
     A widget for viewing, adding, and removing a list of strings.
-    Used for include_tags, exclude_tags, and output_categories.
+    Used for include_tags, exclude_tags, and general tag groups.
     """
 
     changed = Signal()
@@ -93,6 +252,7 @@ class StringListEditor(QWidget):
         # 1. List view
         self.list_widget = QListWidget(self)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list_widget.setMinimumHeight(100)
         layout.addWidget(self.list_widget)
 
         # 2. Input and Action Bar
@@ -115,7 +275,6 @@ class StringListEditor(QWidget):
         layout.addLayout(input_layout)
 
     def get_items(self) -> list[str]:
-        """Return all items currently in the list."""
         items: list[str] = []
         for i in range(self.list_widget.count()):
             text = self.list_widget.item(i).text().strip()
@@ -124,7 +283,6 @@ class StringListEditor(QWidget):
         return items
 
     def set_items(self, items: Sequence[str]) -> None:
-        """Populate the list widget without emitting dirty signals."""
         self.blockSignals(True)
         self.list_widget.clear()
         for item in items:
@@ -138,7 +296,6 @@ class StringListEditor(QWidget):
         if not text:
             return
 
-        # Avoid duplicate entries in simple lists
         existing = set(self.get_items())
         if text not in existing:
             self.list_widget.addItem(QListWidgetItem(text))
@@ -173,7 +330,6 @@ class TagServiceListEditor(QWidget):
     """
     Stacked row editor for Hydrus tag service keys.
     Displays human-readable service names with underlying hex keys.
-    Each row has an [✕] button, and an '+ Add Service' button sits below.
     """
 
     changed = Signal()
@@ -185,7 +341,7 @@ class TagServiceListEditor(QWidget):
     ) -> None:
         super().__init__(parent)
         self.writable_only = writable_only
-        self._available_services: dict[str, str] = {}  # key -> friendly name
+        self._available_services: dict[str, str] = {}
         self._row_widgets: list[QWidget] = []
 
         self._root_layout = QVBoxLayout(self)
@@ -215,19 +371,15 @@ class TagServiceListEditor(QWidget):
         self._update_empty_state()
 
     def set_available_services(self, services: dict[str, str]) -> None:
-        """Update available services and refresh all active comboboxes in-place."""
         self._available_services = dict(services)
-
         for row_widget in self._row_widgets:
             combo: QComboBox | None = row_widget.findChild(QComboBox)
             if not combo:
                 continue
-
             current_key = combo.currentData()
             self._repopulate_combo(combo, selected_key=current_key)
 
     def get_items(self) -> list[str]:
-        """Return all selected service keys."""
         keys: list[str] = []
         for row_widget in self._row_widgets:
             combo: QComboBox | None = row_widget.findChild(QComboBox)
@@ -238,13 +390,10 @@ class TagServiceListEditor(QWidget):
         return keys
 
     def set_items(self, keys: Sequence[str]) -> None:
-        """Populate stacked rows from a list of keys without emitting changed signal."""
         self.blockSignals(True)
         self._clear_rows()
-
         for key in keys:
             self._add_row(key)
-
         self._update_empty_state()
         self.blockSignals(False)
 
@@ -258,13 +407,11 @@ class TagServiceListEditor(QWidget):
         combo.blockSignals(True)
         combo.clear()
 
-        # Add all known services from Hydrus
         for key, name in self._available_services.items():
             short_key = f"{key[:8]}..." if len(key) > 12 else key
             display = f"{name}  ({short_key})"
             combo.addItem(display, userData=key)
 
-        # If current key is unknown / offline, preserve it in the dropdown
         if selected_key:
             idx = combo.findData(selected_key)
             if idx >= 0:
@@ -284,11 +431,10 @@ class TagServiceListEditor(QWidget):
         row_layout.setSpacing(6)
 
         combo = QComboBox(row_widget)
-        combo.setEditable(True)  # Allows pasting custom/raw keys if Hydrus is offline
+        combo.setEditable(True)
         self._repopulate_combo(combo, selected_key=initial_key)
 
         if initial_key is None and self._available_services:
-            # Default to first available service not already selected if possible
             existing_keys = set(self.get_items())
             for key in self._available_services:
                 if key not in existing_keys:
@@ -303,7 +449,6 @@ class TagServiceListEditor(QWidget):
             line_edit.editingFinished.connect(lambda: self._on_combo_edited(combo))
         row_layout.addWidget(combo, stretch=1)
 
-        # Subtle red-accented remove button
         del_btn = QPushButton("✕", row_widget)
         del_btn.setFixedWidth(28)
         del_btn.setToolTip("Remove this service")
@@ -320,7 +465,6 @@ class TagServiceListEditor(QWidget):
         return row_widget
 
     def _on_combo_edited(self, combo: QComboBox) -> None:
-        """Handle manual typing or pasting of raw keys into the combo."""
         text = combo.currentText().strip()
         if text and combo.findData(text) < 0:
             combo.setItemData(combo.currentIndex(), text)
@@ -395,7 +539,6 @@ class KeyValueEditor(QWidget):
         layout.addLayout(btn_layout)
 
     def get_mapping(self) -> dict[str, str]:
-        """Return current valid key-value pairs."""
         mapping: dict[str, str] = {}
         for row in range(self.table.rowCount()):
             key_item = self.table.item(row, 0)
@@ -407,7 +550,6 @@ class KeyValueEditor(QWidget):
         return mapping
 
     def set_mapping(self, mapping: Mapping[str, str]) -> None:
-        """Populate table from mapping without firing changed signals."""
         self.table.blockSignals(True)
         self.table.setRowCount(0)
 
@@ -426,7 +568,6 @@ class KeyValueEditor(QWidget):
         self.table.setItem(row, 1, QTableWidgetItem(""))
         self.table.blockSignals(False)
 
-        # Focus new key cell
         item = self.table.item(row, 0)
         self.table.setCurrentItem(item)
         self.table.editItem(item)
@@ -441,7 +582,6 @@ class KeyValueEditor(QWidget):
         for row in selected_rows:
             self.table.removeRow(row)
         self.table.blockSignals(False)
-
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -458,7 +598,7 @@ class KeyValueEditor(QWidget):
 class ThresholdTableEditor(QWidget):
     """
     A specialized 3-column table for category_thresholds and tag_thresholds.
-    Columns: [Target (Tag or Category), Threshold (0.00-1.00), Override TLT (Checkbox)].
+    Columns: [Target, Threshold, Override TLT].
     """
 
     changed = Signal()
@@ -501,7 +641,6 @@ class ThresholdTableEditor(QWidget):
         layout.addLayout(btn_layout)
 
     def get_thresholds(self) -> dict[str, dict[str, Any]]:
-        """Return dict formatted as {target: {'threshold': float, 'override_tlt': bool}}."""
         results: dict[str, dict[str, Any]] = {}
 
         for row in range(self.table.rowCount()):
@@ -528,7 +667,6 @@ class ThresholdTableEditor(QWidget):
         return results
 
     def set_thresholds(self, data: Mapping[str, Any]) -> None:
-        """Populate table from config dictionary."""
         self.table.blockSignals(True)
         self.table.setRowCount(0)
 
@@ -536,7 +674,6 @@ class ThresholdTableEditor(QWidget):
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(str(target)))
 
-            # Threshold spinbox
             val = conf.threshold if hasattr(conf, "threshold") else conf.get("threshold", 0.40)
             spin = QDoubleSpinBox(self)
             spin.setRange(0.0, 1.0)
@@ -546,13 +683,11 @@ class ThresholdTableEditor(QWidget):
             spin.valueChanged.connect(lambda _: self.changed.emit())
             self.table.setCellWidget(row, 1, spin)
 
-            # Override TLT checkbox
             ovr = conf.override_tlt if hasattr(conf, "override_tlt") else conf.get("override_tlt", False)
             chk = QCheckBox(self)
             chk.setChecked(bool(ovr))
             chk.toggled.connect(lambda _: self.changed.emit())
 
-            # Center checkbox in cell
             chk_container = QWidget(self)
             chk_layout = QHBoxLayout(chk_container)
             chk_layout.setContentsMargins(0, 0, 0, 0)
@@ -605,7 +740,6 @@ class ThresholdTableEditor(QWidget):
         for row in selected_rows:
             self.table.removeRow(row)
         self.table.blockSignals(False)
-
         self.changed.emit()
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
@@ -634,7 +768,6 @@ class SubsetListEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. Table
         self.table = QTableWidget(0, 2, self)
         self.table.setHorizontalHeaderLabels(["Tags (comma-separated)", "Limit"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -643,7 +776,6 @@ class SubsetListEditor(QWidget):
         self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)
 
-        # 2. Action Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
 
@@ -659,7 +791,6 @@ class SubsetListEditor(QWidget):
         layout.addLayout(btn_layout)
 
     def get_subsets(self) -> list[dict[str, Any]]:
-        """Return list of dicts: [{'tags': ['cat', 'dog'], 'limit': 1}, ...]"""
         subsets: list[dict[str, Any]] = []
 
         for row in range(self.table.rowCount()):
@@ -668,7 +799,6 @@ class SubsetListEditor(QWidget):
             if not raw_text:
                 continue
 
-            # Split on comma
             tags = [t.strip() for t in raw_text.split(",") if t.strip()]
             if not tags:
                 continue
@@ -681,7 +811,6 @@ class SubsetListEditor(QWidget):
         return subsets
 
     def set_subsets(self, subsets: Sequence[Any]) -> None:
-        """Populate table from TagSubsetConfig sequence."""
         self.table.blockSignals(True)
         self.table.setRowCount(0)
 
@@ -729,7 +858,6 @@ class SubsetListEditor(QWidget):
         for row in selected_rows:
             self.table.removeRow(row)
         self.table.blockSignals(False)
-
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -740,11 +868,13 @@ class SubsetListEditor(QWidget):
 # endregion
 
 
+# region Category Tag Editor
+
+
 class CategoryTagEditor(QWidget):
     """
     Dynamic category list editor.
-    Displays active categories in a list with an editable combobox + Add/Remove bar.
-    Populates suggestions based on vibe model metadata and canonical categories.
+    Starts empty by default; populates suggestions dynamically from vibe model metadata.
     """
 
     changed = Signal()
@@ -752,16 +882,16 @@ class CategoryTagEditor(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._suggestions: list[str] = list(DEFAULT_SUGGESTIONS)
+        self._suggestions: list[str] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. List of active categories
+        # 1. List of active categories (starts completely empty)
         self.list_widget = QListWidget(self)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_widget.setMinimumHeight(110)
+        self.list_widget.setMinimumHeight(95)
         layout.addWidget(self.list_widget)
 
         # 2. Add bar with editable combobox
@@ -771,10 +901,9 @@ class CategoryTagEditor(QWidget):
         self.combo = QComboBox(self)
         self.combo.setEditable(True)
         self.combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._refresh_combo()
         line_edit = self.combo.lineEdit()
         if line_edit is not None:
-            line_edit.setPlaceholderText("Select or type custom category...")
+            line_edit.setPlaceholderText("Select or type category...")
             line_edit.returnPressed.connect(self._on_add)
         input_layout.addWidget(self.combo, stretch=1)
 
@@ -797,9 +926,8 @@ class CategoryTagEditor(QWidget):
         self.combo.blockSignals(False)
 
     def set_suggestions(self, suggestions: Sequence[str]) -> None:
-        """Update suggestion list based on active models or vibe metadata."""
-        merged = list(dict.fromkeys(list(suggestions) + DEFAULT_SUGGESTIONS))
-        self._suggestions = merged
+        """Update suggestion list strictly from dynamic models / vibe catalog."""
+        self._suggestions = sorted(dict.fromkeys(suggestions))
         self._refresh_combo()
 
     def get_items(self) -> list[str]:
@@ -840,3 +968,6 @@ class CategoryTagEditor(QWidget):
             self.list_widget.takeItem(row)
 
         self.changed.emit()
+
+
+# endregion

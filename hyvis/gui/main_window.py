@@ -197,6 +197,13 @@ class MainWindow(QMainWindow):
         self.filters_page.changed.connect(self._on_page_modified)
         self.app_db_page.changed.connect(self._on_page_modified)
 
+        # Cross-page synchronization for per-model filters
+        self.models_page.request_filter_scope.connect(self._on_request_filter_scope)
+        self.models_page.changed.connect(lambda: self.filters_page.sync_models(self.models_page._models_data))
+        self.filters_page.changed.connect(
+            lambda: self.models_page.update_filter_overrides(self.filters_page._models_data)
+        )
+
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         self.hydrus_page.load_config(cfg)
         self.models_page.load_config(cfg)
@@ -210,6 +217,12 @@ class MainWindow(QMainWindow):
         self.filters_page.apply_to_dict(data)
         self.app_db_page.apply_to_dict(data)
         return data
+
+    def _on_request_filter_scope(self, model_index: int) -> None:
+        """Navigate to the Output & Filters page and select the requested model scope."""
+        # Index 2 is FiltersPage (Hydrus=0, Models=1, Filters=2, AppDb=3)
+        self.sidebar.setCurrentRow(2)
+        self.filters_page.set_scope_by_model_index(model_index)
 
     def _on_page_modified(self) -> None:
         try:
