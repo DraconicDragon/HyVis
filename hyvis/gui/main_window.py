@@ -123,11 +123,11 @@ class MainWindow(QMainWindow):
 
         # 2. Main Body Layout (Sidebar + Stacked Pages)
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(14)
+        body_layout.setSpacing(4)
 
         # Left Sidebar
         self.sidebar = QListWidget(self)
-        self.sidebar.setFixedWidth(200)
+        self.sidebar.setFixedWidth(168)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         sidebar_sections = [
