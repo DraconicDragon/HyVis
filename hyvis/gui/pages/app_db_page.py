@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
-from hyvis.gui.widgets import bind_field_metadata, setup_field_tooltip
+from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, setup_field_tooltip
 
 
 class AppDbPage(QWidget):
@@ -32,6 +31,7 @@ class AppDbPage(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._is_loading_ui: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -41,74 +41,96 @@ class AppDbPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
-        # 1. Database Settings
-        db_group = QGroupBox(app_fields["database"].title, self)
-        setup_field_tooltip(db_group, app_fields["database"])
-        db_layout = QFormLayout(db_group)
+        # 1. Database Settings Card
+        db_title = app_fields["database"].title or "Database"
+        self.db_card = SectionCard(
+            title=db_title,
+            tooltip=app_fields["database"].description or "",
+            parent=self,
+        )
+        db_layout = QFormLayout()
         db_layout.setSpacing(8)
 
-        path_row = QHBoxLayout()
-        self.db_path_edit = QLineEdit(self)
+        # DB Path Row
+        path_box = QWidget(self)
+        path_row = QHBoxLayout(path_box)
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(6)
+
+        self.db_path_edit = QLineEdit(path_box)
         bind_field_metadata(self.db_path_edit, db_fields["path"])
-        self.db_path_edit.textChanged.connect(lambda _: self.changed.emit())
+        self.db_path_edit.textChanged.connect(lambda _: self._on_field_changed())
         path_row.addWidget(self.db_path_edit, stretch=1)
 
-        self.browse_db_btn = QPushButton("Browse...", self)
+        self.browse_db_btn = QPushButton("Browse...", path_box)
         self.browse_db_btn.clicked.connect(self._on_browse_db)
         path_row.addWidget(self.browse_db_btn)
-        db_layout.addRow(f"{db_fields['path'].title}:", path_row)
 
+        add_form_row(db_layout, db_fields["path"], path_box)
+
+        # Cache raw predictions checkbox
         self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, self)
         setup_field_tooltip(self.cache_raw_chk, db_fields["cache_raw_predictions"])
         self.cache_raw_chk.setChecked(True)
-        self.cache_raw_chk.toggled.connect(lambda _: self.changed.emit())
+        self.cache_raw_chk.toggled.connect(lambda _: self._on_field_changed())
         db_layout.addRow("", self.cache_raw_chk)
 
+        # Min score spinbox
         self.min_score_spin = QDoubleSpinBox(self)
         self.min_score_spin.setRange(0.0, 1.0)
         self.min_score_spin.setSingleStep(0.005)
         self.min_score_spin.setDecimals(3)
         self.min_score_spin.setValue(0.010)
-        setup_field_tooltip(self.min_score_spin, db_fields["min_cache_score"])
-        self.min_score_spin.valueChanged.connect(lambda _: self.changed.emit())
-        db_layout.addRow(f"{db_fields['min_cache_score'].title}:", self.min_score_spin)
+        self.min_score_spin.valueChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(db_layout, db_fields["min_cache_score"], self.min_score_spin)
 
-        layout.addWidget(db_group)
+        self.db_card.setContentLayout(db_layout)
+        layout.addWidget(self.db_card)
 
-        # 2. HyVis Application Settings
-        app_group = QGroupBox(app_fields["hyvis"].title, self)
-        setup_field_tooltip(app_group, app_fields["hyvis"])
-        app_layout = QFormLayout(app_group)
+        # 2. HyVis Application Settings Card
+        hy_title = app_fields["hyvis"].title or "Application Settings"
+        self.app_card = SectionCard(
+            title=hy_title,
+            tooltip=app_fields["hyvis"].description or "",
+            parent=self,
+        )
+        app_layout = QFormLayout()
         app_layout.setSpacing(8)
 
         self.log_level_combo = QComboBox(self)
         self.log_level_combo.addItems(["WARNING", "INFO", "DEBUG", "ERROR"])
-        setup_field_tooltip(self.log_level_combo, hy_fields["log_level"])
-        self.log_level_combo.currentTextChanged.connect(lambda _: self.changed.emit())
-        app_layout.addRow(f"{hy_fields['log_level'].title}:", self.log_level_combo)
+        self.log_level_combo.currentTextChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(app_layout, hy_fields["log_level"], self.log_level_combo)
 
         self.infer_only_chk = QCheckBox(hy_fields["infer_only"].title, self)
         setup_field_tooltip(self.infer_only_chk, hy_fields["infer_only"])
         self.infer_only_chk.setChecked(False)
-        self.infer_only_chk.toggled.connect(lambda _: self.changed.emit())
+        self.infer_only_chk.toggled.connect(lambda _: self._on_field_changed())
         app_layout.addRow("", self.infer_only_chk)
 
-        layout.addWidget(app_group)
+        self.app_card.setContentLayout(app_layout)
+        layout.addWidget(self.app_card)
+
         layout.addStretch()
 
+    def _on_field_changed(self) -> None:
+        if self._is_loading_ui:
+            return
+        self.changed.emit()
+
     def load_config(self, cfg: AppConfig) -> None:
-        self.blockSignals(True)
+        self._is_loading_ui = True
+        try:
+            self.db_path_edit.setText(cfg.database.path)
+            self.cache_raw_chk.setChecked(cfg.database.cache_raw_predictions)
+            self.min_score_spin.setValue(cfg.database.min_cache_score)
 
-        self.db_path_edit.setText(cfg.database.path)
-        self.cache_raw_chk.setChecked(cfg.database.cache_raw_predictions)
-        self.min_score_spin.setValue(cfg.database.min_cache_score)
-
-        self.log_level_combo.setCurrentText(cfg.hyvis.log_level)
-        self.infer_only_chk.setChecked(cfg.hyvis.infer_only)
-
-        self.blockSignals(False)
+            self.log_level_combo.setCurrentText(cfg.hyvis.log_level)
+            self.infer_only_chk.setChecked(cfg.hyvis.infer_only)
+        finally:
+            self._is_loading_ui = False
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         db_dict: dict[str, Any] = data.setdefault("database", {})
@@ -126,4 +148,4 @@ class AppDbPage(QWidget):
         )
         if path:
             self.db_path_edit.setText(path)
-            self.changed.emit()
+            self._on_field_changed()

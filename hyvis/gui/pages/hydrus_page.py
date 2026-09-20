@@ -10,7 +10,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -32,7 +31,12 @@ from hyvis.config import (
     RemoveTagConfig,
     TagQueryConfig,
 )
-from hyvis.gui.widgets import TagServiceListEditor, bind_field_metadata, setup_field_tooltip
+from hyvis.gui.widgets import (
+    SectionCard,
+    TagServiceListEditor,
+    add_form_row,
+    setup_field_tooltip,
+)
 
 
 class HydrusPage(QWidget):
@@ -43,6 +47,7 @@ class HydrusPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._available_writable_services: dict[str, str] = {}
+        self._is_loading_ui: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -60,47 +65,58 @@ class HydrusPage(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
-        # 1. API Connection
-        conn_group = QGroupBox("Hydrus API Connection", container)
-        conn_layout = QFormLayout(conn_group)
+        # 1. API Connection Card
+        self.conn_card = SectionCard(
+            title="Hydrus API Connection",
+            tooltip="Connection parameters for the local Hydrus Client API.",
+            parent=container,
+        )
+        conn_layout = QFormLayout()
         conn_layout.setSpacing(8)
 
         self.api_url_edit = QLineEdit(self)
-        bind_field_metadata(self.api_url_edit, h_fields["api_url"])
-        self.api_url_edit.textChanged.connect(lambda _: self.changed.emit())
-        conn_layout.addRow(f"{h_fields['api_url'].title}:", self.api_url_edit)
+        self.api_url_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(conn_layout, h_fields["api_url"], self.api_url_edit)
 
         self.api_key_edit = QLineEdit(self)
         self.api_key_edit.setPlaceholderText("Paste your Hydrus API key here")
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
-        setup_field_tooltip(self.api_key_edit, h_fields["api_key"])
-        self.api_key_edit.textChanged.connect(lambda _: self.changed.emit())
-        conn_layout.addRow(f"{h_fields['api_key'].title}:", self.api_key_edit)
+        self.api_key_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(conn_layout, h_fields["api_key"], self.api_key_edit)
 
         self.no_wait_chk = QCheckBox(h_fields["no_wait"].title, self)
         setup_field_tooltip(self.no_wait_chk, h_fields["no_wait"])
-        self.no_wait_chk.toggled.connect(lambda _: self.changed.emit())
+        self.no_wait_chk.toggled.connect(lambda _: self._on_field_changed())
         conn_layout.addRow("", self.no_wait_chk)
 
-        layout.addWidget(conn_group)
+        self.conn_card.setContentLayout(conn_layout)
+        layout.addWidget(self.conn_card)
 
-        # 2. Output Tag Services (Global)
-        output_group = QGroupBox(h_fields["output_tag_services"].title, container)
-        setup_field_tooltip(output_group, h_fields["output_tag_services"])
-        output_layout = QVBoxLayout(output_group)
-
+        # 2. Output Tag Services (Global) Card
+        out_title = h_fields["output_tag_services"].title or "Destination Tag Services (Global)"
+        self.output_card = SectionCard(
+            title=out_title,
+            tooltip=h_fields["output_tag_services"].description or "",
+            parent=container,
+        )
+        output_layout = QVBoxLayout()
         self.output_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        self.output_services_editor.changed.connect(self.changed.emit)
+        self.output_services_editor.changed.connect(self._on_field_changed)
         output_layout.addWidget(self.output_services_editor)
 
-        layout.addWidget(output_group)
+        self.output_card.setContentLayout(output_layout)
+        layout.addWidget(self.output_card)
 
-        # 3. Tag Queries
-        tag_q_group = QGroupBox(h_fields["tag_queries"].title, container)
-        setup_field_tooltip(tag_q_group, h_fields["tag_queries"])
-        tag_q_layout = QVBoxLayout(tag_q_group)
+        # 3. Tag Queries Card
+        tag_q_title = h_fields["tag_queries"].title or "Tag Queries"
+        self.tag_q_card = SectionCard(
+            title=tag_q_title,
+            tooltip=h_fields["tag_queries"].description or "",
+            parent=container,
+        )
+        tag_q_layout = QVBoxLayout()
 
         self.tag_q_table = QTableWidget(0, 2, self)
         self.tag_q_table.setHorizontalHeaderLabels(
@@ -108,7 +124,7 @@ class HydrusPage(QWidget):
         )
         self.tag_q_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tag_q_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tag_q_table.itemChanged.connect(lambda _: self.changed.emit())
+        self.tag_q_table.itemChanged.connect(lambda _: self._on_field_changed())
         tag_q_layout.addWidget(self.tag_q_table)
 
         tag_btn_layout = QHBoxLayout()
@@ -122,18 +138,23 @@ class HydrusPage(QWidget):
         tag_btn_layout.addStretch()
         tag_q_layout.addLayout(tag_btn_layout)
 
-        layout.addWidget(tag_q_group)
+        self.tag_q_card.setContentLayout(tag_q_layout)
+        layout.addWidget(self.tag_q_card)
 
-        # 4. Page Queries
-        page_q_group = QGroupBox(h_fields["page_queries"].title, container)
-        setup_field_tooltip(page_q_group, h_fields["page_queries"])
-        page_q_layout = QVBoxLayout(page_q_group)
+        # 4. Page Queries Card
+        page_q_title = h_fields["page_queries"].title or "Page Queries"
+        self.page_q_card = SectionCard(
+            title=page_q_title,
+            tooltip=h_fields["page_queries"].description or "",
+            parent=container,
+        )
+        page_q_layout = QVBoxLayout()
 
         self.page_q_table = QTableWidget(0, 2, self)
         self.page_q_table.setHorizontalHeaderLabels([pq_fields["name"].title, f"{pq_fields['index'].title} (Optional)"])
         self.page_q_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.page_q_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.page_q_table.itemChanged.connect(lambda _: self.changed.emit())
+        self.page_q_table.itemChanged.connect(lambda _: self._on_field_changed())
         page_q_layout.addWidget(self.page_q_table)
 
         page_btn_layout = QHBoxLayout()
@@ -147,84 +168,92 @@ class HydrusPage(QWidget):
         page_btn_layout.addStretch()
         page_q_layout.addLayout(page_btn_layout)
 
-        layout.addWidget(page_q_group)
+        self.page_q_card.setContentLayout(page_q_layout)
+        layout.addWidget(self.page_q_card)
 
-        # 5. Additional Post-Run Tags (Checkable Group)
-        self.add_tags_group = QGroupBox(h_fields["add_tags"].title, container)
-        self.add_tags_group.setCheckable(True)
-        self.add_tags_group.setChecked(False)
-        setup_field_tooltip(self.add_tags_group, h_fields["add_tags"])
-        self.add_tags_group.toggled.connect(lambda _: self.changed.emit())
-        add_layout = QFormLayout(self.add_tags_group)
+        # 5. Additional Post-Run Tags Card (Checkable)
+        add_title = h_fields["add_tags"].title or "Post-Run Additional Tags"
+        self.add_tags_card = SectionCard(
+            title=add_title,
+            tooltip=h_fields["add_tags"].description or "",
+            parent=container,
+        )
+        self.add_tags_card.setCheckable(True)
+        self.add_tags_card.setChecked(False)
+        self.add_tags_card.toggled.connect(lambda _: self._on_field_changed())
+        add_layout = QFormLayout()
         add_layout.setSpacing(8)
 
         self.add_tags_edit = QLineEdit(self)
-        bind_field_metadata(self.add_tags_edit, add_fields["tags"])
-        self.add_tags_edit.textChanged.connect(lambda _: self.changed.emit())
-        add_layout.addRow(f"{add_fields['tags'].title}:", self.add_tags_edit)
+        self.add_tags_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(add_layout, add_fields["tags"], self.add_tags_edit)
 
         self.add_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        setup_field_tooltip(self.add_services_editor, add_fields["tag_service_keys"])
-        self.add_services_editor.changed.connect(self.changed.emit)
-        add_layout.addRow(f"{add_fields['tag_service_keys'].title}:", self.add_services_editor)
+        self.add_services_editor.changed.connect(self._on_field_changed)
+        add_form_row(add_layout, add_fields["tag_service_keys"], self.add_services_editor)
 
-        layout.addWidget(self.add_tags_group)
+        self.add_tags_card.setContentLayout(add_layout)
+        layout.addWidget(self.add_tags_card)
 
-        # 6. Cleanup Tags (Checkable Group)
-        self.rem_tags_group = QGroupBox(h_fields["remove_tags"].title, container)
-        self.rem_tags_group.setCheckable(True)
-        self.rem_tags_group.setChecked(False)
-        setup_field_tooltip(self.rem_tags_group, h_fields["remove_tags"])
-        self.rem_tags_group.toggled.connect(lambda _: self.changed.emit())
-        rem_layout = QFormLayout(self.rem_tags_group)
+        # 6. Cleanup Tags Card (Checkable)
+        rem_title = h_fields["remove_tags"].title or "Post-Run Cleanup Tags"
+        self.rem_tags_card = SectionCard(
+            title=rem_title,
+            tooltip=h_fields["remove_tags"].description or "",
+            parent=container,
+        )
+        self.rem_tags_card.setCheckable(True)
+        self.rem_tags_card.setChecked(False)
+        self.rem_tags_card.toggled.connect(lambda _: self._on_field_changed())
+        rem_layout = QFormLayout()
         rem_layout.setSpacing(8)
 
         self.rem_tags_edit = QLineEdit(self)
-        bind_field_metadata(self.rem_tags_edit, rem_fields["tags"])
-        self.rem_tags_edit.textChanged.connect(lambda _: self.changed.emit())
-        rem_layout.addRow(f"{rem_fields['tags'].title}:", self.rem_tags_edit)
+        self.rem_tags_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(rem_layout, rem_fields["tags"], self.rem_tags_edit)
 
         self.rem_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        setup_field_tooltip(self.rem_services_editor, rem_fields["tag_service_keys"])
-        self.rem_services_editor.changed.connect(self.changed.emit)
-        rem_layout.addRow(f"{rem_fields['tag_service_keys'].title}:", self.rem_services_editor)
+        self.rem_services_editor.changed.connect(self._on_field_changed)
+        add_form_row(rem_layout, rem_fields["tag_service_keys"], self.rem_services_editor)
 
-        layout.addWidget(self.rem_tags_group)
+        self.rem_tags_card.setContentLayout(rem_layout)
+        layout.addWidget(self.rem_tags_card)
 
-        # 7. Preview Settings (Checkable Group)
-        self.prev_group = QGroupBox(h_fields["preview"].title, container)
-        self.prev_group.setCheckable(True)
-        self.prev_group.setChecked(False)
-        setup_field_tooltip(self.prev_group, h_fields["preview"])
-        self.prev_group.toggled.connect(lambda _: self.changed.emit())
-        prev_layout = QFormLayout(self.prev_group)
+        # 7. Preview Settings Card (Checkable)
+        prev_title = h_fields["preview"].title or "Client Previews"
+        self.prev_card = SectionCard(
+            title=prev_title,
+            tooltip=h_fields["preview"].description or "",
+            parent=container,
+        )
+        self.prev_card.setCheckable(True)
+        self.prev_card.setChecked(False)
+        self.prev_card.toggled.connect(lambda _: self._on_field_changed())
+        prev_layout = QFormLayout()
         prev_layout.setSpacing(8)
 
         self.prev_name_edit = QLineEdit(self)
-        bind_field_metadata(self.prev_name_edit, prev_fields["page_name"])
-        self.prev_name_edit.textChanged.connect(lambda _: self.changed.emit())
-        prev_layout.addRow(f"{prev_fields['page_name'].title}:", self.prev_name_edit)
+        self.prev_name_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(prev_layout, prev_fields["page_name"], self.prev_name_edit)
 
         self.prev_index_spin = QSpinBox(self)
         self.prev_index_spin.setRange(0, 99)
         self.prev_index_spin.setSpecialValueText("None (Auto)")
-        setup_field_tooltip(self.prev_index_spin, prev_fields["page_index"])
-        self.prev_index_spin.valueChanged.connect(lambda _: self.changed.emit())
-        prev_layout.addRow(f"{prev_fields['page_index'].title}:", self.prev_index_spin)
+        self.prev_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(prev_layout, prev_fields["page_index"], self.prev_index_spin)
 
         self.prev_rej_edit = QLineEdit(self)
-        bind_field_metadata(self.prev_rej_edit, prev_fields["rejected_page_name"])
-        self.prev_rej_edit.textChanged.connect(lambda _: self.changed.emit())
-        prev_layout.addRow(f"{prev_fields['rejected_page_name'].title}:", self.prev_rej_edit)
+        self.prev_rej_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(prev_layout, prev_fields["rejected_page_name"], self.prev_rej_edit)
 
         self.prev_rej_index_spin = QSpinBox(self)
         self.prev_rej_index_spin.setRange(0, 99)
         self.prev_rej_index_spin.setSpecialValueText("None (Auto)")
-        setup_field_tooltip(self.prev_rej_index_spin, prev_fields["rejected_page_index"])
-        self.prev_rej_index_spin.valueChanged.connect(lambda _: self.changed.emit())
-        prev_layout.addRow(f"{prev_fields['rejected_page_index'].title}:", self.prev_rej_index_spin)
+        self.prev_rej_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(prev_layout, prev_fields["rejected_page_index"], self.prev_rej_index_spin)
 
-        layout.addWidget(self.prev_group)
+        self.prev_card.setContentLayout(prev_layout)
+        layout.addWidget(self.prev_card)
 
         # Set scroll root
         scroll.setWidget(container)
@@ -232,6 +261,11 @@ class HydrusPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(scroll)
+
+    def _on_field_changed(self) -> None:
+        if self._is_loading_ui:
+            return
+        self.changed.emit()
 
     def update_services(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
         """Update active services across all tag service editors on this page."""
@@ -241,86 +275,75 @@ class HydrusPage(QWidget):
         self.rem_services_editor.set_available_services(writable_tags)
 
     def load_config(self, cfg: AppConfig) -> None:
-        """Populate widgets from AppConfig without emitting changed signals."""
-        self.blockSignals(True)
-        h = cfg.hydrus
+        """Populate widgets from AppConfig under signal guard."""
+        self._is_loading_ui = True
+        try:
+            h = cfg.hydrus
 
-        self.api_url_edit.setText(h.api_url)
-        self.api_key_edit.setText(h.api_key)
-        self.no_wait_chk.setChecked(h.no_wait)
+            self.api_url_edit.setText(h.api_url)
+            self.api_key_edit.setText(h.api_key)
+            self.no_wait_chk.setChecked(h.no_wait)
 
-        self.output_services_editor.set_items(h.output_tag_services.keys)
+            self.output_services_editor.set_items(h.output_tag_services.keys)
 
-        # Tag Queries
-        self.tag_q_table.blockSignals(True)
-        self.tag_q_table.setRowCount(0)
-        for row, q in enumerate(h.tag_queries):
-            self.tag_q_table.insertRow(row)
-            tags_str = ", ".join(str(t) for t in q.tags)
-            keys_str = ", ".join(q.tag_service_keys)
-            self.tag_q_table.setItem(row, 0, QTableWidgetItem(tags_str))
-            self.tag_q_table.setItem(row, 1, QTableWidgetItem(keys_str))
-        self.tag_q_table.blockSignals(False)
+            # Tag Queries
+            self.tag_q_table.blockSignals(True)
+            self.tag_q_table.setRowCount(0)
+            for row, q in enumerate(h.tag_queries):
+                self.tag_q_table.insertRow(row)
+                tags_str = ", ".join(str(t) for t in q.tags)
+                keys_str = ", ".join(q.tag_service_keys)
+                self.tag_q_table.setItem(row, 0, QTableWidgetItem(tags_str))
+                self.tag_q_table.setItem(row, 1, QTableWidgetItem(keys_str))
+            self.tag_q_table.blockSignals(False)
 
-        # Page Queries
-        self.page_q_table.blockSignals(True)
-        self.page_q_table.setRowCount(0)
-        for row, pq in enumerate(h.page_queries):
-            self.page_q_table.insertRow(row)
-            self.page_q_table.setItem(row, 0, QTableWidgetItem(pq.name))
-            idx_str = str(pq.index) if pq.index is not None else ""
-            self.page_q_table.setItem(row, 1, QTableWidgetItem(idx_str))
-        self.page_q_table.blockSignals(False)
+            # Page Queries
+            self.page_q_table.blockSignals(True)
+            self.page_q_table.setRowCount(0)
+            for row, pq in enumerate(h.page_queries):
+                self.page_q_table.insertRow(row)
+                self.page_q_table.setItem(row, 0, QTableWidgetItem(pq.name))
+                idx_str = str(pq.index) if pq.index is not None else ""
+                self.page_q_table.setItem(row, 1, QTableWidgetItem(idx_str))
+            self.page_q_table.blockSignals(False)
 
-        # Add Tags
-        if h.add_tags:
-            self.add_tags_group.blockSignals(True)
-            self.add_tags_group.setChecked(True)
-            self.add_tags_group.blockSignals(False)
-            self.add_tags_edit.setText(", ".join(h.add_tags.tags))
-            self.add_services_editor.set_items(h.add_tags.tag_service_keys)
-        else:
-            self.add_tags_group.blockSignals(True)
-            self.add_tags_group.setChecked(False)
-            self.add_tags_group.blockSignals(False)
-            self.add_tags_edit.clear()
-            self.add_services_editor.set_items([])
+            # Add Tags
+            if h.add_tags:
+                self.add_tags_card.setChecked(True)
+                self.add_tags_edit.setText(", ".join(h.add_tags.tags))
+                self.add_services_editor.set_items(h.add_tags.tag_service_keys)
+            else:
+                self.add_tags_card.setChecked(False)
+                self.add_tags_edit.clear()
+                self.add_services_editor.set_items([])
 
-        # Remove Tags
-        if h.remove_tags:
-            self.rem_tags_group.blockSignals(True)
-            self.rem_tags_group.setChecked(True)
-            self.rem_tags_group.blockSignals(False)
-            self.rem_tags_edit.setText(", ".join(h.remove_tags.tags))
-            self.rem_services_editor.set_items(h.remove_tags.tag_service_keys)
-        else:
-            self.rem_tags_group.blockSignals(True)
-            self.rem_tags_group.setChecked(False)
-            self.rem_tags_group.blockSignals(False)
-            self.rem_tags_edit.clear()
-            self.rem_services_editor.set_items([])
+            # Remove Tags
+            if h.remove_tags:
+                self.rem_tags_card.setChecked(True)
+                self.rem_tags_edit.setText(", ".join(h.remove_tags.tags))
+                self.rem_services_editor.set_items(h.remove_tags.tag_service_keys)
+            else:
+                self.rem_tags_card.setChecked(False)
+                self.rem_tags_edit.clear()
+                self.rem_services_editor.set_items([])
 
-        # Preview
-        if h.preview:
-            self.prev_group.blockSignals(True)
-            self.prev_group.setChecked(True)
-            self.prev_group.blockSignals(False)
-            self.prev_name_edit.setText(h.preview.page_name or "")
-            self.prev_index_spin.setValue(h.preview.page_index if h.preview.page_index is not None else 0)
-            self.prev_rej_edit.setText(h.preview.rejected_page_name or "")
-            self.prev_rej_index_spin.setValue(
-                h.preview.rejected_page_index if h.preview.rejected_page_index is not None else 0
-            )
-        else:
-            self.prev_group.blockSignals(True)
-            self.prev_group.setChecked(False)
-            self.prev_group.blockSignals(False)
-            self.prev_name_edit.clear()
-            self.prev_index_spin.setValue(0)
-            self.prev_rej_edit.clear()
-            self.prev_rej_index_spin.setValue(0)
-
-        self.blockSignals(False)
+            # Preview
+            if h.preview:
+                self.prev_card.setChecked(True)
+                self.prev_name_edit.setText(h.preview.page_name or "")
+                self.prev_index_spin.setValue(h.preview.page_index if h.preview.page_index is not None else 0)
+                self.prev_rej_edit.setText(h.preview.rejected_page_name or "")
+                self.prev_rej_index_spin.setValue(
+                    h.preview.rejected_page_index if h.preview.rejected_page_index is not None else 0
+                )
+            else:
+                self.prev_card.setChecked(False)
+                self.prev_name_edit.clear()
+                self.prev_index_spin.setValue(0)
+                self.prev_rej_edit.clear()
+                self.prev_rej_index_spin.setValue(0)
+        finally:
+            self._is_loading_ui = False
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         """Serialize widget states into the raw dictionary representation for AppConfig."""
@@ -361,7 +384,7 @@ class HydrusPage(QWidget):
         hydrus_dict["page_queries"] = page_queries
 
         # Add Tags (omitted as None if disabled/unchecked)
-        if self.add_tags_group.isChecked():
+        if self.add_tags_card.isChecked():
             add_tags = [t.strip() for t in self.add_tags_edit.text().split(",") if t.strip()]
             add_keys = self.add_services_editor.get_items()
             if add_tags or add_keys:
@@ -372,7 +395,7 @@ class HydrusPage(QWidget):
             hydrus_dict["add_tags"] = None
 
         # Remove Tags (omitted as None if disabled/unchecked)
-        if self.rem_tags_group.isChecked():
+        if self.rem_tags_card.isChecked():
             rem_tags = [t.strip() for t in self.rem_tags_edit.text().split(",") if t.strip()]
             rem_keys = self.rem_services_editor.get_items()
             if rem_tags or rem_keys:
@@ -383,7 +406,7 @@ class HydrusPage(QWidget):
             hydrus_dict["remove_tags"] = None
 
         # Preview (omitted as None if disabled/unchecked)
-        if self.prev_group.isChecked():
+        if self.prev_card.isChecked():
             prev_name = self.prev_name_edit.text().strip() or None
             prev_rej = self.prev_rej_edit.text().strip() or None
             idx_val = self.prev_index_spin.value() if self.prev_index_spin.value() > 0 else None
@@ -408,7 +431,7 @@ class HydrusPage(QWidget):
         self.tag_q_table.setItem(row, 0, QTableWidgetItem("system:untagged"))
         self.tag_q_table.setItem(row, 1, QTableWidgetItem(""))
         self.tag_q_table.blockSignals(False)
-        self.changed.emit()
+        self._on_field_changed()
 
     def _on_remove_tag_q(self) -> None:
         rows = sorted({idx.row() for idx in self.tag_q_table.selectedIndexes()}, reverse=True)
@@ -418,7 +441,7 @@ class HydrusPage(QWidget):
         for r in rows:
             self.tag_q_table.removeRow(r)
         self.tag_q_table.blockSignals(False)
-        self.changed.emit()
+        self._on_field_changed()
 
     def _on_add_page_q(self) -> None:
         row = self.page_q_table.rowCount()
@@ -427,7 +450,7 @@ class HydrusPage(QWidget):
         self.page_q_table.setItem(row, 0, QTableWidgetItem("target_page"))
         self.page_q_table.setItem(row, 1, QTableWidgetItem(""))
         self.page_q_table.blockSignals(False)
-        self.changed.emit()
+        self._on_field_changed()
 
     def _on_remove_page_q(self) -> None:
         rows = sorted({idx.row() for idx in self.page_q_table.selectedIndexes()}, reverse=True)
@@ -437,4 +460,4 @@ class HydrusPage(QWidget):
         for r in rows:
             self.page_q_table.removeRow(r)
         self.page_q_table.blockSignals(False)
-        self.changed.emit()
+        self._on_field_changed()
