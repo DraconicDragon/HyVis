@@ -202,7 +202,7 @@ class FiltersPage(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(12)
 
         # Card 1: Thresholds & TLT

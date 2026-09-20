@@ -94,7 +94,7 @@ class ModelsPage(QWidget):
 
         right_container = QWidget()
         self.form_layout = QVBoxLayout(right_container)
-        self.form_layout.setContentsMargins(12, 0, 0, 0)
+        self.form_layout.setContentsMargins(12, 0, 10, 0)
         self.form_layout.setSpacing(14)
 
         # Card 1: Model Runtime Parameters
