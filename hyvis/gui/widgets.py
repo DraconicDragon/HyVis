@@ -18,8 +18,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -971,3 +972,69 @@ class CategoryTagEditor(QWidget):
 
 
 # endregion
+
+
+class SmoothScrollArea(QScrollArea):
+    """Experimental smooth scrolling area using QPropertyAnimation and Event Filters."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Bind the animation to the vertical scrollbar's 'value' property
+        self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.setDuration(300)  # 300ms animation duration feels snappy but smooth
+        self._target_value = 0.0
+
+        # 1. Install filter on the scrollbar itself to fix instant-jumps on hover
+        self.verticalScrollBar().installEventFilter(self)
+
+        # 2. Install global application filter to monitor child widgets (tables, lists)
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Wheel:
+            # If the user is scrolling while hovering directly over the scrollbar
+            if obj == self.verticalScrollBar():
+                self.wheelEvent(event)  # Reroute to smooth scroll
+                return True
+
+            # If the animation is running, prevent child tables/lists from stealing the scroll
+            if self._anim.state() == QPropertyAnimation.State.Running:
+                from PySide6.QtWidgets import QWidget
+
+                # Check if the widget being scrolled over is a child of this scroll area
+                if isinstance(obj, QWidget) and self.isAncestorOf(obj):
+                    self.wheelEvent(event)  # Steal the event to continue the smooth glide
+                    return True
+
+        return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        delta = event.angleDelta().y()
+        if delta == 0:
+            super().wheelEvent(event)
+            return
+
+        vbar = self.verticalScrollBar()
+
+        # If animation is stopped, our baseline target is the current visual position
+        if self._anim.state() != QPropertyAnimation.State.Running:
+            self._target_value = vbar.value()
+
+        # Each notch (120 delta) scrolls a certain amount.
+        # Tuning: vbar.singleStep() * 3.5 is roughly standard OS scroll speed.
+        step = vbar.singleStep() * 3.5 * (delta / 120.0)
+
+        self._target_value -= step
+        self._target_value = max(vbar.minimum(), min(self._target_value, vbar.maximum()))
+
+        self._anim.stop()
+        self._anim.setStartValue(vbar.value())
+        self._anim.setEndValue(self._target_value)
+        self._anim.start()
+
+        event.accept()
