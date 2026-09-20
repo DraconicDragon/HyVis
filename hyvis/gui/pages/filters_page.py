@@ -4,27 +4,35 @@ filters_page.py — Output filtering, thresholding, namespace prefixes, and repl
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
+    QPushButton,
     QScrollArea,
+    QSpinBox,
+    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from hyvis.config import AppConfig
+from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.widgets import (
     KeyValueEditor,
     StringListEditor,
     SubsetListEditor,
     ThresholdTableEditor,
+    setup_field_tooltip,
 )
 
 # Standard canonical categories
@@ -42,6 +50,88 @@ ALL_CATEGORIES = [
 ]
 
 
+class CategoryLimitEditor(QWidget):
+    """Table editor for max_tags_per_category: [Category (Combo/Text), Limit (SpinBox)]."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.table = QTableWidget(0, 2, self)
+        self.table.setHorizontalHeaderLabels(["Category", "Max Tags"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
+
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Category Limit", self)
+        self.add_btn.clicked.connect(self._on_add_row)
+        btn_layout.addWidget(self.add_btn)
+
+        self.remove_btn = QPushButton("- Remove Selected", self)
+        self.remove_btn.clicked.connect(self._on_remove_row)
+        btn_layout.addWidget(self.remove_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+    def get_limits(self) -> dict[str, int]:
+        limits: dict[str, int] = {}
+        for row in range(self.table.rowCount()):
+            combo: QComboBox | None = self.table.cellWidget(row, 0)
+            cat = combo.currentText().strip() if combo else ""
+            spin: QSpinBox | None = self.table.cellWidget(row, 1)
+            val = spin.value() if spin else 1
+            if cat:
+                limits[cat] = val
+        return limits
+
+    def set_limits(self, limits: Mapping[str, int]) -> None:
+        self.table.blockSignals(True)
+        self.table.setRowCount(0)
+        for row, (cat, val) in enumerate(limits.items()):
+            self._insert_row(row, cat, int(val))
+        self.table.blockSignals(False)
+
+    def _insert_row(self, row: int, category: str = "general", limit: int = 10) -> None:
+        self.table.insertRow(row)
+        combo = QComboBox(self)
+        combo.setEditable(True)
+        combo.addItems(ALL_CATEGORIES)
+        combo.setCurrentText(category)
+        combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        self.table.setCellWidget(row, 0, combo)
+
+        spin = QSpinBox(self)
+        spin.setRange(1, 9999)
+        spin.setValue(limit)
+        spin.valueChanged.connect(lambda _: self.changed.emit())
+        self.table.setCellWidget(row, 1, spin)
+
+    def _on_add_row(self) -> None:
+        self.table.blockSignals(True)
+        row = self.table.rowCount()
+        existing = set(self.get_limits().keys())
+        cat = next((c for c in ALL_CATEGORIES if c not in existing), "general")
+        self._insert_row(row, cat, 10)
+        self.table.blockSignals(False)
+        self.changed.emit()
+
+    def _on_remove_row(self) -> None:
+        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
+        if not selected_rows:
+            return
+        self.table.blockSignals(True)
+        for row in selected_rows:
+            self.table.removeRow(row)
+        self.table.blockSignals(False)
+        self.changed.emit()
+
+
 class FiltersPage(QWidget):
     """Configuration page for global [output_filter] settings."""
 
@@ -53,6 +143,8 @@ class FiltersPage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        of_fields = OutputFilterConfig.model_fields
+
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -72,10 +164,12 @@ class FiltersPage(QWidget):
         self.default_thresh_spin.setSingleStep(0.05)
         self.default_thresh_spin.setDecimals(2)
         self.default_thresh_spin.setValue(0.40)
+        setup_field_tooltip(self.default_thresh_spin, of_fields["default_threshold"])
         self.default_thresh_spin.valueChanged.connect(lambda _: self.changed.emit())
-        thresh_layout.addRow("Default Threshold (Fallback):", self.default_thresh_spin)
+        thresh_layout.addRow(f"{of_fields['default_threshold'].title}:", self.default_thresh_spin)
 
-        self.prefer_tlt_chk = QCheckBox("Prefer Model Tag-Level Thresholds (TLT)", self)
+        self.prefer_tlt_chk = QCheckBox(of_fields["prefer_tag_level_thresholds"].title, self)
+        setup_field_tooltip(self.prefer_tlt_chk, of_fields["prefer_tag_level_thresholds"])
         self.prefer_tlt_chk.setChecked(True)
         self.prefer_tlt_chk.toggled.connect(lambda _: self.changed.emit())
         thresh_layout.addRow("", self.prefer_tlt_chk)
@@ -85,13 +179,15 @@ class FiltersPage(QWidget):
         self.tlt_offset_spin.setSingleStep(0.05)
         self.tlt_offset_spin.setDecimals(2)
         self.tlt_offset_spin.setValue(0.00)
+        setup_field_tooltip(self.tlt_offset_spin, of_fields["tag_level_threshold_relative_offset"])
         self.tlt_offset_spin.valueChanged.connect(lambda _: self.changed.emit())
-        thresh_layout.addRow("TLT Relative Offset (-1.0 to 1.0):", self.tlt_offset_spin)
+        thresh_layout.addRow(f"{of_fields['tag_level_threshold_relative_offset'].title}:", self.tlt_offset_spin)
 
         layout.addWidget(thresh_group)
 
         # 2. Categories to Emit
-        cat_group = QGroupBox("Categories to Output (Empty = All Allowed via Inclusions)", container)
+        cat_group = QGroupBox(of_fields["output_categories"].title, container)
+        setup_field_tooltip(cat_group, of_fields["output_categories"])
         cat_grid = QGridLayout(cat_group)
         cat_grid.setSpacing(8)
 
@@ -104,76 +200,111 @@ class FiltersPage(QWidget):
         layout.addWidget(cat_group)
 
         # 3. Inclusions & Exclusions
-        inc_exc_group = QGroupBox("Tag Inclusion & Exclusion Lists", container)
+        inc_exc_group = QGroupBox("Tag Inclusions & Exclusions", container)
         inc_exc_layout = QHBoxLayout(inc_exc_group)
         inc_exc_layout.setSpacing(12)
 
-        inc_box = QVBoxLayout()
-        inc_box.addWidget(StringListEditor(placeholder="Add always-included tag...", parent=self))
-        self.include_editor = inc_box.itemAt(0).widget()
+        # Inclusions sub-group
+        inc_sub = QGroupBox(of_fields["include_tags"].title, inc_exc_group)
+        setup_field_tooltip(inc_sub, of_fields["include_tags"])
+        inc_box = QVBoxLayout(inc_sub)
+        self.include_editor = StringListEditor(placeholder="Add always-included tag...", parent=self)
         self.include_editor.changed.connect(self.changed.emit)
-        inc_exc_layout.addLayout(inc_box)
+        inc_box.addWidget(self.include_editor)
+        inc_exc_layout.addWidget(inc_sub)
 
-        exc_box = QVBoxLayout()
-        exc_box.addWidget(StringListEditor(placeholder="Add always-excluded tag...", parent=self))
-        self.exclude_editor = exc_box.itemAt(0).widget()
+        # Exclusions sub-group
+        exc_sub = QGroupBox(of_fields["exclude_tags"].title, inc_exc_group)
+        setup_field_tooltip(exc_sub, of_fields["exclude_tags"])
+        exc_box = QVBoxLayout(exc_sub)
+        self.exclude_editor = StringListEditor(placeholder="Add always-excluded tag...", parent=self)
         self.exclude_editor.changed.connect(self.changed.emit)
-        inc_exc_layout.addLayout(exc_box)
+        exc_box.addWidget(self.exclude_editor)
+        inc_exc_layout.addWidget(exc_sub)
 
         layout.addWidget(inc_exc_group)
 
         # 4. Custom Threshold Overrides
-        overrides_group = QGroupBox("Threshold Overrides (Category & Specific Tags)", container)
+        overrides_group = QGroupBox("Threshold Overrides", container)
         overrides_layout = QVBoxLayout(overrides_group)
         overrides_layout.setSpacing(12)
 
-        overrides_layout.addWidget(QGroupBox("Category Threshold Overrides", self))
-        cat_box = overrides_layout.itemAt(0).widget()
-        cat_box_layout = QVBoxLayout(cat_box)
+        cat_thresh_sub = QGroupBox(of_fields["category_thresholds"].title, self)
+        setup_field_tooltip(cat_thresh_sub, of_fields["category_thresholds"])
+        cat_box_layout = QVBoxLayout(cat_thresh_sub)
         self.cat_thresh_editor = ThresholdTableEditor(target_header="Category Name", parent=self)
         self.cat_thresh_editor.changed.connect(self.changed.emit)
         cat_box_layout.addWidget(self.cat_thresh_editor)
+        overrides_layout.addWidget(cat_thresh_sub)
 
-        overrides_layout.addWidget(QGroupBox("Tag Threshold Overrides", self))
-        tag_box = overrides_layout.itemAt(1).widget()
-        tag_box_layout = QVBoxLayout(tag_box)
+        tag_thresh_sub = QGroupBox(of_fields["tag_thresholds"].title, self)
+        setup_field_tooltip(tag_thresh_sub, of_fields["tag_thresholds"])
+        tag_box_layout = QVBoxLayout(tag_thresh_sub)
         self.tag_thresh_editor = ThresholdTableEditor(target_header="Raw Tag Name", parent=self)
         self.tag_thresh_editor.changed.connect(self.changed.emit)
         tag_box_layout.addWidget(self.tag_thresh_editor)
+        overrides_layout.addWidget(tag_thresh_sub)
 
         layout.addWidget(overrides_group)
 
         # 5. Namespace Prefixes & Tag Replacements
-        pfx_group = QGroupBox("Tag Formatting & Replacements", container)
+        pfx_group = QGroupBox("Tag Formatting & Namespace Prefixes", container)
         pfx_layout = QVBoxLayout(pfx_group)
         pfx_layout.setSpacing(12)
 
         # Category Prefixes
-        pfx_layout.addWidget(QGroupBox("Category Tag Prefix Mapping (e.g. character -> character:)", self))
-        cat_pfx_box = pfx_layout.itemAt(0).widget()
-        cat_pfx_layout = QVBoxLayout(cat_pfx_box)
+        cat_pfx_sub = QGroupBox(of_fields["category_tag_prefix_mapping"].title, self)
+        setup_field_tooltip(cat_pfx_sub, of_fields["category_tag_prefix_mapping"])
+        cat_pfx_layout = QVBoxLayout(cat_pfx_sub)
         self.cat_prefix_editor = KeyValueEditor(key_header="Category", val_header="Prefix", parent=self)
         self.cat_prefix_editor.changed.connect(self.changed.emit)
         cat_pfx_layout.addWidget(self.cat_prefix_editor)
+        pfx_layout.addWidget(cat_pfx_sub)
+
+        # Tag Prefix Overrides
+        tag_pfx_sub = QGroupBox(of_fields["tag_prefix_overrides"].title, self)
+        setup_field_tooltip(tag_pfx_sub, of_fields["tag_prefix_overrides"])
+        tag_pfx_layout = QVBoxLayout(tag_pfx_sub)
+        self.tag_prefix_editor = KeyValueEditor(key_header="Raw Tag", val_header="Prefix", parent=self)
+        self.tag_prefix_editor.changed.connect(self.changed.emit)
+        tag_pfx_layout.addWidget(self.tag_prefix_editor)
+        pfx_layout.addWidget(tag_pfx_sub)
 
         # Tag Replacements
-        pfx_layout.addWidget(QGroupBox("Tag Replacements (e.g. rating:g -> general)", self))
-        rep_box = pfx_layout.itemAt(1).widget()
-        rep_layout = QVBoxLayout(rep_box)
+        rep_sub = QGroupBox(of_fields["tag_replacements"].title, self)
+        setup_field_tooltip(rep_sub, of_fields["tag_replacements"])
+        rep_layout = QVBoxLayout(rep_sub)
         self.tag_replacements_editor = KeyValueEditor(key_header="Original Tag", val_header="Replacement", parent=self)
         self.tag_replacements_editor.changed.connect(self.changed.emit)
         rep_layout.addWidget(self.tag_replacements_editor)
+        pfx_layout.addWidget(rep_sub)
 
         layout.addWidget(pfx_group)
 
-        # 6. Joint Subsets
-        subset_group = QGroupBox("Joint Subset Limits (Max Tags Per Group)", container)
-        subset_layout = QVBoxLayout(subset_group)
+        # 6. Tag Limits (Per-Category & Joint Subsets)
+        limits_group = QGroupBox("Tag Output Limits", container)
+        limits_layout = QVBoxLayout(limits_group)
+        limits_layout.setSpacing(12)
+
+        # Max tags per category
+        cat_limit_sub = QGroupBox(of_fields["max_tags_per_category"].title, self)
+        setup_field_tooltip(cat_limit_sub, of_fields["max_tags_per_category"])
+        cat_limit_layout = QVBoxLayout(cat_limit_sub)
+        self.cat_limit_editor = CategoryLimitEditor(self)
+        self.cat_limit_editor.changed.connect(self.changed.emit)
+        cat_limit_layout.addWidget(self.cat_limit_editor)
+        limits_layout.addWidget(cat_limit_sub)
+
+        # Joint Subsets
+        subset_sub = QGroupBox(of_fields["max_tags_per_subset"].title, self)
+        setup_field_tooltip(subset_sub, of_fields["max_tags_per_subset"])
+        subset_layout = QVBoxLayout(subset_sub)
         self.subset_editor = SubsetListEditor(self)
         self.subset_editor.changed.connect(self.changed.emit)
         subset_layout.addWidget(self.subset_editor)
+        limits_layout.addWidget(subset_sub)
 
-        layout.addWidget(subset_group)
+        layout.addWidget(limits_group)
 
         # Mount scroll
         scroll.setWidget(container)
@@ -205,7 +336,9 @@ class FiltersPage(QWidget):
         self.cat_thresh_editor.set_thresholds(of.category_thresholds)
         self.tag_thresh_editor.set_thresholds(of.tag_thresholds)
         self.cat_prefix_editor.set_mapping(of.category_tag_prefix_mapping)
+        self.tag_prefix_editor.set_mapping(of.tag_prefix_overrides)
         self.tag_replacements_editor.set_mapping(of.tag_replacements)
+        self.cat_limit_editor.set_limits(of.max_tags_per_category)
         self.subset_editor.set_subsets(of.max_tags_per_subset)
 
         self.blockSignals(False)
@@ -229,5 +362,7 @@ class FiltersPage(QWidget):
         of_dict["category_thresholds"] = self.cat_thresh_editor.get_thresholds()
         of_dict["tag_thresholds"] = self.tag_thresh_editor.get_thresholds()
         of_dict["category_tag_prefix_mapping"] = self.cat_prefix_editor.get_mapping()
+        of_dict["tag_prefix_overrides"] = self.tag_prefix_editor.get_mapping()
         of_dict["tag_replacements"] = self.tag_replacements_editor.get_mapping()
+        of_dict["max_tags_per_category"] = self.cat_limit_editor.get_limits()
         of_dict["max_tags_per_subset"] = self.subset_editor.get_subsets()

@@ -2,10 +2,14 @@
 widgets.py — Reusable specialized input widgets for HyVis configuration.
 
 Includes:
-  - StringListEditor: Reusable list for service keys, queries, and include/exclude tags.
+  - StringListEditor: Reusable list for include/exclude tags.
+  - TagServiceListEditor: Stacked comboboxes with friendly service names, [X] buttons,
+    and automatic resolution of raw hex keys.
   - KeyValueEditor: Reusable table for prefix mappings and tag replacements.
   - ThresholdTableEditor: Table for category and tag thresholds with TLT override checkboxes.
   - SubsetListEditor: Table for managing max_tags_per_subset rule groups.
+  - setup_field_tooltip: Helper to wire Pydantic Field descriptions directly to Qt tooltips.
+  - bind_field_metadata: Helper to wire tooltips and example placeholders simultaneously.
 """
 
 from __future__ import annotations
@@ -17,9 +21,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -31,13 +37,32 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+
+def setup_field_tooltip(widget: QWidget, field_info: Any) -> None:
+    """Set the widget tooltip from Pydantic Field description if present."""
+    if hasattr(field_info, "description") and field_info.description:
+        widget.setToolTip(field_info.description)
+
+
+def bind_field_metadata(widget: QWidget, field_info: Any, set_placeholder: bool = True) -> None:
+    """
+    Bind Pydantic Field metadata to a Qt widget.
+    Applies description as tooltip, and the first example as placeholder if applicable.
+    """
+    setup_field_tooltip(widget, field_info)
+    if set_placeholder and hasattr(field_info, "examples") and field_info.examples:
+        first_example = field_info.examples[0]
+        if hasattr(widget, "setPlaceholderText") and isinstance(first_example, (str, int, float)):
+            widget.setPlaceholderText(str(first_example))
+
+
 # region String List Editor
 
 
 class StringListEditor(QWidget):
     """
     A widget for viewing, adding, and removing a list of strings.
-    Used for include_tags, exclude_tags, output_categories, and service keys.
+    Used for include_tags, exclude_tags, and output_categories.
     """
 
     changed = Signal()
@@ -124,6 +149,185 @@ class StringListEditor(QWidget):
             self._on_remove()
         else:
             super().keyPressEvent(event)
+
+
+# endregion
+
+
+# region Tag Service List Editor
+
+
+class TagServiceListEditor(QWidget):
+    """
+    Stacked row editor for Hydrus tag service keys.
+    Displays human-readable service names with underlying hex keys.
+    Each row has an [✕] button, and an '+ Add Service' button sits below.
+    """
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        writable_only: bool = True,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.writable_only = writable_only
+        self._available_services: dict[str, str] = {}  # key -> friendly name
+        self._row_widgets: list[QWidget] = []
+
+        self._root_layout = QVBoxLayout(self)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(6)
+
+        # 1. Stack container
+        self._stack_widget = QWidget(self)
+        self._stack_layout = QVBoxLayout(self._stack_widget)
+        self._stack_layout.setContentsMargins(0, 0, 0, 0)
+        self._stack_layout.setSpacing(6)
+        self._root_layout.addWidget(self._stack_widget)
+
+        # 2. Empty placeholder label
+        self.empty_label = QLabel("(No services selected — click '+ Add Service' below)", self)
+        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self._root_layout.addWidget(self.empty_label)
+
+        # 3. Add button
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Service", self)
+        self.add_btn.clicked.connect(self._on_add_clicked)
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addStretch()
+        self._root_layout.addLayout(btn_layout)
+
+        self._update_empty_state()
+
+    def set_available_services(self, services: dict[str, str]) -> None:
+        """Update available services and refresh all active comboboxes in-place."""
+        self._available_services = dict(services)
+
+        for row_widget in self._row_widgets:
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if not combo:
+                continue
+
+            current_key = combo.currentData()
+            self._repopulate_combo(combo, selected_key=current_key)
+
+    def get_items(self) -> list[str]:
+        """Return all selected service keys."""
+        keys: list[str] = []
+        for row_widget in self._row_widgets:
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if combo:
+                key = str(combo.currentData() or combo.currentText()).strip()
+                if key:
+                    keys.append(key)
+        return keys
+
+    def set_items(self, keys: Sequence[str]) -> None:
+        """Populate stacked rows from a list of keys without emitting changed signal."""
+        self.blockSignals(True)
+        self._clear_rows()
+
+        for key in keys:
+            self._add_row(key)
+
+        self._update_empty_state()
+        self.blockSignals(False)
+
+    def _clear_rows(self) -> None:
+        for row in self._row_widgets:
+            self._stack_layout.removeWidget(row)
+            row.deleteLater()
+        self._row_widgets.clear()
+
+    def _repopulate_combo(self, combo: QComboBox, selected_key: str | None = None) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+
+        # Add all known services from Hydrus
+        for key, name in self._available_services.items():
+            short_key = f"{key[:8]}..." if len(key) > 12 else key
+            display = f"{name}  ({short_key})"
+            combo.addItem(display, userData=key)
+
+        # If current key is unknown / offline, preserve it in the dropdown
+        if selected_key:
+            idx = combo.findData(selected_key)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
+                display = f"Unknown Service  ({short_key})"
+                combo.addItem(display, userData=selected_key)
+                combo.setCurrentIndex(combo.count() - 1)
+
+        combo.blockSignals(False)
+
+    def _add_row(self, initial_key: str | None = None) -> QWidget:
+        row_widget = QWidget(self._stack_widget)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        combo = QComboBox(row_widget)
+        combo.setEditable(True)  # Allows pasting custom/raw keys if Hydrus is offline
+        self._repopulate_combo(combo, selected_key=initial_key)
+
+        if initial_key is None and self._available_services:
+            # Default to first available service not already selected if possible
+            existing_keys = set(self.get_items())
+            for key in self._available_services:
+                if key not in existing_keys:
+                    idx = combo.findData(key)
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+                    break
+
+        combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.editingFinished.connect(lambda: self._on_combo_edited(combo))
+        row_layout.addWidget(combo, stretch=1)
+
+        # Subtle red-accented remove button
+        del_btn = QPushButton("✕", row_widget)
+        del_btn.setFixedWidth(28)
+        del_btn.setToolTip("Remove this service")
+        del_btn.setStyleSheet(
+            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
+            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
+        )
+        del_btn.clicked.connect(lambda: self._on_remove_row(row_widget))
+        row_layout.addWidget(del_btn)
+
+        self._stack_layout.addWidget(row_widget)
+        self._row_widgets.append(row_widget)
+        self._update_empty_state()
+        return row_widget
+
+    def _on_combo_edited(self, combo: QComboBox) -> None:
+        """Handle manual typing or pasting of raw keys into the combo."""
+        text = combo.currentText().strip()
+        if text and combo.findData(text) < 0:
+            combo.setItemData(combo.currentIndex(), text)
+        self.changed.emit()
+
+    def _on_add_clicked(self) -> None:
+        self._add_row()
+        self.changed.emit()
+
+    def _on_remove_row(self, row_widget: QWidget) -> None:
+        if row_widget in self._row_widgets:
+            self._row_widgets.remove(row_widget)
+            self._stack_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+            self._update_empty_state()
+            self.changed.emit()
+
+    def _update_empty_state(self) -> None:
+        self.empty_label.setVisible(len(self._row_widgets) == 0)
 
 
 # endregion
@@ -297,8 +501,12 @@ class ThresholdTableEditor(QWidget):
             spin: QDoubleSpinBox | None = self.table.cellWidget(row, 1)
             thresh_val = spin.value() if spin else 0.40
 
-            chk: QCheckBox | None = self.table.cellWidget(row, 2)
-            override_val = chk.isChecked() if chk else False
+            chk_container: QWidget | None = self.table.cellWidget(row, 2)
+            override_val = False
+            if chk_container:
+                chk = chk_container.findChild(QCheckBox)
+                if chk:
+                    override_val = chk.isChecked()
 
             results[target] = {
                 "threshold": float(thresh_val),

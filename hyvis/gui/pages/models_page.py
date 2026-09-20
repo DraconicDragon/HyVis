@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.config import AppConfig
-from hyvis.gui.widgets import StringListEditor
+from hyvis.config import AppConfig, InferenceConfig, ModelConfig
+from hyvis.gui.widgets import TagServiceListEditor, bind_field_metadata, setup_field_tooltip
 
 
 class ModelsPage(QWidget):
@@ -38,9 +38,13 @@ class ModelsPage(QWidget):
         super().__init__(parent)
         self._models_data: list[dict[str, Any]] = []
         self._current_index: int = -1
+        self._writable_tag_services: dict[str, str] = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        m_fields = ModelConfig.model_fields
+        inf_fields = InferenceConfig.model_fields
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
 
@@ -52,9 +56,12 @@ class ModelsPage(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)
 
-        left_layout.addWidget(QLabel("<b>Configured Models:</b>"))
+        models_label = QLabel(f"<b>{inf_fields['models'].title}:</b>", left_widget)
+        setup_field_tooltip(models_label, inf_fields["models"])
+        left_layout.addWidget(models_label)
 
         self.model_list = QListWidget(left_widget)
+        setup_field_tooltip(self.model_list, inf_fields["models"])
         self.model_list.currentRowChanged.connect(self._on_model_selected)
         left_layout.addWidget(self.model_list, stretch=1)
 
@@ -86,60 +93,69 @@ class ModelsPage(QWidget):
         # Model ID dropdown (populated via vibe.list_models)
         self.model_id_combo = QComboBox(self)
         self.model_id_combo.setEditable(True)
+        setup_field_tooltip(self.model_id_combo, m_fields["model_id"])
         self._populate_available_models()
         self.model_id_combo.currentTextChanged.connect(self._on_field_changed)
-        param_layout.addRow("Model ID:", self.model_id_combo)
+        param_layout.addRow(f"{m_fields['model_id'].title}:", self.model_id_combo)
 
         # Source
         source_row = QHBoxLayout()
         self.source_edit = QLineEdit(self)
-        self.source_edit.setPlaceholderText("Default HuggingFace repo (leave empty)")
+        bind_field_metadata(self.source_edit, m_fields["source"])
+        if not self.source_edit.placeholderText():
+            self.source_edit.setPlaceholderText("Default HuggingFace repo (leave empty)")
         self.source_edit.textChanged.connect(self._on_field_changed)
         source_row.addWidget(self.source_edit, stretch=1)
 
         self.browse_src_btn = QPushButton("Browse Folder...", self)
         self.browse_src_btn.clicked.connect(self._on_browse_source)
         source_row.addWidget(self.browse_src_btn)
-        param_layout.addRow("Source Path / Repo:", source_row)
+        param_layout.addRow(f"{m_fields['source'].title}:", source_row)
 
         # Device
         self.device_combo = QComboBox(self)
         self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
         self.device_combo.setEditable(True)
+        setup_field_tooltip(self.device_combo, m_fields["device"])
         self.device_combo.currentTextChanged.connect(self._on_field_changed)
-        param_layout.addRow("Hardware Device:", self.device_combo)
+        param_layout.addRow(f"{m_fields['device'].title}:", self.device_combo)
 
         # Backend
         self.backend_combo = QComboBox(self)
         self.backend_combo.addItems(["auto", "pytorch", "onnx"])
         self.backend_combo.currentTextChanged.connect(self._on_field_changed)
-        param_layout.addRow("Execution Backend:", self.backend_combo)
+        setup_field_tooltip(self.backend_combo, m_fields["backend"])
+        param_layout.addRow(f"{m_fields['backend'].title}:", self.backend_combo)
 
         # Precision
         self.precision_combo = QComboBox(self)
         self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
         self.precision_combo.currentTextChanged.connect(self._on_field_changed)
-        param_layout.addRow("Precision:", self.precision_combo)
+        setup_field_tooltip(self.precision_combo, m_fields["precision"])
+        param_layout.addRow(f"{m_fields['precision'].title}:", self.precision_combo)
 
         # Batch Size
         self.batch_spin = QSpinBox(self)
         self.batch_spin.setRange(1, 128)
         self.batch_spin.setValue(1)
+        setup_field_tooltip(self.batch_spin, m_fields["batch_size"])
         self.batch_spin.valueChanged.connect(self._on_field_changed)
-        param_layout.addRow("Batch Size:", self.batch_spin)
+        param_layout.addRow(f"{m_fields['batch_size'].title}:", self.batch_spin)
 
         self.form_layout.addWidget(param_group)
 
-        # Model Output Services Override
-        svc_group = QGroupBox("Per-Model Destination Tag Services (Optional Override)", right_container)
-        svc_layout = QVBoxLayout(svc_group)
-        self.model_services_editor = StringListEditor(
-            placeholder="Leave empty to use global output services...",
-            parent=self,
-        )
+        # Model Output Services Override (Checkable Group)
+        self.svc_group = QGroupBox(m_fields["output_tag_services"].title, right_container)
+        self.svc_group.setCheckable(True)
+        self.svc_group.setChecked(False)
+        setup_field_tooltip(self.svc_group, m_fields["output_tag_services"])
+        self.svc_group.toggled.connect(self._on_svc_group_toggled)
+
+        svc_layout = QVBoxLayout(self.svc_group)
+        self.model_services_editor = TagServiceListEditor(writable_only=True, parent=self)
         self.model_services_editor.changed.connect(self._on_field_changed)
         svc_layout.addWidget(self.model_services_editor)
-        self.form_layout.addWidget(svc_group)
+        self.form_layout.addWidget(self.svc_group)
 
         self.form_layout.addStretch()
         right_scroll.setWidget(right_container)
@@ -148,6 +164,11 @@ class ModelsPage(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
         layout.addWidget(splitter)
+
+    def update_services(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
+        """Update available tag services for per-model destination overrides."""
+        self._writable_tag_services = dict(writable_tags)
+        self.model_services_editor.set_available_services(writable_tags)
 
     def _populate_available_models(self) -> None:
         self.model_id_combo.blockSignals(True)
@@ -158,7 +179,6 @@ class ModelsPage(QWidget):
             models = sorted(vibe.list_models())
             self.model_id_combo.addItems(models)
         except Exception:
-            # Fallback if vibe is not in python path during standalone UI test
             self.model_id_combo.addItems(["wd-swinv2-v3", "wd-eva02-large-v3", "jtp-3", "taggerine"])
         self.model_id_combo.blockSignals(False)
 
@@ -202,6 +222,7 @@ class ModelsPage(QWidget):
         self.backend_combo.blockSignals(True)
         self.precision_combo.blockSignals(True)
         self.batch_spin.blockSignals(True)
+        self.svc_group.blockSignals(True)
 
         self.model_id_combo.setCurrentText(str(m.get("model_id", "")))
         self.source_edit.setText(str(m.get("source") or ""))
@@ -214,8 +235,16 @@ class ModelsPage(QWidget):
         self.batch_spin.setValue(int(m.get("batch_size", 1)))
 
         svcs = m.get("output_tag_services")
-        keys = svcs.get("keys", []) if svcs else []
-        self.model_services_editor.set_items(keys)
+        if svcs is not None:
+            self.svc_group.setChecked(True)
+            keys = svcs.get("keys", []) if isinstance(svcs, dict) else getattr(svcs, "keys", [])
+            self.model_services_editor.set_items(keys)
+        else:
+            self.svc_group.setChecked(False)
+            self.model_services_editor.set_items([])
+
+        if self._writable_tag_services:
+            self.model_services_editor.set_available_services(self._writable_tag_services)
 
         self.model_id_combo.blockSignals(False)
         self.source_edit.blockSignals(False)
@@ -223,6 +252,7 @@ class ModelsPage(QWidget):
         self.backend_combo.blockSignals(False)
         self.precision_combo.blockSignals(False)
         self.batch_spin.blockSignals(False)
+        self.svc_group.blockSignals(False)
 
     def _save_form_to_model(self, index: int) -> None:
         if index < 0 or index >= len(self._models_data):
@@ -240,13 +270,20 @@ class ModelsPage(QWidget):
         m["precision"] = self.precision_combo.currentText().strip()
         m["batch_size"] = self.batch_spin.value()
 
-        svcs = self.model_services_editor.get_items()
-        m["output_tag_services"] = {"keys": svcs} if svcs else None
+        if self.svc_group.isChecked():
+            svcs = self.model_services_editor.get_items()
+            m["output_tag_services"] = {"keys": svcs}
+        else:
+            m["output_tag_services"] = None
 
         # Update sidebar list label
         item = self.model_list.item(index)
         if item and model_id:
             item.setText(model_id)
+
+    def _on_svc_group_toggled(self, checked: bool) -> None:
+        del checked
+        self._on_field_changed()
 
     def _on_field_changed(self) -> None:
         self._save_form_to_model(self._current_index)
@@ -266,6 +303,7 @@ class ModelsPage(QWidget):
             "backend": None,
             "precision": "auto",
             "batch_size": 1,
+            "output_tag_services": None,
         }
         self._models_data.append(new_model)
         self.model_list.addItem(QListWidgetItem("wd-swinv2-v3"))

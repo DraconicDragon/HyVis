@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -35,7 +36,7 @@ class MainWindow(QMainWindow):
         self.state = state or ConfigState()
 
         self.setWindowTitle("HyVis Configurator")
-        self.resize(1020, 720)
+        self.resize(1020, 750)
 
         self._setup_menu_bar()
         self._setup_ui()
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self._load_config_to_pages(self.state.config)
         self._update_title()
         self._update_validation(self.state.validate())
+        self._on_connection_changed(self.state.connection_status, self.state.connection_info)
 
     def _setup_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -81,33 +83,69 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
     def _setup_ui(self) -> None:
+        app_fields = AppConfig.model_fields
+
         central = QWidget(self)
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setContentsMargins(12, 10, 12, 12)
         root_layout.setSpacing(10)
 
+        # 1. Top Global Bar (Header & Hydrus Status)
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 2)
+        top_bar.setSpacing(10)
+
+        app_title = QLabel("<b>HyVis Configurator</b>", self)
+        app_title.setStyleSheet("font-size: 13px; color: #bbb;")
+        top_bar.addWidget(app_title)
+
+        top_bar.addStretch()
+
+        self.conn_indicator = QLabel(self)
+        self.conn_indicator.setText("<span style='color: #888;'>○ Offline</span>")
+        top_bar.addWidget(self.conn_indicator)
+
+        self.sync_services_btn = QPushButton("⟳ Sync Services", self)
+        self.sync_services_btn.setToolTip("Connect to Hydrus API and refresh available tag services")
+        self.sync_services_btn.clicked.connect(self._on_sync_services)
+        top_bar.addWidget(self.sync_services_btn)
+
+        root_layout.addLayout(top_bar)
+
+        # Divider line
+        divider = QFrame(self)
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        divider.setStyleSheet("color: #333;")
+        root_layout.addWidget(divider)
+
+        # 2. Main Body Layout (Sidebar + Stacked Pages)
         body_layout = QHBoxLayout()
         body_layout.setSpacing(14)
 
-        # 1. Left Sidebar
+        # Left Sidebar
         self.sidebar = QListWidget(self)
         self.sidebar.setFixedWidth(200)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        sidebar_items = [
-            "Hydrus Connection",
-            "Models & Sessions",
-            "Output & Filters",
-            "Database & App",
+        sidebar_sections = [
+            (app_fields["hydrus"].title, app_fields["hydrus"].description),
+            (app_fields["inference"].title, app_fields["inference"].description),
+            (app_fields["output_filter"].title, app_fields["output_filter"].description),
+            (
+                f"{app_fields['database'].title} & App",
+                f"{app_fields['database'].description} {app_fields['hyvis'].description}",
+            ),
         ]
-        for name in sidebar_items:
-            item = QListWidgetItem(name)
+        for title, desc in sidebar_sections:
+            item = QListWidgetItem(title)
+            item.setToolTip(desc)
             self.sidebar.addItem(item)
 
         body_layout.addWidget(self.sidebar)
 
-        # 2. Right Stacked Pages
+        # Right Stacked Pages
         self.page_stack = QStackedWidget(self)
 
         self.hydrus_page = HydrusPage(self)
@@ -148,6 +186,10 @@ class MainWindow(QMainWindow):
         self.state.validation_changed.connect(self._update_validation)
         self.state.config_loaded.connect(self._load_config_to_pages)
 
+        # Hydrus entity sourcing signals
+        self.state.services_updated.connect(self._on_services_updated)
+        self.state.connection_changed.connect(self._on_connection_changed)
+
         # Connect page changes to central validation and dirty-tracking
         self.hydrus_page.changed.connect(self._on_page_modified)
         self.models_page.changed.connect(self._on_page_modified)
@@ -176,6 +218,39 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.state.set_dirty(True)
             self._update_validation([str(exc)])
+
+    def _on_sync_services(self) -> None:
+        """Trigger background query to Hydrus using active credentials from the page."""
+        url = self.hydrus_page.api_url_edit.text().strip()
+        key = self.hydrus_page.api_key_edit.text().strip()
+        self.state.sync_hydrus_services(api_url=url, api_key=key)
+
+    def _on_services_updated(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
+        """Propagate updated tag services to all dependent pages."""
+        if hasattr(self.hydrus_page, "update_services"):
+            self.hydrus_page.update_services(all_tags, writable_tags)
+        if hasattr(self.models_page, "update_services"):
+            self.models_page.update_services(all_tags, writable_tags)
+
+    def _on_connection_changed(self, status: str, info: str) -> None:
+        """Update top-bar status badge and button state based on connection health."""
+        if status == "connected":
+            self.conn_indicator.setText(f"<span style='color: #2e7d32; font-weight: bold;'>● {info}</span>")
+            self.conn_indicator.setToolTip("Hydrus connection verified and active")
+            self.sync_services_btn.setEnabled(True)
+        elif status == "connecting":
+            self.conn_indicator.setText(f"<span style='color: #f57c00;'>◌ {info}</span>")
+            self.conn_indicator.setToolTip("Connecting to Hydrus API...")
+            self.sync_services_btn.setEnabled(False)
+        elif status == "error":
+            short_info = info if len(info) <= 40 else f"{info[:37]}..."
+            self.conn_indicator.setText(f"<span style='color: #d32f2f; font-weight: bold;'>▲ {short_info}</span>")
+            self.conn_indicator.setToolTip(info)
+            self.sync_services_btn.setEnabled(True)
+        else:  # offline
+            self.conn_indicator.setText("<span style='color: #888;'>○ Offline</span>")
+            self.conn_indicator.setToolTip("Hydrus client is offline or credentials not set")
+            self.sync_services_btn.setEnabled(True)
 
     def _update_title(self) -> None:
         path = self.state.current_path

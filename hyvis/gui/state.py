@@ -1,5 +1,5 @@
 """
-state.py — Central state management and Pydantic synchronization for the GUI.
+state.py — Central state management, Pydantic synchronization, and live Hydrus entity sourcing.
 """
 
 from __future__ import annotations
@@ -9,20 +9,30 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from hyvis.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _prune_none(obj: Any) -> Any:
+    """Recursively prune None values from dictionaries since TOML does not support null."""
+    if isinstance(obj, dict):
+        return {k: _prune_none(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_prune_none(v) for v in obj if v is not None]
+    return obj
+
+
 # Minimal starter template for new configurations
 _DEFAULT_CONFIG_DICT: dict[str, Any] = {
     "hydrus": {
         "api_url": "http://127.0.0.1:45869",
-        "api_key": "your_api_key_here",
+        "api_key": "",
         "no_wait": False,
         "tag_queries": [{"tags": ["system:untagged"]}],
-        "output_tag_services": {"keys": ["your_output_tag_service_key_here"]},
+        "output_tag_services": {"keys": [""]},
     },
     "inference": {
         "models": [
@@ -50,13 +60,83 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
 }
 
 
+class _HydrusWorkerSignals(QObject):
+    """Signals emitted by background Hydrus connection worker."""
+
+    success = Signal(dict, dict, str)  # (all_services, writable_services, version_str)
+    error = Signal(str)  # error message
+
+
+class _HydrusFetchWorker(QRunnable):
+    """Worker task that queries Hydrus in a background thread."""
+
+    def __init__(self, api_url: str, api_key: str) -> None:
+        super().__init__()
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
+        self.signals = _HydrusWorkerSignals()
+
+    def run(self) -> None:
+        from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
+
+        try:
+            client = HydrusClient(self.api_url, self.api_key)
+            client.verify_connection()
+
+            # Retrieve version info
+            version_str = "unknown"
+            try:
+                v_info = client.get_version_info()
+                version_str = str(
+                    v_info.get("hydrus_version") or v_info.get("client_version") or v_info.get("version") or "unknown"
+                )
+            except Exception:
+                pass
+
+            # Retrieve services
+            resp = client.get_services()
+            raw_services = resp.get("services", {})
+
+            all_tag_services: dict[str, str] = {}
+            writable_tag_services: dict[str, str] = {}
+
+            for key, info in raw_services.items():
+                name = str(info.get("name", key))
+                type_pretty = str(info.get("type_pretty", "")).lower()
+                stype = info.get("type")
+
+                # Tag services have 'tag' in type_pretty or type in (0, 5)
+                is_tag_domain = "tag" in type_pretty or stype in (0, 5)
+                if is_tag_domain:
+                    all_tag_services[key] = name
+
+                    # Writable services: local tag domains (5) or tag repositories (0)
+                    # Excludes virtual read-only "all known tags"
+                    is_all_known = "all known tags" in name.lower() or stype == 10
+                    if not is_all_known:
+                        writable_tag_services[key] = name
+
+            self.signals.success.emit(all_tag_services, writable_tag_services, version_str)
+
+        except HydrusConnectionError as exc:
+            self.signals.error.emit(f"Offline: {exc}")
+        except HydrusError as exc:
+            self.signals.error.emit(f"API Error: {exc}")
+        except Exception as exc:
+            self.signals.error.emit(f"Connection failed: {exc}")
+
+
 class ConfigState(QObject):
-    """Manages the lifecycle, file path, validation, and dirty state of an AppConfig."""
+    """Manages the lifecycle, validation, and live Hydrus entity sourcing of an AppConfig."""
 
     config_loaded = Signal(object)  # Emits AppConfig instance on open / reset
     config_saved = Signal(Path)  # Emits Path when saved to disk
     dirty_changed = Signal(bool)  # Emits True if unsaved changes exist
     validation_changed = Signal(list)  # Emits list of human-readable error strings
+
+    # Hydrus entity sourcing signals
+    services_updated = Signal(dict, dict)  # (all_tag_services, writable_tag_services)
+    connection_changed = Signal(str, str)  # (status, display_message)
 
     def __init__(self) -> None:
         super().__init__()
@@ -64,8 +144,16 @@ class ConfigState(QObject):
         self._is_dirty: bool = False
         self._config: AppConfig | None = None
 
+        # Hydrus sourcing state
+        self._tag_services: dict[str, str] = {}
+        self._writable_tag_services: dict[str, str] = {}
+        self._connection_status: str = "offline"
+        self._connection_info: str = "Not connected"
+
         # Start with default template
         self.new_config()
+
+    # region Properties
 
     @property
     def current_path(self) -> Path | None:
@@ -79,6 +167,28 @@ class ConfigState(QObject):
     def config(self) -> AppConfig:
         assert self._config is not None
         return self._config
+
+    @property
+    def tag_services(self) -> dict[str, str]:
+        """All tag services (including read-only services like All Known Tags)."""
+        return dict(self._tag_services)
+
+    @property
+    def writable_tag_services(self) -> dict[str, str]:
+        """Writable destination tag services only."""
+        return dict(self._writable_tag_services)
+
+    @property
+    def connection_status(self) -> str:
+        """One of: 'connected', 'connecting', 'offline', 'error'."""
+        return self._connection_status
+
+    @property
+    def connection_info(self) -> str:
+        """Display label for connection status."""
+        return self._connection_info
+
+    # endregion
 
     def set_dirty(self, dirty: bool = True) -> None:
         if self._is_dirty != dirty:
@@ -104,6 +214,11 @@ class ConfigState(QObject):
             self.config_loaded.emit(self._config)
             self.validate()
             logger.info("Loaded configuration from %s", file_path)
+
+            # Auto-sync services if credentials are present
+            if loaded.hydrus.api_url and loaded.hydrus.api_key:
+                self.sync_hydrus_services(loaded.hydrus.api_url, loaded.hydrus.api_key)
+
             return True
         except Exception as exc:
             logger.error("Failed to load config '%s': %s", file_path, exc)
@@ -120,7 +235,8 @@ class ConfigState(QObject):
 
         try:
             # Dump Pydantic model to clean dictionary and serialize to TOML
-            data = self._config.model_dump(mode="json", exclude_defaults=False)
+            raw_dump = self._config.model_dump(mode="json", exclude_none=True)
+            data = _prune_none(raw_dump)
             toml_str = tomli_w.dumps(data)
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,3 +266,50 @@ class ConfigState(QObject):
 
         self.validation_changed.emit(errors)
         return errors
+
+    # region Live Hydrus Sourcing
+
+    def sync_hydrus_services(
+        self,
+        api_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Fetch Hydrus services in a background thread without freezing the UI."""
+        cfg = self.config
+        url = api_url or (cfg.hydrus.api_url if cfg else "")
+        key = api_key or (cfg.hydrus.api_key if cfg else "")
+
+        if not url or not key:
+            self._connection_status = "offline"
+            self._connection_info = "Credentials missing"
+            self.connection_changed.emit(self._connection_status, self._connection_info)
+            return
+
+        self._connection_status = "connecting"
+        self._connection_info = "Connecting..."
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+        worker = _HydrusFetchWorker(url, key)
+        worker.signals.success.connect(self._on_fetch_success)
+        worker.signals.error.connect(self._on_fetch_error)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_fetch_success(
+        self,
+        all_tags: dict[str, str],
+        writable_tags: dict[str, str],
+        version_str: str,
+    ) -> None:
+        self._tag_services = all_tags
+        self._writable_tag_services = writable_tags
+        self._connection_status = "connected"
+        self._connection_info = f"Connected: Hydrus v{version_str}"
+        self.services_updated.emit(self._tag_services, self._writable_tag_services)
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+    def _on_fetch_error(self, err_msg: str) -> None:
+        self._connection_status = "error"
+        self._connection_info = err_msg
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+    # endregion
