@@ -49,9 +49,11 @@ class ModelsPage(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
 
         splitter = QSplitter(self)
+        splitter.setChildrenCollapsible(False)
 
         # 1. Left: Models list
         left_widget = QWidget(splitter)
+        left_widget.setMinimumWidth(132)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)
