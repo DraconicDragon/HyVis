@@ -238,7 +238,7 @@ class HydrusPage(QWidget):
 
         self.prev_index_spin = QSpinBox(self)
         self.prev_index_spin.setRange(0, 99)
-        self.prev_index_spin.setSpecialValueText("None (Auto)")
+        self.prev_index_spin.setSpecialValueText("None (0)")
         self.prev_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(prev_layout, prev_fields["page_index"], self.prev_index_spin)
 
@@ -248,7 +248,7 @@ class HydrusPage(QWidget):
 
         self.prev_rej_index_spin = QSpinBox(self)
         self.prev_rej_index_spin.setRange(0, 99)
-        self.prev_rej_index_spin.setSpecialValueText("None (Auto)")
+        self.prev_rej_index_spin.setSpecialValueText("None (0)")
         self.prev_rej_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(prev_layout, prev_fields["rejected_page_index"], self.prev_rej_index_spin)
 
