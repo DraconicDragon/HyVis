@@ -49,7 +49,7 @@ class AppDbPage(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(4, 10, 10, 10)
         layout.setSpacing(14)
 
         # 1. Database Settings Card

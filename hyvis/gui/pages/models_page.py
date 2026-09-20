@@ -54,7 +54,7 @@ class ModelsPage(QWidget):
         inf_fields = InferenceConfig.model_fields
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(4, 10, 0, 10)
 
         splitter = QSplitter(self)
         splitter.setChildrenCollapsible(False)

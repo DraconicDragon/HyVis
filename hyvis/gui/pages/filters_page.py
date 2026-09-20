@@ -156,7 +156,7 @@ class FiltersPage(QWidget):
         of_fields = OutputFilterConfig.model_fields
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
+        root.setContentsMargins(4, 10, 0, 10)
         root.setSpacing(10)
 
         # 1. Top Scope Selector Bar
@@ -202,7 +202,7 @@ class FiltersPage(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(0, 8, 10, 10)
         layout.setSpacing(12)
 
         # Card 1: Thresholds & TLT
