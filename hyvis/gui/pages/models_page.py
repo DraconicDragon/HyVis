@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.widgets import (
     SectionCard,
+    SmoothScrollArea,
     TagServiceListEditor,
     add_form_row,
     bind_field_metadata,
@@ -88,7 +89,7 @@ class ModelsPage(QWidget):
         splitter.addWidget(left_widget)
 
         # 2. Right: Active Model Settings (Scrollable Container)
-        right_scroll = QScrollArea(splitter)
+        right_scroll = SmoothScrollArea(splitter)
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 

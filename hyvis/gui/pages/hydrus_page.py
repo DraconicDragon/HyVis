@@ -33,6 +33,7 @@ from hyvis.config import (
 )
 from hyvis.gui.widgets import (
     SectionCard,
+    SmoothScrollArea,
     TagServiceListEditor,
     add_form_row,
     setup_field_tooltip,
@@ -58,7 +59,7 @@ class HydrusPage(QWidget):
         add_fields = AddTagConfig.model_fields
         rem_fields = RemoveTagConfig.model_fields
 
-        scroll = QScrollArea(self)
+        scroll = SmoothScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 

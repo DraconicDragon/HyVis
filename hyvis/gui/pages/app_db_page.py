@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
-from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, setup_field_tooltip
+from hyvis.gui.widgets import SectionCard, SmoothScrollArea, add_form_row, bind_field_metadata, setup_field_tooltip
 
 
 class AppDbPage(QWidget):
@@ -43,7 +43,7 @@ class AppDbPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea(self)
+        scroll = SmoothScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 

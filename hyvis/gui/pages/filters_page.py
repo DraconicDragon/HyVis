@@ -33,6 +33,7 @@ from hyvis.gui.widgets import (
     CategoryTagEditor,
     KeyValueEditor,
     SectionCard,
+    SmoothScrollArea,
     StringListEditor,
     SubsetListEditor,
     ThresholdTableEditor,
@@ -196,7 +197,7 @@ class FiltersPage(QWidget):
         root.addWidget(self.banner_frame)
 
         # 3. Main Scroll Area for Filter Cards
-        scroll = QScrollArea(self)
+        scroll = SmoothScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
