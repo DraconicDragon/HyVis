@@ -230,19 +230,25 @@ class ConfigState(QObject):
             logger.error("Failed to load config '%s': %s", file_path, exc)
             return False
 
-    def save_to_file(self, path: Path | str | None = None) -> bool:
-        """Serialize and save the current configuration to disk as TOML."""
+    def save_to_file(
+        self,
+        path: Path | str | None = None,
+        raw_data: dict[str, Any] | None = None,
+    ) -> bool:
+        """Serialize and save the current configuration to disk as valid TOML."""
         target_path = Path(path).resolve() if path else self._current_path
         if target_path is None:
             raise ValueError("No file path specified for saving.")
 
-        if self._config is None:
-            return False
-
         try:
-            # Dump Pydantic model to clean dictionary and serialize to TOML
-            raw_dump = self._config.model_dump(mode="json", exclude_none=True)
-            data = _prune_none(raw_dump)
+            if raw_data is not None:
+                data = _prune_none(raw_data)
+            elif self._config is not None:
+                raw_dump = self._config.model_dump(mode="json", exclude_none=True)
+                data = _prune_none(raw_dump)
+            else:
+                return False
+
             toml_str = tomli_w.dumps(data)
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +261,7 @@ class ConfigState(QObject):
             return True
         except Exception as exc:
             logger.error("Failed to save config to '%s': %s", target_path, exc)
-            return False
+            raise
 
     def update_config(self, new_config: AppConfig) -> None:
         """Update active configuration from page views and mark dirty."""

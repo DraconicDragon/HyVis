@@ -290,9 +290,14 @@ class MainWindow(QMainWindow):
         try:
             validated = AppConfig.model_validate(data)
             self.state.update_config(validated)
-            return self.state.save_to_file()
+        except Exception:
+            # Allow saving premature / work-in-progress TOMLs without validation hard-blocking
+            pass
+
+        try:
+            return self.state.save_to_file(raw_data=data)
         except Exception as exc:
-            QMessageBox.critical(self, "Invalid Configuration", f"Cannot save invalid configuration:\n\n{exc}")
+            self._show_save_error(exc)
             return False
 
     def _on_save_as_config(self) -> bool:
@@ -306,10 +311,23 @@ class MainWindow(QMainWindow):
         try:
             validated = AppConfig.model_validate(data)
             self.state.update_config(validated)
-            return self.state.save_to_file(file_path)
+        except Exception:
+            pass
+
+        try:
+            return self.state.save_to_file(path=file_path, raw_data=data)
         except Exception as exc:
-            QMessageBox.critical(self, "Invalid Configuration", f"Cannot save invalid configuration:\n\n{exc}")
+            self._show_save_error(exc)
             return False
+
+    def _show_save_error(self, exc: Exception) -> None:
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Failed to Save Configuration")
+        msg_box.setText("An error occurred while serializing or saving the configuration file.")
+        msg_box.setDetailedText(str(exc))
+        msg_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        msg_box.exec()
 
     def _confirm_discard_changes(self) -> bool:
         if not self.state.is_dirty:
