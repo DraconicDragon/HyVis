@@ -650,7 +650,7 @@ class AppConfig(StrictBaseModel):
     )
     output_filter: OutputFilterConfig = Field(
         ...,
-        title="Global Output Filter",
+        title="Output Filter",
         description="Global settings for filtering, thresholding, and transforming tags before pushing to Hydrus.",
     )
     database: DatabaseConfig = Field(
