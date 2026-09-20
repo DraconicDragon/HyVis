@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -39,7 +40,15 @@ class AppDbPage(QWidget):
         db_fields = DatabaseConfig.model_fields
         hy_fields = HyvisConfig.model_fields
 
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(14)
 
@@ -48,13 +57,13 @@ class AppDbPage(QWidget):
         self.db_card = SectionCard(
             title=db_title,
             tooltip=app_fields["database"].description or "",
-            parent=self,
+            parent=container,
         )
         db_layout = QFormLayout()
         db_layout.setSpacing(8)
 
         # DB Path Row
-        path_box = QWidget(self)
+        path_box = QWidget(container)
         path_row = QHBoxLayout(path_box)
         path_row.setContentsMargins(0, 0, 0, 0)
         path_row.setSpacing(6)
@@ -71,14 +80,14 @@ class AppDbPage(QWidget):
         add_form_row(db_layout, db_fields["path"], path_box)
 
         # Cache raw predictions checkbox
-        self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, self)
+        self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, container)
         setup_field_tooltip(self.cache_raw_chk, db_fields["cache_raw_predictions"])
         self.cache_raw_chk.setChecked(True)
         self.cache_raw_chk.toggled.connect(lambda _: self._on_field_changed())
         db_layout.addRow("", self.cache_raw_chk)
 
         # Min score spinbox
-        self.min_score_spin = QDoubleSpinBox(self)
+        self.min_score_spin = QDoubleSpinBox(container)
         self.min_score_spin.setRange(0.0, 1.0)
         self.min_score_spin.setSingleStep(0.005)
         self.min_score_spin.setDecimals(3)
@@ -94,17 +103,17 @@ class AppDbPage(QWidget):
         self.app_card = SectionCard(
             title=hy_title,
             tooltip=app_fields["hyvis"].description or "",
-            parent=self,
+            parent=container,
         )
         app_layout = QFormLayout()
         app_layout.setSpacing(8)
 
-        self.log_level_combo = QComboBox(self)
+        self.log_level_combo = QComboBox(container)
         self.log_level_combo.addItems(["WARNING", "INFO", "DEBUG", "ERROR"])
         self.log_level_combo.currentTextChanged.connect(lambda _: self._on_field_changed())
         add_form_row(app_layout, hy_fields["log_level"], self.log_level_combo)
 
-        self.infer_only_chk = QCheckBox(hy_fields["infer_only"].title, self)
+        self.infer_only_chk = QCheckBox(hy_fields["infer_only"].title, container)
         setup_field_tooltip(self.infer_only_chk, hy_fields["infer_only"])
         self.infer_only_chk.setChecked(False)
         self.infer_only_chk.toggled.connect(lambda _: self._on_field_changed())
@@ -114,6 +123,8 @@ class AppDbPage(QWidget):
         layout.addWidget(self.app_card)
 
         layout.addStretch()
+        scroll.setWidget(container)
+        root.addWidget(scroll)
 
     def _on_field_changed(self) -> None:
         if self._is_loading_ui:
