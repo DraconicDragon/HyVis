@@ -37,6 +37,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+DEFAULT_SUGGESTIONS = [
+    "general",
+    "character",
+    "rating",
+    "artist",
+    "copyright",
+    "meta",
+    "species",
+    "lore",
+    "contributor",
+]
+
 
 def setup_field_tooltip(widget: QWidget, field_info: Any) -> None:
     """Set the widget tooltip from Pydantic Field description if present."""
@@ -726,3 +738,105 @@ class SubsetListEditor(QWidget):
 
 
 # endregion
+
+
+class CategoryTagEditor(QWidget):
+    """
+    Dynamic category list editor.
+    Displays active categories in a list with an editable combobox + Add/Remove bar.
+    Populates suggestions based on vibe model metadata and canonical categories.
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self._suggestions: list[str] = list(DEFAULT_SUGGESTIONS)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        # 1. List of active categories
+        self.list_widget = QListWidget(self)
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list_widget.setMinimumHeight(110)
+        layout.addWidget(self.list_widget)
+
+        # 2. Add bar with editable combobox
+        input_layout = QHBoxLayout()
+        input_layout.setSpacing(6)
+
+        self.combo = QComboBox(self)
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._refresh_combo()
+        line_edit = self.combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setPlaceholderText("Select or type custom category...")
+            line_edit.returnPressed.connect(self._on_add)
+        input_layout.addWidget(self.combo, stretch=1)
+
+        self.add_btn = QPushButton("+ Add", self)
+        self.add_btn.clicked.connect(self._on_add)
+        input_layout.addWidget(self.add_btn)
+
+        self.remove_btn = QPushButton("- Remove Selected", self)
+        self.remove_btn.clicked.connect(self._on_remove)
+        input_layout.addWidget(self.remove_btn)
+
+        layout.addLayout(input_layout)
+
+    def _refresh_combo(self) -> None:
+        self.combo.blockSignals(True)
+        current = self.combo.currentText()
+        self.combo.clear()
+        self.combo.addItems(self._suggestions)
+        self.combo.setCurrentText(current)
+        self.combo.blockSignals(False)
+
+    def set_suggestions(self, suggestions: Sequence[str]) -> None:
+        """Update suggestion list based on active models or vibe metadata."""
+        merged = list(dict.fromkeys(list(suggestions) + DEFAULT_SUGGESTIONS))
+        self._suggestions = merged
+        self._refresh_combo()
+
+    def get_items(self) -> list[str]:
+        items: list[str] = []
+        for i in range(self.list_widget.count()):
+            text = self.list_widget.item(i).text().strip()
+            if text:
+                items.append(text)
+        return items
+
+    def set_items(self, items: Sequence[str]) -> None:
+        self.blockSignals(True)
+        self.list_widget.clear()
+        for item in items:
+            cleaned = str(item).strip()
+            if cleaned:
+                self.list_widget.addItem(QListWidgetItem(cleaned))
+        self.blockSignals(False)
+
+    def _on_add(self) -> None:
+        text = self.combo.currentText().strip().lower()
+        if not text:
+            return
+
+        existing = set(self.get_items())
+        if text not in existing:
+            self.list_widget.addItem(QListWidgetItem(text))
+            self.combo.setCurrentText("")
+            self.changed.emit()
+
+    def _on_remove(self) -> None:
+        selected = self.list_widget.selectedItems()
+        if not selected:
+            return
+
+        for item in selected:
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
+
+        self.changed.emit()
