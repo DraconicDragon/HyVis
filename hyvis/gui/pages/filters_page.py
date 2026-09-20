@@ -200,7 +200,7 @@ class FiltersPage(QWidget):
         layout.addWidget(cat_group)
 
         # 3. Inclusions & Exclusions
-        inc_exc_group = QGroupBox("Tag Inclusions & Exclusions", container)
+        inc_exc_group = QGroupBox("Tag Inclusions && Exclusions", container)
         inc_exc_layout = QHBoxLayout(inc_exc_group)
         inc_exc_layout.setSpacing(12)
 
@@ -248,7 +248,7 @@ class FiltersPage(QWidget):
         layout.addWidget(overrides_group)
 
         # 5. Namespace Prefixes & Tag Replacements
-        pfx_group = QGroupBox("Tag Formatting & Namespace Prefixes", container)
+        pfx_group = QGroupBox("Tag Formatting && Namespace Prefixes", container)
         pfx_layout = QVBoxLayout(pfx_group)
         pfx_layout.setSpacing(12)
 
