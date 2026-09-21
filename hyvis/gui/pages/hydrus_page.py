@@ -28,8 +28,8 @@ from hyvis.gui.widgets import (
     PageQueryListEditor,
     SectionCard,
     SmoothScrollArea,
-    StringListEditor,
     TagQueryListEditor,
+    TagRuleListEditor,
     TagServiceListEditor,
     add_form_row,
     setup_field_tooltip,
@@ -136,51 +136,47 @@ class HydrusPage(QWidget):
         self.page_q_card.setContentLayout(page_q_layout)
         layout.addWidget(self.page_q_card)
 
-        # 5. Additional Post-Run Tags Card (Checkable)
+        # 5. Additional Post-Run Tags Card (Stacked Multi-Rule Editor)
         add_title = h_fields["add_tags"].title or "Post-Run Additional Tags"
         self.add_tags_card = SectionCard(
             title=add_title,
             tooltip=h_fields["add_tags"].description or "",
             parent=container,
         )
-        self.add_tags_card.setCheckable(True)
-        self.add_tags_card.setChecked(False)
-        self.add_tags_card.toggled.connect(lambda _: self._on_field_changed())
-        add_layout = QFormLayout()
-        add_layout.setSpacing(8)
-
-        self.add_tags_editor = StringListEditor(placeholder="Add tag to apply (press Enter or Add)...", parent=self)
+        add_layout = QVBoxLayout()
+        self.add_tags_editor = TagRuleListEditor(
+            title_prefix="Add Rule",
+            tags_label="Tags to Add:",
+            placeholder="Add tag to apply after processing...",
+            allow_search_all=False,
+            add_btn_text="+ Add Additional Tags Rule",
+            empty_text="(No additional tags configured — click '+ Add Additional Tags Rule' below)",
+            parent=self,
+        )
         self.add_tags_editor.changed.connect(self._on_field_changed)
-        add_form_row(add_layout, add_fields["tags"], self.add_tags_editor)
-
-        self.add_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        self.add_services_editor.changed.connect(self._on_field_changed)
-        add_form_row(add_layout, add_fields["tag_service_keys"], self.add_services_editor)
-
+        add_layout.addWidget(self.add_tags_editor)
         self.add_tags_card.setContentLayout(add_layout)
         layout.addWidget(self.add_tags_card)
 
-        # 6. Cleanup Tags Card (Checkable)
+        # 6. Cleanup Tags Card (Stacked Multi-Rule Editor)
         rem_title = h_fields["remove_tags"].title or "Post-Run Cleanup Tags"
         self.rem_tags_card = SectionCard(
             title=rem_title,
             tooltip=h_fields["remove_tags"].description or "",
             parent=container,
         )
-        self.rem_tags_card.setCheckable(True)
-        self.rem_tags_card.setChecked(False)
-        self.rem_tags_card.toggled.connect(lambda _: self._on_field_changed())
-        rem_layout = QFormLayout()
-        rem_layout.setSpacing(8)
-
-        self.rem_tags_editor = StringListEditor(placeholder="Add tag to remove (press Enter or Add)...", parent=self)
+        rem_layout = QVBoxLayout()
+        self.rem_tags_editor = TagRuleListEditor(
+            title_prefix="Remove Rule",
+            tags_label="Tags to Remove:",
+            placeholder="Add tag to remove after processing...",
+            allow_search_all=False,
+            add_btn_text="+ Add Cleanup Tags Rule",
+            empty_text="(No cleanup tags configured — click '+ Add Cleanup Tags Rule' below)",
+            parent=self,
+        )
         self.rem_tags_editor.changed.connect(self._on_field_changed)
-        add_form_row(rem_layout, rem_fields["tags"], self.rem_tags_editor)
-
-        self.rem_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        self.rem_services_editor.changed.connect(self._on_field_changed)
-        add_form_row(rem_layout, rem_fields["tag_service_keys"], self.rem_services_editor)
-
+        rem_layout.addWidget(self.rem_tags_editor)
         self.rem_tags_card.setContentLayout(rem_layout)
         layout.addWidget(self.rem_tags_card)
 
@@ -238,8 +234,8 @@ class HydrusPage(QWidget):
         self._available_all_services = dict(all_tags)
 
         self.output_services_editor.set_available_services(writable_tags)
-        self.add_services_editor.set_available_services(writable_tags)
-        self.rem_services_editor.set_available_services(writable_tags)
+        self.add_tags_editor.set_available_services(writable_tags)
+        self.rem_tags_editor.set_available_services(writable_tags)
         self.tag_queries_editor.set_available_services(all_tags)
 
     def update_pages(self, pages: list[dict[str, Any]]) -> None:
@@ -261,25 +257,11 @@ class HydrusPage(QWidget):
             self.tag_queries_editor.set_queries(h.tag_queries)
             self.page_queries_editor.set_queries(h.page_queries)
 
-            # Add Tags
-            if h.add_tags:
-                self.add_tags_card.setChecked(True)
-                self.add_tags_editor.set_items(h.add_tags.tags)
-                self.add_services_editor.set_items(h.add_tags.tag_service_keys)
-            else:
-                self.add_tags_card.setChecked(False)
-                self.add_tags_editor.set_items([])
-                self.add_services_editor.set_items([])
+            # Add Tags rules
+            self.add_tags_editor.set_rules(h.add_tags)
 
-            # Remove Tags
-            if h.remove_tags:
-                self.rem_tags_card.setChecked(True)
-                self.rem_tags_editor.set_items(h.remove_tags.tags)
-                self.rem_services_editor.set_items(h.remove_tags.tag_service_keys)
-            else:
-                self.rem_tags_card.setChecked(False)
-                self.rem_tags_editor.set_items([])
-                self.rem_services_editor.set_items([])
+            # Remove Tags rules
+            self.rem_tags_editor.set_rules(h.remove_tags)
 
             # Preview
             if h.preview:
@@ -311,27 +293,11 @@ class HydrusPage(QWidget):
         hydrus_dict["tag_queries"] = self.tag_queries_editor.get_queries()
         hydrus_dict["page_queries"] = self.page_queries_editor.get_queries()
 
-        # Add Tags (omitted as None if unchecked)
-        if self.add_tags_card.isChecked():
-            add_tags = self.add_tags_editor.get_items()
-            add_keys = self.add_services_editor.get_items()
-            if add_tags or add_keys:
-                hydrus_dict["add_tags"] = {"tags": add_tags, "tag_service_keys": add_keys}
-            else:
-                hydrus_dict["add_tags"] = None
-        else:
-            hydrus_dict["add_tags"] = None
+        # Add Tags rules list
+        hydrus_dict["add_tags"] = self.add_tags_editor.get_rules()
 
-        # Remove Tags (omitted as None if unchecked)
-        if self.rem_tags_card.isChecked():
-            rem_tags = self.rem_tags_editor.get_items()
-            rem_keys = self.rem_services_editor.get_items()
-            if rem_tags or rem_keys:
-                hydrus_dict["remove_tags"] = {"tags": rem_tags, "tag_service_keys": rem_keys}
-            else:
-                hydrus_dict["remove_tags"] = None
-        else:
-            hydrus_dict["remove_tags"] = None
+        # Remove Tags rules list
+        hydrus_dict["remove_tags"] = self.rem_tags_editor.get_rules()
 
         # Preview (omitted as None if unchecked)
         if self.prev_card.isChecked():

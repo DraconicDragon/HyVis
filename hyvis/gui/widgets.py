@@ -1082,15 +1082,16 @@ class CategoryTagEditor(QWidget):
 # endregion
 
 
-# region Tag Query Stacked Card Editor
+# region Tag Rule & Query Stacked Card Editors
 
 
-class TagQueryCard(QFrame):
+class TagRuleCard(QFrame):
     """
-    A single query card mapping to one [[hydrus.tag_queries]] entry.
-    Contains:
-      - Target Service dropdown (non-editable, with 'All Known Tags (virtual)' default).
-      - Tag list editor (StringListEditor) supporting commas, colons, and parentheses.
+    A single card mapping tags to a specific Hydrus service key.
+    Used for:
+      - [[hydrus.tag_queries]] (allow_search_all=True)
+      - [[hydrus.add_tags]] (allow_search_all=False, writable services only)
+      - [[hydrus.remove_tags]] (allow_search_all=False, writable services only)
     """
 
     changed = Signal()
@@ -1099,15 +1100,21 @@ class TagQueryCard(QFrame):
     def __init__(
         self,
         index: int = 1,
+        title_prefix: str = "Rule",
+        tags_label: str = "Tags:",
+        placeholder: str = "Enter tag and press Enter or Add...",
+        allow_search_all: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._available_services: dict[str, Any] = {}
         self._index = index
+        self._title_prefix = title_prefix
+        self._allow_search_all = allow_search_all
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setStyleSheet(
-            "TagQueryCard {"
+            "TagRuleCard {"
             "  border: 1px solid rgba(255, 255, 255, 0.08);"
             "  border-radius: 6px;"
             "  background: rgba(255, 255, 255, 0.015);"
@@ -1120,7 +1127,7 @@ class TagQueryCard(QFrame):
 
         # 1. Header row
         header_layout = QHBoxLayout()
-        self.title_label = QLabel(f"<b>Query #{self._index}</b>", self)
+        self.title_label = QLabel(f"<b>{self._title_prefix} #{self._index}</b>", self)
         self.title_label.setStyleSheet("font-size: 12px;")
         header_layout.addWidget(self.title_label)
 
@@ -1128,7 +1135,7 @@ class TagQueryCard(QFrame):
 
         self.del_btn = QPushButton("✕", self)
         self.del_btn.setFixedWidth(26)
-        self.del_btn.setToolTip("Remove this query block")
+        self.del_btn.setToolTip("Remove this rule")
         self.del_btn.setStyleSheet(
             "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
             "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
@@ -1138,7 +1145,7 @@ class TagQueryCard(QFrame):
 
         card_layout.addLayout(header_layout)
 
-        # 2. Service selection row
+        # 2. Target Service row
         svc_row = QHBoxLayout()
         svc_row.setSpacing(8)
         svc_label = QLabel("Target Service:", self)
@@ -1146,7 +1153,7 @@ class TagQueryCard(QFrame):
         svc_row.addWidget(svc_label)
 
         self.service_combo = QComboBox(self)
-        self.service_combo.setEditable(False)  # NON-EDITABLE: Pure entity selector
+        self.service_combo.setEditable(False)
         self._repopulate_services()
         self.service_combo.currentIndexChanged.connect(lambda _: self.changed.emit())
         svc_row.addWidget(self.service_combo, stretch=1)
@@ -1154,17 +1161,17 @@ class TagQueryCard(QFrame):
         card_layout.addLayout(svc_row)
 
         # 3. Tags list editor
-        tags_label = QLabel("Search Tags:", self)
-        tags_label.setStyleSheet("color: #b0bec5;")
-        card_layout.addWidget(tags_label)
+        t_label = QLabel(tags_label, self)
+        t_label.setStyleSheet("color: #b0bec5;")
+        card_layout.addWidget(t_label)
 
-        self.tags_editor = StringListEditor(placeholder="Enter search tag and press Enter or Add...", parent=self)
+        self.tags_editor = StringListEditor(placeholder=placeholder, parent=self)
         self.tags_editor.changed.connect(self.changed.emit)
         card_layout.addWidget(self.tags_editor)
 
     def set_index(self, index: int) -> None:
         self._index = index
-        self.title_label.setText(f"<b>Query #{self._index}</b>")
+        self.title_label.setText(f"<b>{self._title_prefix} #{self._index}</b>")
 
     def set_available_services(self, services: dict[str, Any]) -> None:
         self._available_services = dict(services)
@@ -1175,45 +1182,40 @@ class TagQueryCard(QFrame):
         self.service_combo.blockSignals(True)
         self.service_combo.clear()
 
-        # 1. Offline State: Dim combobox and show explicit warning
+        # Offline State
         if not self._available_services:
             if selected_key and selected_key != HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
                 short_k = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
                 self.service_combo.addItem(f"Service: {short_k} (Offline)", userData=selected_key)
             else:
-                # Default search-all under the hood (userData=""), but explicit offline warning in UI
-                self.service_combo.addItem("⚠ Connect to Hydrus to select services", userData="")
+                msg = "⚠ Connect to Hydrus to select service"
+                self.service_combo.addItem(msg, userData="")
 
             self.service_combo.setCurrentIndex(0)
             self.service_combo.setEnabled(False)
             self.service_combo.blockSignals(False)
             return
 
-        # 2. Connected State: Enable combobox
         self.service_combo.setEnabled(True)
 
-        # Index 0 is always the default search-all option (maps to empty key in HyVis config)
-        all_known_info = self._available_services.get(HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY)
-        if all_known_info:
-            # Respect whatever custom name the user gave it in Hydrus
-            name = (
-                all_known_info.get("name", "All Known Tags")
-                if isinstance(all_known_info, dict)
-                else str(all_known_info)
-            )
-            short_k = f"{HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY[:8]}..."
-            display = f"{name} (virtual)  ({short_k})"
-        else:
-            # Offline fallback
-            display = "All Known Tags (virtual)"
+        # Allow Search All ("All Known Tags") only for Tag Queries
+        if self._allow_search_all:
+            all_known_info = self._available_services.get(HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY)
+            if all_known_info:
+                name = (
+                    all_known_info.get("name", "All Known Tags")
+                    if isinstance(all_known_info, dict)
+                    else str(all_known_info)
+                )
+                short_k = f"{HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY[:8]}..."
+                display = f"{name} (virtual)  ({short_k})"
+            else:
+                display = "All Known Tags (virtual)"
+            self.service_combo.addItem(display, userData="")
 
-        # Index 0 is always the default search-all option (maps to empty key in HyVis config)
-        self.service_combo.addItem(display, userData="")
-
-        # Add all other tag services from Hydrus
+        # Populate services
         for key, val in self._available_services.items():
-            # Skip the built-in service key because it is already index 0 above
-            if key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
+            if self._allow_search_all and key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
                 continue
 
             if isinstance(val, dict):
@@ -1224,13 +1226,17 @@ class TagQueryCard(QFrame):
                 name = str(val)
                 is_virtual = False
 
+            # Exclude virtual services if writable_only / allow_search_all is False
+            if not self._allow_search_all and is_virtual:
+                continue
+
             virt_label = " (virtual)" if is_virtual else ""
             short_key = f"{key[:8]}..." if len(key) > 12 else key
             self.service_combo.addItem(f"{name}{virt_label}  ({short_key})", userData=key)
 
-        # 3. Resolve active selection
+        # Resolve selection
         if selected_key:
-            if selected_key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY or selected_key == "":
+            if self._allow_search_all and (selected_key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY or selected_key == ""):
                 self.service_combo.setCurrentIndex(0)
             else:
                 idx = self.service_combo.findData(selected_key)
@@ -1245,36 +1251,49 @@ class TagQueryCard(QFrame):
 
         self.service_combo.blockSignals(False)
 
-    def get_query(self) -> dict[str, Any]:
+    def get_rule(self) -> dict[str, Any]:
         tags = self.tags_editor.get_items()
         selected_key = str(self.service_combo.currentData() or "").strip()
         service_keys = [selected_key] if selected_key else []
         return {"tags": tags, "tag_service_keys": service_keys}
 
-    def set_query(self, tags: Sequence[Any], service_keys: Sequence[str]) -> None:
+    def set_rule(self, tags: Sequence[Any], service_keys: Sequence[str]) -> None:
         self.tags_editor.set_items([str(t) for t in tags])
         key = service_keys[0] if service_keys else ""
         self._repopulate_services(selected_key=key)
 
 
-class TagQueryListEditor(QWidget):
+class TagRuleListEditor(QWidget):
     """
-    Stacked list editor for multiple [[hydrus.tag_queries]].
-    Each entry is represented as an independent TagQueryCard.
+    Stacked list editor for multi-rule tag blocks.
+    Used for tag_queries, add_tags, and remove_tags.
     """
 
     changed = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title_prefix: str = "Rule",
+        tags_label: str = "Tags:",
+        placeholder: str = "Enter tag and press Enter or Add...",
+        allow_search_all: bool = False,
+        add_btn_text: str = "+ Add Rule",
+        empty_text: str = "(No rules configured — click button below)",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._cards: list[TagQueryCard] = []
+        self._cards: list[TagRuleCard] = []
         self._available_services: dict[str, Any] = {}
+        self._title_prefix = title_prefix
+        self._tags_label = tags_label
+        self._placeholder = placeholder
+        self._allow_search_all = allow_search_all
 
         self._root_layout = QVBoxLayout(self)
         self._root_layout.setContentsMargins(0, 0, 0, 0)
         self._root_layout.setSpacing(8)
 
-        # 1. Container for cards
+        # 1. Cards container
         self._cards_widget = QWidget(self)
         self._cards_layout = QVBoxLayout(self._cards_widget)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -1282,13 +1301,13 @@ class TagQueryListEditor(QWidget):
         self._root_layout.addWidget(self._cards_widget)
 
         # 2. Empty placeholder
-        self.empty_label = QLabel("(No tag queries configured — click '+ Add Tag Query' below)", self)
+        self.empty_label = QLabel(empty_text, self)
         self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
         self._root_layout.addWidget(self.empty_label)
 
         # 3. Add button
         btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("+ Add Tag Query", self)
+        self.add_btn = QPushButton(add_btn_text, self)
         self.add_btn.clicked.connect(self._on_add_clicked)
         btn_layout.addWidget(self.add_btn)
         btn_layout.addStretch()
@@ -1301,20 +1320,20 @@ class TagQueryListEditor(QWidget):
         for card in self._cards:
             card.set_available_services(services)
 
-    def get_queries(self) -> list[dict[str, Any]]:
-        queries: list[dict[str, Any]] = []
+    def get_rules(self) -> list[dict[str, Any]]:
+        rules: list[dict[str, Any]] = []
         for card in self._cards:
-            q = card.get_query()
-            if q["tags"]:  # Only persist queries with at least one tag
-                queries.append(q)
-        return queries
+            r = card.get_rule()
+            if r["tags"]:  # Only export rules that have at least one tag
+                rules.append(r)
+        return rules
 
-    def set_queries(self, queries: Sequence[Any]) -> None:
+    def set_rules(self, rules: Sequence[Any]) -> None:
         self.blockSignals(True)
         self._clear_cards()
-        for idx, q in enumerate(queries, start=1):
-            tags = getattr(q, "tags", None) or (q.get("tags") if isinstance(q, dict) else [])
-            keys = getattr(q, "tag_service_keys", None) or (q.get("tag_service_keys") if isinstance(q, dict) else [])
+        for idx, r in enumerate(rules, start=1):
+            tags = getattr(r, "tags", None) or (r.get("tags") if isinstance(r, dict) else [])
+            keys = getattr(r, "tag_service_keys", None) or (r.get("tag_service_keys") if isinstance(r, dict) else [])
             self._add_card(tags, keys, idx)
         self._update_empty_state()
         self.blockSignals(False)
@@ -1330,14 +1349,21 @@ class TagQueryListEditor(QWidget):
         tags: Sequence[Any] | None = None,
         keys: Sequence[str] | None = None,
         index: int | None = None,
-    ) -> TagQueryCard:
+    ) -> TagRuleCard:
         idx = index or (len(self._cards) + 1)
-        card = TagQueryCard(index=idx, parent=self._cards_widget)
+        card = TagRuleCard(
+            index=idx,
+            title_prefix=self._title_prefix,
+            tags_label=self._tags_label,
+            placeholder=self._placeholder,
+            allow_search_all=self._allow_search_all,
+            parent=self._cards_widget,
+        )
         card.set_available_services(self._available_services)
         if tags is not None:
-            card.set_query(tags, keys or [])
+            card.set_rule(tags, keys or [])
         else:
-            card.set_query([], [])
+            card.set_rule([], [])
 
         card.changed.connect(self.changed.emit)
         card.delete_requested.connect(lambda: self._on_delete_card(card))
@@ -1351,7 +1377,7 @@ class TagQueryListEditor(QWidget):
         self._add_card()
         self.changed.emit()
 
-    def _on_delete_card(self, card: TagQueryCard) -> None:
+    def _on_delete_card(self, card: TagRuleCard) -> None:
         if card in self._cards:
             self._cards.remove(card)
             self._cards_layout.removeWidget(card)
@@ -1368,7 +1394,27 @@ class TagQueryListEditor(QWidget):
         self.empty_label.setVisible(len(self._cards) == 0)
 
 
+class TagQueryListEditor(TagRuleListEditor):
+    """Convenience subclass for [[hydrus.tag_queries]] enabling 'All Known Tags'."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            title_prefix="Query",
+            tags_label="Search Tags:",
+            placeholder="Enter search tag and press Enter or Add...",
+            allow_search_all=True,
+            add_btn_text="+ Add Tag Query",
+            empty_text="(No tag queries configured — click '+ Add Tag Query' below)",
+            parent=parent,
+        )
+
+    # Maintain method aliases
+    get_queries = TagRuleListEditor.get_rules
+    set_queries = TagRuleListEditor.set_rules
+
+
 # endregion
+
 
 # region Page Query List Editor
 

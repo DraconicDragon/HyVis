@@ -38,7 +38,10 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
         "api_key": "",
         "no_wait": False,
         "tag_queries": [],
+        "page_queries": [],
         "output_tag_services": {"keys": [""]},
+        "add_tags": [],
+        "remove_tags": [],
     },
     "inference": {
         "models": [
