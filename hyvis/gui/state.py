@@ -69,12 +69,12 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
 class _HydrusWorkerSignals(QObject):
     """Signals emitted by background Hydrus connection worker."""
 
-    success = Signal(dict, dict, str)  # (all_services, writable_services, version_str)
+    success = Signal(dict, dict, list, str)  # (all_services, writable_services, pages, version_str)
     error = Signal(str)  # error message
 
 
 class _HydrusFetchWorker(QRunnable):
-    """Worker task that queries Hydrus in a background thread."""
+    """Worker task that queries Hydrus services and open media pages in a background thread."""
 
     def __init__(self, api_url: str, api_key: str) -> None:
         super().__init__()
@@ -89,7 +89,7 @@ class _HydrusFetchWorker(QRunnable):
             client = HydrusClient(self.api_url, self.api_key)
             client.verify_connection()
 
-            # Retrieve version info
+            # 1. Retrieve version info
             version_str = "unknown"
             try:
                 v_info = client.get_version_info()
@@ -99,7 +99,7 @@ class _HydrusFetchWorker(QRunnable):
             except Exception:
                 pass
 
-            # Retrieve services
+            # 2. Retrieve services
             resp = client.get_services()
             raw_services = resp.get("services", {})
 
@@ -129,7 +129,62 @@ class _HydrusFetchWorker(QRunnable):
                     if not is_virtual:
                         writable_tag_services[key] = name
 
-            self.signals.success.emit(all_tag_services, writable_tag_services, version_str)
+            # 3. Retrieve open media pages
+            pages: list[dict[str, Any]] = []
+            try:
+                root_pages = client.get_pages()
+                raw_node = root_pages.get("pages", {})
+
+                collected_media: list[dict[str, Any]] = []
+
+                def _walk(node: dict[str, Any]) -> None:
+                    if node.get("is_media_page") is True:
+                        collected_media.append(
+                            {
+                                "name": str(node.get("name", "Unnamed Page")),
+                                "page_key": str(node.get("page_key", "")),
+                            }
+                        )
+                    for child in node.get("pages", []):
+                        _walk(child)
+
+                _walk(raw_node)
+
+                # Count duplicates to calculate disambiguation indices
+                name_totals: dict[str, int] = {}
+                for p in collected_media:
+                    name_totals[p["name"]] = name_totals.get(p["name"], 0) + 1
+
+                name_indices: dict[str, int] = {}
+                for p in collected_media:
+                    name = p["name"]
+                    idx = name_indices.get(name, 0)
+                    name_indices[name] = idx + 1
+                    has_duplicates = name_totals[name] > 1
+
+                    num_files = None
+                    try:
+                        p_info = client.get_page_info(p["page_key"], simple=True)
+                        media = p_info.get("media") or p_info.get("page_info", {}).get("media")
+                        if media:
+                            num_files = media.get("num_files")
+                    except Exception:
+                        pass
+
+                    pages.append(
+                        {
+                            "name": name,
+                            "index": idx if has_duplicates else None,
+                            "raw_index": idx,
+                            "has_duplicates": has_duplicates,
+                            "num_files": num_files,
+                            "page_key": p["page_key"],
+                        }
+                    )
+            except Exception as exc:
+                logger.debug("Failed to fetch Hydrus open pages: %s", exc)
+
+            self.signals.success.emit(all_tag_services, writable_tag_services, pages, version_str)
 
         except HydrusConnectionError as exc:
             self.signals.error.emit(f"Offline: {exc}")
@@ -149,6 +204,7 @@ class ConfigState(QObject):
 
     # Hydrus entity sourcing signals
     services_updated = Signal(dict, dict)  # (all_tag_services, writable_tag_services)
+    pages_updated = Signal(list)  # list of open media page dicts
     connection_changed = Signal(str, str)  # (status, display_message)
 
     def __init__(self) -> None:
@@ -160,6 +216,7 @@ class ConfigState(QObject):
         # Hydrus sourcing state
         self._tag_services: dict[str, Any] = {}
         self._writable_tag_services: dict[str, str] = {}
+        self._pages: list[dict[str, Any]] = []
         self._connection_status: str = "offline"
         self._connection_info: str = "Not connected"
 
@@ -190,6 +247,11 @@ class ConfigState(QObject):
     def writable_tag_services(self) -> dict[str, str]:
         """Writable destination tag services only."""
         return dict(self._writable_tag_services)
+
+    @property
+    def pages(self) -> list[dict[str, Any]]:
+        """List of open media pages currently in the Hydrus client."""
+        return list(self._pages)
 
     @property
     def connection_status(self) -> str:
@@ -317,13 +379,16 @@ class ConfigState(QObject):
         self,
         all_tags: dict[str, Any],
         writable_tags: dict[str, str],
+        pages: list[dict[str, Any]],
         version_str: str,
     ) -> None:
         self._tag_services = all_tags
         self._writable_tag_services = writable_tags
+        self._pages = pages
         self._connection_status = "connected"
         self._connection_info = f"Connected: Hydrus v{version_str}"
         self.services_updated.emit(self._tag_services, self._writable_tag_services)
+        self.pages_updated.emit(self._pages)
         self.connection_changed.emit(self._connection_status, self._connection_info)
 
     def _on_fetch_error(self, err_msg: str) -> None:
