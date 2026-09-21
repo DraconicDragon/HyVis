@@ -187,42 +187,46 @@ keys = ["your_service_key_here", "another_service_key_here"]
 
 </details>
 
-### `[hydrus.add_tags]`
+### `[[hydrus.add_tags]]`
 
-Specifies arbitrary extra tags to apply to successfully processed files. These tags are added to files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies rules for extra tags to apply to successfully processed files. These tags are added **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+
+Defining multiple blocks allows routing different tags to different tag services (e.g. local workflow tags to your local service, and model metadata tags to a shared service).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | No | List of tags to add to files. |
-| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to write the tags to. <br> **Only required if `tags` is specified*. |
+| `tags` | Array of Strings | **Yes** | List of tags to add to files. |
+| `tag_service_keys` | Array of Strings | **Yes** | Destination Hydrus tag service keys to write these tags to. |
 
 <details>
-<summary>💡 View <code>[hydrus.add_tags]</code> Example</summary>
+<summary>💡 View <code>[[hydrus.add_tags]]</code> Example</summary>
 
 ```toml
-[hydrus.add_tags]
+[[hydrus.add_tags]]
 tags = ["ai:tagged"]
 tag_service_keys = ["my_service_key_here"]
 ```
 
 </details>
 
-### `[hydrus.remove_tags]`
+### `[[hydrus.remove_tags]]`
 
-Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing `hyvis <config> --push-only`.
+Defining multiple blocks allows targeting specific cleanup tags to specific tag services.
+
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass inference using the local database cache, and retry the cleanup phase. You can also rerun pending cleanups anytime by executing `hyvis <config> --push-only`.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `tags` | Array of Strings | No | List of tags to remove from successfully processed files. |
-| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to remove the tags from. <br> **Only required if `tags` is specified*. |
+| `tag_service_keys` | Array of Strings | No* | Target Hydrus tag service keys to remove these tags from. <br> **Only required if `tags` is specified*. |
 
 <details>
-<summary>💡 View <code>[hydrus.remove_tags]</code> Example</summary>
+<summary>💡 View <code>[[hydrus.remove_tags]]</code> Example</summary>
 
 ```toml
-[hydrus.remove_tags]
+[[hydrus.remove_tags]]
 tags = ["temp:tagme", "queue:ai processing"]
 tag_service_keys = ["my_service_key_here"]
 ```
