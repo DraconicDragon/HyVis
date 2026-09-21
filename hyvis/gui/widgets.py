@@ -185,7 +185,7 @@ class SectionCard(QFrame):
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
         QWidget().setLayout(self._content_layout)
-        self._content_layout = layout  # type: ignore[assignment]
+        self._content_layout = layout
         self._content_widget.setLayout(layout)
 
     def setCheckable(self, checkable: bool) -> None:
@@ -336,7 +336,8 @@ class StringListEditor(QWidget):
 class TagServiceListEditor(QWidget):
     """
     Stacked row editor for Hydrus tag service keys.
-    Displays human-readable service names with underlying hex keys.
+    Displays human-readable service names while strictly preserving underlying 64-char hex keys.
+    Non-editable: values are strictly backed by Hydrus entities with offline/unrecognized preservation.
     """
 
     changed = Signal()
@@ -384,16 +385,16 @@ class TagServiceListEditor(QWidget):
             if not combo:
                 continue
             current_key = combo.currentData()
-            self._repopulate_combo(combo, selected_key=current_key)
+            self._repopulate_combo(combo, selected_key=str(current_key) if current_key else None)
 
     def get_items(self) -> list[str]:
         keys: list[str] = []
         for row_widget in self._row_widgets:
             combo: QComboBox | None = row_widget.findChild(QComboBox)
             if combo:
-                key = str(combo.currentData() or combo.currentText()).strip()
-                if key:
-                    keys.append(key)
+                data = combo.currentData()
+                if data:
+                    keys.append(str(data).strip())
         return keys
 
     def set_items(self, keys: Sequence[str]) -> None:
@@ -414,6 +415,23 @@ class TagServiceListEditor(QWidget):
         combo.blockSignals(True)
         combo.clear()
 
+        # Offline State
+        if not self._available_services:
+            if selected_key:
+                short_k = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
+                combo.addItem(f"Service: {short_k} (Offline)", userData=selected_key)
+                combo.setCurrentIndex(0)
+                combo.setEnabled(False)
+            else:
+                combo.addItem("⚠ Connect to Hydrus to select services", userData="")
+                combo.setCurrentIndex(0)
+                combo.setEnabled(False)
+            combo.blockSignals(False)
+            return
+
+        # Connected State
+        combo.setEnabled(True)
+
         for key, name in self._available_services.items():
             short_key = f"{key[:8]}..." if len(key) > 12 else key
             display = f"{name}  ({short_key})"
@@ -425,9 +443,18 @@ class TagServiceListEditor(QWidget):
                 combo.setCurrentIndex(idx)
             else:
                 short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
-                display = f"Unknown Service  ({short_key})"
-                combo.addItem(display, userData=selected_key)
+                combo.addItem(f"❌ Unrecognized Service  ({short_key})", userData=selected_key)
                 combo.setCurrentIndex(combo.count() - 1)
+        else:
+            # Pick the first service that isn't already selected in another row
+            existing_keys = set(self.get_items())
+            found_idx = -1
+            for i in range(combo.count()):
+                k = combo.itemData(i)
+                if k and k not in existing_keys:
+                    found_idx = i
+                    break
+            combo.setCurrentIndex(max(found_idx, 0))
 
         combo.blockSignals(False)
 
@@ -438,22 +465,9 @@ class TagServiceListEditor(QWidget):
         row_layout.setSpacing(6)
 
         combo = QComboBox(row_widget)
-        combo.setEditable(True)
+        combo.setEditable(False)  # NON-EDITABLE: Pure entity selector
         self._repopulate_combo(combo, selected_key=initial_key)
-
-        if initial_key is None and self._available_services:
-            existing_keys = set(self.get_items())
-            for key in self._available_services:
-                if key not in existing_keys:
-                    idx = combo.findData(key)
-                    if idx >= 0:
-                        combo.setCurrentIndex(idx)
-                    break
-
         combo.currentIndexChanged.connect(lambda _: self.changed.emit())
-        line_edit = combo.lineEdit()
-        if line_edit is not None:
-            line_edit.editingFinished.connect(lambda: self._on_combo_edited(combo))
         row_layout.addWidget(combo, stretch=1)
 
         del_btn = QPushButton("✕", row_widget)
@@ -470,12 +484,6 @@ class TagServiceListEditor(QWidget):
         self._row_widgets.append(row_widget)
         self._update_empty_state()
         return row_widget
-
-    def _on_combo_edited(self, combo: QComboBox) -> None:
-        text = combo.currentText().strip()
-        if text and combo.findData(text) < 0:
-            combo.setItemData(combo.currentIndex(), text)
-        self.changed.emit()
 
     def _on_add_clicked(self) -> None:
         self._add_row()
@@ -1081,8 +1089,8 @@ class TagQueryCard(QFrame):
     """
     A single query card mapping to one [[hydrus.tag_queries]] entry.
     Contains:
-      - Target Service dropdown (resolving friendly names, with 'All Known Tags (virtual)' default).
-      - Tag list editor (StringListEditor) that cleanly supports commas, colons, and parentheses.
+      - Target Service dropdown (non-editable, with 'All Known Tags (virtual)' default).
+      - Tag list editor (StringListEditor) supporting commas, colons, and parentheses.
     """
 
     changed = Signal()
@@ -1138,7 +1146,7 @@ class TagQueryCard(QFrame):
         svc_row.addWidget(svc_label)
 
         self.service_combo = QComboBox(self)
-        self.service_combo.setEditable(True)
+        self.service_combo.setEditable(False)  # NON-EDITABLE: Pure entity selector
         self._repopulate_services()
         self.service_combo.currentIndexChanged.connect(lambda _: self.changed.emit())
         svc_row.addWidget(self.service_combo, stretch=1)
@@ -1161,13 +1169,30 @@ class TagQueryCard(QFrame):
     def set_available_services(self, services: dict[str, Any]) -> None:
         self._available_services = dict(services)
         current_key = self.service_combo.currentData()
-        self._repopulate_services(selected_key=current_key)
+        self._repopulate_services(selected_key=str(current_key) if current_key else None)
 
     def _repopulate_services(self, selected_key: str | None = None) -> None:
         self.service_combo.blockSignals(True)
         self.service_combo.clear()
 
-        # 1. Look up the built-in 'all known tags' service by its immutable hex key
+        # 1. Offline State: Dim combobox and show explicit warning
+        if not self._available_services:
+            if selected_key and selected_key != HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
+                short_k = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
+                self.service_combo.addItem(f"Service: {short_k} (Offline)", userData=selected_key)
+            else:
+                # Default search-all under the hood (userData=""), but explicit offline warning in UI
+                self.service_combo.addItem("⚠ Connect to Hydrus to select services", userData="")
+
+            self.service_combo.setCurrentIndex(0)
+            self.service_combo.setEnabled(False)
+            self.service_combo.blockSignals(False)
+            return
+
+        # 2. Connected State: Enable combobox
+        self.service_combo.setEnabled(True)
+
+        # Index 0 is always the default search-all option (maps to empty key in HyVis config)
         all_known_info = self._available_services.get(HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY)
         if all_known_info:
             # Respect whatever custom name the user gave it in Hydrus
@@ -1185,7 +1210,7 @@ class TagQueryCard(QFrame):
         # Index 0 is always the default search-all option (maps to empty key in HyVis config)
         self.service_combo.addItem(display, userData="")
 
-        # 2. Add all other services from Hydrus
+        # Add all other tag services from Hydrus
         for key, val in self._available_services.items():
             # Skip the built-in service key because it is already index 0 above
             if key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
@@ -1205,7 +1230,7 @@ class TagQueryCard(QFrame):
 
         # 3. Resolve active selection
         if selected_key:
-            if selected_key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
+            if selected_key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY or selected_key == "":
                 self.service_combo.setCurrentIndex(0)
             else:
                 idx = self.service_combo.findData(selected_key)
@@ -1213,7 +1238,7 @@ class TagQueryCard(QFrame):
                     self.service_combo.setCurrentIndex(idx)
                 else:
                     short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
-                    self.service_combo.addItem(f"Unknown Service  ({short_key})", userData=selected_key)
+                    self.service_combo.addItem(f"❌ Unrecognized Service  ({short_key})", userData=selected_key)
                     self.service_combo.setCurrentIndex(self.service_combo.count() - 1)
         else:
             self.service_combo.setCurrentIndex(0)
