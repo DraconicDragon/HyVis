@@ -29,11 +29,11 @@ from hyvis.config import (
     PageQueryConfig,
     PreviewConfig,
     RemoveTagConfig,
-    TagQueryConfig,
 )
 from hyvis.gui.widgets import (
     SectionCard,
     SmoothScrollArea,
+    TagQueryListEditor,
     TagServiceListEditor,
     add_form_row,
     setup_field_tooltip,
@@ -48,12 +48,12 @@ class HydrusPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._available_writable_services: dict[str, str] = {}
+        self._available_all_services: dict[str, str] = {}
         self._is_loading_ui: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         h_fields = HydrusConfig.model_fields
-        tq_fields = TagQueryConfig.model_fields
         pq_fields = PageQueryConfig.model_fields
         prev_fields = PreviewConfig.model_fields
         add_fields = AddTagConfig.model_fields
@@ -110,7 +110,7 @@ class HydrusPage(QWidget):
         self.output_card.setContentLayout(output_layout)
         layout.addWidget(self.output_card)
 
-        # 3. Tag Queries Card
+        # 3. Tag Queries Card (Stacked Query Cards)
         tag_q_title = h_fields["tag_queries"].title or "Tag Queries"
         self.tag_q_card = SectionCard(
             title=tag_q_title,
@@ -118,26 +118,9 @@ class HydrusPage(QWidget):
             parent=container,
         )
         tag_q_layout = QVBoxLayout()
-
-        self.tag_q_table = QTableWidget(0, 2, self)
-        self.tag_q_table.setHorizontalHeaderLabels(
-            [f"{tq_fields['tags'].title} (comma-separated)", f"{tq_fields['tag_service_keys'].title} (empty = all)"]
-        )
-        self.tag_q_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.tag_q_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tag_q_table.itemChanged.connect(lambda _: self._on_field_changed())
-        tag_q_layout.addWidget(self.tag_q_table)
-
-        tag_btn_layout = QHBoxLayout()
-        self.add_tag_q_btn = QPushButton("+ Add Tag Query", self)
-        self.add_tag_q_btn.clicked.connect(self._on_add_tag_q)
-        tag_btn_layout.addWidget(self.add_tag_q_btn)
-
-        self.remove_tag_q_btn = QPushButton("- Remove Selected", self)
-        self.remove_tag_q_btn.clicked.connect(self._on_remove_tag_q)
-        tag_btn_layout.addWidget(self.remove_tag_q_btn)
-        tag_btn_layout.addStretch()
-        tag_q_layout.addLayout(tag_btn_layout)
+        self.tag_queries_editor = TagQueryListEditor(parent=self)
+        self.tag_queries_editor.changed.connect(self._on_field_changed)
+        tag_q_layout.addWidget(self.tag_queries_editor)
 
         self.tag_q_card.setContentLayout(tag_q_layout)
         layout.addWidget(self.tag_q_card)
@@ -271,9 +254,14 @@ class HydrusPage(QWidget):
     def update_services(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
         """Update active services across all tag service editors on this page."""
         self._available_writable_services = dict(writable_tags)
+        self._available_all_services = dict(all_tags)
+
         self.output_services_editor.set_available_services(writable_tags)
         self.add_services_editor.set_available_services(writable_tags)
         self.rem_services_editor.set_available_services(writable_tags)
+
+        # Tag queries can search across all tag services (including read-only PTRs)
+        self.tag_queries_editor.set_available_services(all_tags)
 
     def load_config(self, cfg: AppConfig) -> None:
         """Populate widgets from AppConfig under signal guard."""
@@ -287,16 +275,8 @@ class HydrusPage(QWidget):
 
             self.output_services_editor.set_items(h.output_tag_services.keys)
 
-            # Tag Queries
-            self.tag_q_table.blockSignals(True)
-            self.tag_q_table.setRowCount(0)
-            for row, q in enumerate(h.tag_queries):
-                self.tag_q_table.insertRow(row)
-                tags_str = ", ".join(str(t) for t in q.tags)
-                keys_str = ", ".join(q.tag_service_keys)
-                self.tag_q_table.setItem(row, 0, QTableWidgetItem(tags_str))
-                self.tag_q_table.setItem(row, 1, QTableWidgetItem(keys_str))
-            self.tag_q_table.blockSignals(False)
+            # Stacked tag queries editor
+            self.tag_queries_editor.set_queries(h.tag_queries)
 
             # Page Queries
             self.page_q_table.blockSignals(True)
@@ -355,19 +335,8 @@ class HydrusPage(QWidget):
         hydrus_dict["no_wait"] = self.no_wait_chk.isChecked()
         hydrus_dict["output_tag_services"] = {"keys": self.output_services_editor.get_items()}
 
-        # Tag queries
-        tag_queries: list[dict[str, Any]] = []
-        for r in range(self.tag_q_table.rowCount()):
-            tag_item = self.tag_q_table.item(r, 0)
-            key_item = self.tag_q_table.item(r, 1)
-            raw_tags = tag_item.text().strip() if tag_item else ""
-            raw_keys = key_item.text().strip() if key_item else ""
-
-            if raw_tags:
-                tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
-                keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
-                tag_queries.append({"tags": tags, "tag_service_keys": keys})
-        hydrus_dict["tag_queries"] = tag_queries
+        # Tag queries from stacked editor
+        hydrus_dict["tag_queries"] = self.tag_queries_editor.get_queries()
 
         # Page queries
         page_queries: list[dict[str, Any]] = []
@@ -424,25 +393,6 @@ class HydrusPage(QWidget):
                 hydrus_dict["preview"] = None
         else:
             hydrus_dict["preview"] = None
-
-    def _on_add_tag_q(self) -> None:
-        row = self.tag_q_table.rowCount()
-        self.tag_q_table.blockSignals(True)
-        self.tag_q_table.insertRow(row)
-        self.tag_q_table.setItem(row, 0, QTableWidgetItem("system:untagged"))
-        self.tag_q_table.setItem(row, 1, QTableWidgetItem(""))
-        self.tag_q_table.blockSignals(False)
-        self._on_field_changed()
-
-    def _on_remove_tag_q(self) -> None:
-        rows = sorted({idx.row() for idx in self.tag_q_table.selectedIndexes()}, reverse=True)
-        if not rows:
-            return
-        self.tag_q_table.blockSignals(True)
-        for r in rows:
-            self.tag_q_table.removeRow(r)
-        self.tag_q_table.blockSignals(False)
-        self._on_field_changed()
 
     def _on_add_page_q(self) -> None:
         row = self.page_q_table.rowCount()

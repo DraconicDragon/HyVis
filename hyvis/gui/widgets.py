@@ -8,8 +8,11 @@ Includes:
   - KeyValueEditor: Reusable table for prefix mappings and tag replacements.
   - ThresholdTableEditor: Table for category and tag thresholds with TLT override checkboxes.
   - SubsetListEditor: Table for managing max_tags_per_subset rule groups.
+  - CategoryLimitEditor: Table editor for category limit mappings.
   - CategoryTagEditor: Dynamic category list editor starting empty with vibe suggestions.
+  - TagQueryCard & TagQueryListEditor: Stacked cards for Hydrus search queries avoiding comma bugs.
   - SectionCard: Card container with inline header, checkable toggle, and title tooltip.
+  - SmoothScrollArea: Momentum-based easing scroll area with event-filtered wheel routing.
   - setup_field_tooltip / bind_field_metadata / add_form_row: Metadata wiring helpers.
 """
 
@@ -22,6 +25,7 @@ from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -253,7 +257,7 @@ class StringListEditor(QWidget):
         # 1. List view
         self.list_widget = QListWidget(self)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_widget.setMinimumHeight(100)
+        self.list_widget.setMinimumHeight(95)
         layout.addWidget(self.list_widget)
 
         # 2. Input and Action Bar
@@ -869,6 +873,100 @@ class SubsetListEditor(QWidget):
 # endregion
 
 
+# region Category Limit Editor
+
+
+class CategoryLimitEditor(QWidget):
+    """Table editor for max_tags_per_category: [Category (Combo/Text), Limit (SpinBox)]."""
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._suggestions: list[str] = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.table = QTableWidget(0, 2, self)
+        self.table.setHorizontalHeaderLabels(["Category", "Max Tags"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
+
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Category Limit", self)
+        self.add_btn.clicked.connect(self._on_add_row)
+        btn_layout.addWidget(self.add_btn)
+
+        self.remove_btn = QPushButton("- Remove Selected", self)
+        self.remove_btn.clicked.connect(self._on_remove_row)
+        btn_layout.addWidget(self.remove_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+    def set_suggestions(self, suggestions: list[str]) -> None:
+        self._suggestions = list(suggestions)
+
+    def get_limits(self) -> dict[str, int]:
+        limits: dict[str, int] = {}
+        for row in range(self.table.rowCount()):
+            combo: QComboBox | None = self.table.cellWidget(row, 0)
+            cat = combo.currentText().strip() if combo else ""
+            spin: QSpinBox | None = self.table.cellWidget(row, 1)
+            val = spin.value() if spin else 1
+            if cat:
+                limits[cat] = val
+        return limits
+
+    def set_limits(self, limits: Mapping[str, int]) -> None:
+        self.table.blockSignals(True)
+        self.table.setRowCount(0)
+        for row, (cat, val) in enumerate(limits.items()):
+            self._insert_row(row, cat, int(val))
+        self.table.blockSignals(False)
+
+    def _insert_row(self, row: int, category: str = "", limit: int = 10) -> None:
+        self.table.insertRow(row)
+        combo = QComboBox(self)
+        combo.setEditable(True)
+        if self._suggestions:
+            combo.addItems(self._suggestions)
+        combo.setCurrentText(category)
+        combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        self.table.setCellWidget(row, 0, combo)
+
+        spin = QSpinBox(self)
+        spin.setRange(1, 9999)
+        spin.setValue(limit)
+        spin.valueChanged.connect(lambda _: self.changed.emit())
+        self.table.setCellWidget(row, 1, spin)
+
+    def _on_add_row(self) -> None:
+        self.table.blockSignals(True)
+        row = self.table.rowCount()
+        existing = set(self.get_limits().keys())
+        cat = next((c for c in self._suggestions if c not in existing), "")
+        self._insert_row(row, cat, 10)
+        self.table.blockSignals(False)
+        self.changed.emit()
+
+    def _on_remove_row(self) -> None:
+        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
+        if not selected_rows:
+            return
+        self.table.blockSignals(True)
+        for row in selected_rows:
+            self.table.removeRow(row)
+        self.table.blockSignals(False)
+        self.changed.emit()
+
+
+# endregion
+
+
 # region Category Tag Editor
 
 
@@ -974,6 +1072,247 @@ class CategoryTagEditor(QWidget):
 # endregion
 
 
+# region Tag Query Stacked Card Editor
+
+
+class TagQueryCard(QFrame):
+    """
+    A single query card mapping to one [[hydrus.tag_queries]] entry.
+    Contains:
+      - Target Service dropdown (resolving friendly names, with 'All Known Tags' default).
+      - Tag list editor (StringListEditor) that cleanly supports commas, colons, and parentheses.
+    """
+
+    changed = Signal()
+    delete_requested = Signal()
+
+    def __init__(
+        self,
+        index: int = 1,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._available_services: dict[str, str] = {}
+        self._index = index
+
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(
+            "TagQueryCard {"
+            "  border: 1px solid rgba(255, 255, 255, 0.08);"
+            "  border-radius: 6px;"
+            "  background: rgba(255, 255, 255, 0.015);"
+            "}"
+        )
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(10, 8, 10, 10)
+        card_layout.setSpacing(8)
+
+        # 1. Header row
+        header_layout = QHBoxLayout()
+        self.title_label = QLabel(f"<b>Query #{self._index}</b>", self)
+        self.title_label.setStyleSheet("font-size: 12px;")
+        header_layout.addWidget(self.title_label)
+
+        header_layout.addStretch(1)
+
+        self.del_btn = QPushButton("✕", self)
+        self.del_btn.setFixedWidth(26)
+        self.del_btn.setToolTip("Remove this query block")
+        self.del_btn.setStyleSheet(
+            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
+            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
+        )
+        self.del_btn.clicked.connect(self.delete_requested.emit)
+        header_layout.addWidget(self.del_btn)
+
+        card_layout.addLayout(header_layout)
+
+        # 2. Service selection row
+        svc_row = QHBoxLayout()
+        svc_row.setSpacing(8)
+        svc_label = QLabel("Target Service:", self)
+        svc_label.setStyleSheet("color: #b0bec5;")
+        svc_row.addWidget(svc_label)
+
+        self.service_combo = QComboBox(self)
+        self.service_combo.setEditable(True)
+        self._repopulate_services()
+        self.service_combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        svc_row.addWidget(self.service_combo, stretch=1)
+
+        card_layout.addLayout(svc_row)
+
+        # 3. Tags list editor
+        tags_label = QLabel("Search Tags:", self)
+        tags_label.setStyleSheet("color: #b0bec5;")
+        card_layout.addWidget(tags_label)
+
+        self.tags_editor = StringListEditor(placeholder="Enter search tag and press Enter or Add...", parent=self)
+        self.tags_editor.changed.connect(self.changed.emit)
+        card_layout.addWidget(self.tags_editor)
+
+    def set_index(self, index: int) -> None:
+        self._index = index
+        self.title_label.setText(f"<b>Query #{self._index}</b>")
+
+    def set_available_services(self, services: dict[str, str]) -> None:
+        self._available_services = dict(services)
+        current_key = self.service_combo.currentData()
+        self._repopulate_services(selected_key=current_key)
+
+    def _repopulate_services(self, selected_key: str | None = None) -> None:
+        self.service_combo.blockSignals(True)
+        self.service_combo.clear()
+
+        # Virtual 'all known tags' default option (empty key)
+        self.service_combo.addItem("All Known Tags (Search All)", userData="")
+
+        for key, name in self._available_services.items():
+            short_key = f"{key[:8]}..." if len(key) > 12 else key
+            display = f"{name}  ({short_key})"
+            self.service_combo.addItem(display, userData=key)
+
+        if selected_key:
+            idx = self.service_combo.findData(selected_key)
+            if idx >= 0:
+                self.service_combo.setCurrentIndex(idx)
+            else:
+                short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
+                display = f"Unknown Service  ({short_key})"
+                self.service_combo.addItem(display, userData=selected_key)
+                self.service_combo.setCurrentIndex(self.service_combo.count() - 1)
+        else:
+            self.service_combo.setCurrentIndex(0)
+
+        self.service_combo.blockSignals(False)
+
+    def get_query(self) -> dict[str, Any]:
+        tags = self.tags_editor.get_items()
+        selected_key = str(self.service_combo.currentData() or "").strip()
+        service_keys = [selected_key] if selected_key else []
+        return {"tags": tags, "tag_service_keys": service_keys}
+
+    def set_query(self, tags: Sequence[Any], service_keys: Sequence[str]) -> None:
+        self.tags_editor.set_items([str(t) for t in tags])
+        key = service_keys[0] if service_keys else ""
+        self._repopulate_services(selected_key=key)
+
+
+class TagQueryListEditor(QWidget):
+    """
+    Stacked list editor for multiple [[hydrus.tag_queries]].
+    Each entry is represented as an independent TagQueryCard.
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._cards: list[TagQueryCard] = []
+        self._available_services: dict[str, str] = {}
+
+        self._root_layout = QVBoxLayout(self)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(8)
+
+        # 1. Container for cards
+        self._cards_widget = QWidget(self)
+        self._cards_layout = QVBoxLayout(self._cards_widget)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
+        self._cards_layout.setSpacing(8)
+        self._root_layout.addWidget(self._cards_widget)
+
+        # 2. Empty placeholder
+        self.empty_label = QLabel("(No tag queries configured — click '+ Add Tag Query' below)", self)
+        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self._root_layout.addWidget(self.empty_label)
+
+        # 3. Add button
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Tag Query", self)
+        self.add_btn.clicked.connect(self._on_add_clicked)
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addStretch()
+        self._root_layout.addLayout(btn_layout)
+
+        self._update_empty_state()
+
+    def set_available_services(self, services: dict[str, str]) -> None:
+        self._available_services = dict(services)
+        for card in self._cards:
+            card.set_available_services(services)
+
+    def get_queries(self) -> list[dict[str, Any]]:
+        queries: list[dict[str, Any]] = []
+        for card in self._cards:
+            q = card.get_query()
+            if q["tags"]:  # Only persist queries with at least one tag
+                queries.append(q)
+        return queries
+
+    def set_queries(self, queries: Sequence[Any]) -> None:
+        self.blockSignals(True)
+        self._clear_cards()
+        for idx, q in enumerate(queries, start=1):
+            tags = getattr(q, "tags", None) or (q.get("tags") if isinstance(q, dict) else [])
+            keys = getattr(q, "tag_service_keys", None) or (q.get("tag_service_keys") if isinstance(q, dict) else [])
+            self._add_card(tags, keys, idx)
+        self._update_empty_state()
+        self.blockSignals(False)
+
+    def _clear_cards(self) -> None:
+        for card in self._cards:
+            self._cards_layout.removeWidget(card)
+            card.deleteLater()
+        self._cards.clear()
+
+    def _add_card(
+        self,
+        tags: Sequence[Any] | None = None,
+        keys: Sequence[str] | None = None,
+        index: int | None = None,
+    ) -> TagQueryCard:
+        idx = index or (len(self._cards) + 1)
+        card = TagQueryCard(index=idx, parent=self._cards_widget)
+        card.set_available_services(self._available_services)
+        if tags is not None:
+            card.set_query(tags, keys or [])
+        else:
+            card.set_query(["system:untagged"], [])
+
+        card.changed.connect(self.changed.emit)
+        card.delete_requested.connect(lambda: self._on_delete_card(card))
+
+        self._cards_layout.addWidget(card)
+        self._cards.append(card)
+        self._update_empty_state()
+        return card
+
+    def _on_add_clicked(self) -> None:
+        self._add_card()
+        self.changed.emit()
+
+    def _on_delete_card(self, card: TagQueryCard) -> None:
+        if card in self._cards:
+            self._cards.remove(card)
+            self._cards_layout.removeWidget(card)
+            card.deleteLater()
+            self._renumber_cards()
+            self._update_empty_state()
+            self.changed.emit()
+
+    def _renumber_cards(self) -> None:
+        for idx, card in enumerate(self._cards, start=1):
+            card.set_index(idx)
+
+    def _update_empty_state(self) -> None:
+        self.empty_label.setVisible(len(self._cards) == 0)
+
+
+# endregion
+
+
 class SmoothScrollArea(QScrollArea):
     """Experimental smooth scrolling area using QPropertyAnimation and Event Filters."""
 
@@ -989,8 +1328,6 @@ class SmoothScrollArea(QScrollArea):
         self.verticalScrollBar().installEventFilter(self)
 
         # 2. Install global application filter to monitor child widgets (tables, lists)
-        from PySide6.QtWidgets import QApplication
-
         app = QApplication.instance()
         if app:
             app.installEventFilter(self)
@@ -1003,13 +1340,13 @@ class SmoothScrollArea(QScrollArea):
                 return True
 
             # If the animation is running, prevent child tables/lists from stealing the scroll
-            if self._anim.state() == QPropertyAnimation.State.Running:
-                from PySide6.QtWidgets import QWidget
-
-                # Check if the widget being scrolled over is a child of this scroll area
-                if isinstance(obj, QWidget) and self.isAncestorOf(obj):
-                    self.wheelEvent(event)  # Steal the event to continue the smooth glide
-                    return True
+            if (
+                self._anim.state() == QPropertyAnimation.State.Running
+                and isinstance(obj, QWidget)
+                and self.isAncestorOf(obj)
+            ):
+                self.wheelEvent(event)  # Steal the event to continue the smooth glide
+                return True
 
         return super().eventFilter(obj, event)
 

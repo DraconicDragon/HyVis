@@ -5,31 +5,27 @@ filters_page.py — Output filtering, thresholding, namespace prefixes, and per-
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping
 from typing import Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSpinBox,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.widgets import (
+    CategoryLimitEditor,
     CategoryTagEditor,
     KeyValueEditor,
     SectionCard,
@@ -47,94 +43,6 @@ def _values_differ(val1: Any, val2: Any) -> bool:
     if isinstance(val1, float) and isinstance(val2, (int, float)):
         return abs(val1 - float(val2)) > 1e-4
     return val1 != val2
-
-
-class CategoryLimitEditor(QWidget):
-    """Table editor for max_tags_per_category: [Category (Combo/Text), Limit (SpinBox)]."""
-
-    changed = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._suggestions: list[str] = []
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        self.table = QTableWidget(0, 2, self)
-        self.table.setHorizontalHeaderLabels(["Category", "Max Tags"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
-
-        btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("+ Add Category Limit", self)
-        self.add_btn.clicked.connect(self._on_add_row)
-        btn_layout.addWidget(self.add_btn)
-
-        self.remove_btn = QPushButton("- Remove Selected", self)
-        self.remove_btn.clicked.connect(self._on_remove_row)
-        btn_layout.addWidget(self.remove_btn)
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
-    def set_suggestions(self, suggestions: list[str]) -> None:
-        self._suggestions = list(suggestions)
-
-    def get_limits(self) -> dict[str, int]:
-        limits: dict[str, int] = {}
-        for row in range(self.table.rowCount()):
-            combo: QComboBox | None = self.table.cellWidget(row, 0)
-            cat = combo.currentText().strip() if combo else ""
-            spin: QSpinBox | None = self.table.cellWidget(row, 1)
-            val = spin.value() if spin else 1
-            if cat:
-                limits[cat] = val
-        return limits
-
-    def set_limits(self, limits: Mapping[str, int]) -> None:
-        self.table.blockSignals(True)
-        self.table.setRowCount(0)
-        for row, (cat, val) in enumerate(limits.items()):
-            self._insert_row(row, cat, int(val))
-        self.table.blockSignals(False)
-
-    def _insert_row(self, row: int, category: str = "", limit: int = 10) -> None:
-        self.table.insertRow(row)
-        combo = QComboBox(self)
-        combo.setEditable(True)
-        if self._suggestions:
-            combo.addItems(self._suggestions)
-        combo.setCurrentText(category)
-        combo.currentTextChanged.connect(lambda _: self.changed.emit())
-        self.table.setCellWidget(row, 0, combo)
-
-        spin = QSpinBox(self)
-        spin.setRange(1, 9999)
-        spin.setValue(limit)
-        spin.valueChanged.connect(lambda _: self.changed.emit())
-        self.table.setCellWidget(row, 1, spin)
-
-    def _on_add_row(self) -> None:
-        self.table.blockSignals(True)
-        row = self.table.rowCount()
-        existing = set(self.get_limits().keys())
-        cat = next((c for c in self._suggestions if c not in existing), "")
-        self._insert_row(row, cat, 10)
-        self.table.blockSignals(False)
-        self.changed.emit()
-
-    def _on_remove_row(self) -> None:
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
-        if not selected_rows:
-            return
-        self.table.blockSignals(True)
-        for row in selected_rows:
-            self.table.removeRow(row)
-        self.table.blockSignals(False)
-        self.changed.emit()
 
 
 class FiltersPage(QWidget):
