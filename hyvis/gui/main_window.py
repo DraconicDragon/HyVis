@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
 
         # Hydrus entity sourcing signals
         self.state.services_updated.connect(self._on_services_updated)
+        self.state.pages_updated.connect(self.hydrus_page.update_pages)
         self.state.connection_changed.connect(self._on_connection_changed)
 
         # Connect page changes to central validation and dirty-tracking
@@ -246,6 +247,8 @@ class MainWindow(QMainWindow):
         )
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
+        if self.state.pages:
+            self.hydrus_page.update_pages(self.state.pages)
         self.hydrus_page.load_config(cfg)
         self.models_page.load_config(cfg)
         self.filters_page.load_config(cfg)

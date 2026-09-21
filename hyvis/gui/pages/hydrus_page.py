@@ -10,14 +10,9 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
-    QHBoxLayout,
-    QHeaderView,
     QLineEdit,
-    QPushButton,
     QScrollArea,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -26,13 +21,14 @@ from hyvis.config import (
     AddTagConfig,
     AppConfig,
     HydrusConfig,
-    PageQueryConfig,
     PreviewConfig,
     RemoveTagConfig,
 )
 from hyvis.gui.widgets import (
+    PageQueryListEditor,
     SectionCard,
     SmoothScrollArea,
+    StringListEditor,
     TagQueryListEditor,
     TagServiceListEditor,
     add_form_row,
@@ -49,12 +45,12 @@ class HydrusPage(QWidget):
         super().__init__(parent)
         self._available_writable_services: dict[str, str] = {}
         self._available_all_services: dict[str, str] = {}
+        self._available_pages: list[dict[str, Any]] = []
         self._is_loading_ui: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         h_fields = HydrusConfig.model_fields
-        pq_fields = PageQueryConfig.model_fields
         prev_fields = PreviewConfig.model_fields
         add_fields = AddTagConfig.model_fields
         rem_fields = RemoveTagConfig.model_fields
@@ -125,7 +121,7 @@ class HydrusPage(QWidget):
         self.tag_q_card.setContentLayout(tag_q_layout)
         layout.addWidget(self.tag_q_card)
 
-        # 4. Page Queries Card
+        # 4. Page Queries Card (Stacked Live Page Selector)
         page_q_title = h_fields["page_queries"].title or "Page Queries"
         self.page_q_card = SectionCard(
             title=page_q_title,
@@ -133,24 +129,9 @@ class HydrusPage(QWidget):
             parent=container,
         )
         page_q_layout = QVBoxLayout()
-
-        self.page_q_table = QTableWidget(0, 2, self)
-        self.page_q_table.setHorizontalHeaderLabels([pq_fields["name"].title, f"{pq_fields['index'].title} (Optional)"])
-        self.page_q_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.page_q_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.page_q_table.itemChanged.connect(lambda _: self._on_field_changed())
-        page_q_layout.addWidget(self.page_q_table)
-
-        page_btn_layout = QHBoxLayout()
-        self.add_page_q_btn = QPushButton("+ Add Page Query", self)
-        self.add_page_q_btn.clicked.connect(self._on_add_page_q)
-        page_btn_layout.addWidget(self.add_page_q_btn)
-
-        self.remove_page_q_btn = QPushButton("- Remove Selected", self)
-        self.remove_page_q_btn.clicked.connect(self._on_remove_page_q)
-        page_btn_layout.addWidget(self.remove_page_q_btn)
-        page_btn_layout.addStretch()
-        page_q_layout.addLayout(page_btn_layout)
+        self.page_queries_editor = PageQueryListEditor(parent=self)
+        self.page_queries_editor.changed.connect(self._on_field_changed)
+        page_q_layout.addWidget(self.page_queries_editor)
 
         self.page_q_card.setContentLayout(page_q_layout)
         layout.addWidget(self.page_q_card)
@@ -168,9 +149,9 @@ class HydrusPage(QWidget):
         add_layout = QFormLayout()
         add_layout.setSpacing(8)
 
-        self.add_tags_edit = QLineEdit(self)
-        self.add_tags_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(add_layout, add_fields["tags"], self.add_tags_edit)
+        self.add_tags_editor = StringListEditor(placeholder="Add tag to apply (press Enter or Add)...", parent=self)
+        self.add_tags_editor.changed.connect(self._on_field_changed)
+        add_form_row(add_layout, add_fields["tags"], self.add_tags_editor)
 
         self.add_services_editor = TagServiceListEditor(writable_only=True, parent=self)
         self.add_services_editor.changed.connect(self._on_field_changed)
@@ -192,9 +173,9 @@ class HydrusPage(QWidget):
         rem_layout = QFormLayout()
         rem_layout.setSpacing(8)
 
-        self.rem_tags_edit = QLineEdit(self)
-        self.rem_tags_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(rem_layout, rem_fields["tags"], self.rem_tags_edit)
+        self.rem_tags_editor = StringListEditor(placeholder="Add tag to remove (press Enter or Add)...", parent=self)
+        self.rem_tags_editor.changed.connect(self._on_field_changed)
+        add_form_row(rem_layout, rem_fields["tags"], self.rem_tags_editor)
 
         self.rem_services_editor = TagServiceListEditor(writable_only=True, parent=self)
         self.rem_services_editor.changed.connect(self._on_field_changed)
@@ -251,7 +232,7 @@ class HydrusPage(QWidget):
             return
         self.changed.emit()
 
-    def update_services(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
+    def update_services(self, all_tags: dict[str, Any], writable_tags: dict[str, str]) -> None:
         """Update active services across all tag service editors on this page."""
         self._available_writable_services = dict(writable_tags)
         self._available_all_services = dict(all_tags)
@@ -259,9 +240,12 @@ class HydrusPage(QWidget):
         self.output_services_editor.set_available_services(writable_tags)
         self.add_services_editor.set_available_services(writable_tags)
         self.rem_services_editor.set_available_services(writable_tags)
-
-        # Tag queries can search across all tag services (including read-only PTRs)
         self.tag_queries_editor.set_available_services(all_tags)
+
+    def update_pages(self, pages: list[dict[str, Any]]) -> None:
+        """Update open Hydrus media pages in the page query editor."""
+        self._available_pages = list(pages)
+        self.page_queries_editor.set_available_pages(pages)
 
     def load_config(self, cfg: AppConfig) -> None:
         """Populate widgets from AppConfig under signal guard."""
@@ -274,38 +258,27 @@ class HydrusPage(QWidget):
             self.no_wait_chk.setChecked(h.no_wait)
 
             self.output_services_editor.set_items(h.output_tag_services.keys)
-
-            # Stacked tag queries editor
             self.tag_queries_editor.set_queries(h.tag_queries)
-
-            # Page Queries
-            self.page_q_table.blockSignals(True)
-            self.page_q_table.setRowCount(0)
-            for row, pq in enumerate(h.page_queries):
-                self.page_q_table.insertRow(row)
-                self.page_q_table.setItem(row, 0, QTableWidgetItem(pq.name))
-                idx_str = str(pq.index) if pq.index is not None else ""
-                self.page_q_table.setItem(row, 1, QTableWidgetItem(idx_str))
-            self.page_q_table.blockSignals(False)
+            self.page_queries_editor.set_queries(h.page_queries)
 
             # Add Tags
             if h.add_tags:
                 self.add_tags_card.setChecked(True)
-                self.add_tags_edit.setText(", ".join(h.add_tags.tags))
+                self.add_tags_editor.set_items(h.add_tags.tags)
                 self.add_services_editor.set_items(h.add_tags.tag_service_keys)
             else:
                 self.add_tags_card.setChecked(False)
-                self.add_tags_edit.clear()
+                self.add_tags_editor.set_items([])
                 self.add_services_editor.set_items([])
 
             # Remove Tags
             if h.remove_tags:
                 self.rem_tags_card.setChecked(True)
-                self.rem_tags_edit.setText(", ".join(h.remove_tags.tags))
+                self.rem_tags_editor.set_items(h.remove_tags.tags)
                 self.rem_services_editor.set_items(h.remove_tags.tag_service_keys)
             else:
                 self.rem_tags_card.setChecked(False)
-                self.rem_tags_edit.clear()
+                self.rem_tags_editor.set_items([])
                 self.rem_services_editor.set_items([])
 
             # Preview
@@ -335,27 +308,12 @@ class HydrusPage(QWidget):
         hydrus_dict["no_wait"] = self.no_wait_chk.isChecked()
         hydrus_dict["output_tag_services"] = {"keys": self.output_services_editor.get_items()}
 
-        # Tag queries from stacked editor
         hydrus_dict["tag_queries"] = self.tag_queries_editor.get_queries()
+        hydrus_dict["page_queries"] = self.page_queries_editor.get_queries()
 
-        # Page queries
-        page_queries: list[dict[str, Any]] = []
-        for r in range(self.page_q_table.rowCount()):
-            name_item = self.page_q_table.item(r, 0)
-            idx_item = self.page_q_table.item(r, 1)
-            name = name_item.text().strip() if name_item else ""
-            idx_str = idx_item.text().strip() if idx_item else ""
-
-            if name:
-                pq_data: dict[str, Any] = {"name": name}
-                if idx_str.isdigit():
-                    pq_data["index"] = int(idx_str)
-                page_queries.append(pq_data)
-        hydrus_dict["page_queries"] = page_queries
-
-        # Add Tags (omitted as None if disabled/unchecked)
+        # Add Tags (omitted as None if unchecked)
         if self.add_tags_card.isChecked():
-            add_tags = [t.strip() for t in self.add_tags_edit.text().split(",") if t.strip()]
+            add_tags = self.add_tags_editor.get_items()
             add_keys = self.add_services_editor.get_items()
             if add_tags or add_keys:
                 hydrus_dict["add_tags"] = {"tags": add_tags, "tag_service_keys": add_keys}
@@ -364,9 +322,9 @@ class HydrusPage(QWidget):
         else:
             hydrus_dict["add_tags"] = None
 
-        # Remove Tags (omitted as None if disabled/unchecked)
+        # Remove Tags (omitted as None if unchecked)
         if self.rem_tags_card.isChecked():
-            rem_tags = [t.strip() for t in self.rem_tags_edit.text().split(",") if t.strip()]
+            rem_tags = self.rem_tags_editor.get_items()
             rem_keys = self.rem_services_editor.get_items()
             if rem_tags or rem_keys:
                 hydrus_dict["remove_tags"] = {"tags": rem_tags, "tag_service_keys": rem_keys}
@@ -375,7 +333,7 @@ class HydrusPage(QWidget):
         else:
             hydrus_dict["remove_tags"] = None
 
-        # Preview (omitted as None if disabled/unchecked)
+        # Preview (omitted as None if unchecked)
         if self.prev_card.isChecked():
             prev_name = self.prev_name_edit.text().strip() or None
             prev_rej = self.prev_rej_edit.text().strip() or None
@@ -393,22 +351,3 @@ class HydrusPage(QWidget):
                 hydrus_dict["preview"] = None
         else:
             hydrus_dict["preview"] = None
-
-    def _on_add_page_q(self) -> None:
-        row = self.page_q_table.rowCount()
-        self.page_q_table.blockSignals(True)
-        self.page_q_table.insertRow(row)
-        self.page_q_table.setItem(row, 0, QTableWidgetItem("target_page"))
-        self.page_q_table.setItem(row, 1, QTableWidgetItem(""))
-        self.page_q_table.blockSignals(False)
-        self._on_field_changed()
-
-    def _on_remove_page_q(self) -> None:
-        rows = sorted({idx.row() for idx in self.page_q_table.selectedIndexes()}, reverse=True)
-        if not rows:
-            return
-        self.page_q_table.blockSignals(True)
-        for r in rows:
-            self.page_q_table.removeRow(r)
-        self.page_q_table.blockSignals(False)
-        self._on_field_changed()

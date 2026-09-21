@@ -1370,6 +1370,201 @@ class TagQueryListEditor(QWidget):
 
 # endregion
 
+# region Page Query List Editor
+
+
+class PageQueryListEditor(QWidget):
+    """
+    Stacked row editor for [[hydrus.page_queries]].
+    Displays open media pages with automatic disambiguation indices and file count previews.
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._available_pages: list[dict[str, Any]] = []
+        self._row_widgets: list[QWidget] = []
+
+        self._root_layout = QVBoxLayout(self)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(6)
+
+        # 1. Stack container
+        self._stack_widget = QWidget(self)
+        self._stack_layout = QVBoxLayout(self._stack_widget)
+        self._stack_layout.setContentsMargins(0, 0, 0, 0)
+        self._stack_layout.setSpacing(6)
+        self._root_layout.addWidget(self._stack_widget)
+
+        # 2. Empty placeholder label
+        self.empty_label = QLabel("(No page queries configured — click '+ Add Page Query' below)", self)
+        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self._root_layout.addWidget(self.empty_label)
+
+        # 3. Add button
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Page Query", self)
+        self.add_btn.clicked.connect(self._on_add_clicked)
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addStretch()
+        self._root_layout.addLayout(btn_layout)
+
+        self._update_empty_state()
+
+    def set_available_pages(self, pages: list[dict[str, Any]]) -> None:
+        self._available_pages = list(pages)
+        for row_widget in self._row_widgets:
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if not combo:
+                continue
+            curr_data = combo.currentData()
+            self._repopulate_combo(combo, selected_target=curr_data if isinstance(curr_data, dict) else None)
+
+    def get_queries(self) -> list[dict[str, Any]]:
+        queries: list[dict[str, Any]] = []
+        for row_widget in self._row_widgets:
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if combo:
+                data = combo.currentData()
+                if isinstance(data, dict) and data.get("name"):
+                    q: dict[str, Any] = {"name": data["name"]}
+                    if data.get("index") is not None:
+                        q["index"] = int(data["index"])
+                    queries.append(q)
+        return queries
+
+    def set_queries(self, queries: Sequence[Any]) -> None:
+        self.blockSignals(True)
+        self._clear_rows()
+        for q in queries:
+            name = getattr(q, "name", None) or (q.get("name") if isinstance(q, dict) else "")
+            idx = (
+                getattr(q, "index", None) if hasattr(q, "index") else (q.get("index") if isinstance(q, dict) else None)
+            )
+            if name:
+                self._add_row({"name": str(name), "index": idx})
+        self._update_empty_state()
+        self.blockSignals(False)
+
+    def _clear_rows(self) -> None:
+        for row in self._row_widgets:
+            self._stack_layout.removeWidget(row)
+            row.deleteLater()
+        self._row_widgets.clear()
+
+    def _repopulate_combo(self, combo: QComboBox, selected_target: dict[str, Any] | None = None) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+
+        # Offline / No pages open
+        if not self._available_pages:
+            if selected_target:
+                name = selected_target.get("name", "Unknown Page")
+                idx = selected_target.get("index")
+                idx_str = f" [index {idx}]" if idx is not None else ""
+                combo.addItem(f"{name}{idx_str} (Offline / Closed)", userData=selected_target)
+                combo.setCurrentIndex(0)
+                combo.setEnabled(False)
+            else:
+                combo.addItem("⚠ Connect to Hydrus with open media tabs", userData=None)
+                combo.setCurrentIndex(0)
+                combo.setEnabled(False)
+            combo.blockSignals(False)
+            return
+
+        combo.setEnabled(True)
+
+        # Populate open media pages
+        for p in self._available_pages:
+            name = p["name"]
+            idx = p["index"]
+            raw_idx = p.get("raw_index", 0)
+            has_dups = p.get("has_duplicates", False)
+            num_files = p.get("num_files")
+
+            files_str = f" · {num_files} files" if num_files is not None else ""
+            tab_str = (
+                f" (Tab #{raw_idx + 1}{files_str})"
+                if has_dups
+                else (f" ({num_files} files)" if num_files is not None else "")
+            )
+            display = f"{name}{tab_str}"
+
+            combo.addItem(display, userData={"name": name, "index": idx})
+
+        # Selection resolution
+        if selected_target:
+            target_name = selected_target.get("name")
+            target_idx = selected_target.get("index")
+
+            found_idx = -1
+            for i in range(combo.count()):
+                d = combo.itemData(i)
+                if (
+                    isinstance(d, dict)
+                    and d.get("name") == target_name
+                    and (target_idx is None or d.get("index") == target_idx)
+                ):
+                    found_idx = i
+                    break
+
+            if found_idx >= 0:
+                combo.setCurrentIndex(found_idx)
+            else:
+                idx_str = f" [index {target_idx}]" if target_idx is not None else ""
+                combo.addItem(f"{target_name}{idx_str} (Tab Closed in Hydrus)", userData=selected_target)
+                combo.setCurrentIndex(combo.count() - 1)
+        else:
+            combo.setCurrentIndex(0)
+
+        combo.blockSignals(False)
+
+    def _add_row(self, initial_target: dict[str, Any] | None = None) -> QWidget:
+        row_widget = QWidget(self._stack_widget)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        combo = QComboBox(row_widget)
+        combo.setEditable(False)
+        self._repopulate_combo(combo, selected_target=initial_target)
+        combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        row_layout.addWidget(combo, stretch=1)
+
+        del_btn = QPushButton("✕", row_widget)
+        del_btn.setFixedWidth(28)
+        del_btn.setToolTip("Remove this page query")
+        del_btn.setStyleSheet(
+            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
+            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
+        )
+        del_btn.clicked.connect(lambda: self._on_remove_row(row_widget))
+        row_layout.addWidget(del_btn)
+
+        self._stack_layout.addWidget(row_widget)
+        self._row_widgets.append(row_widget)
+        self._update_empty_state()
+        return row_widget
+
+    def _on_add_clicked(self) -> None:
+        self._add_row()
+        self.changed.emit()
+
+    def _on_remove_row(self, row_widget: QWidget) -> None:
+        if row_widget in self._row_widgets:
+            self._row_widgets.remove(row_widget)
+            self._stack_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+            self._update_empty_state()
+            self.changed.emit()
+
+    def _update_empty_state(self) -> None:
+        self.empty_label.setVisible(len(self._row_widgets) == 0)
+
+
+# endregion
+
 
 class SmoothScrollArea(QScrollArea):
     """Experimental smooth scrolling area using QPropertyAnimation and Event Filters."""
