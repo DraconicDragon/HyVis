@@ -22,6 +22,7 @@ from hyvis.config import (
     HydrusConfig,
     PreviewConfig,
 )
+from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     PageQueryListEditor,
     SectionCard,
@@ -145,6 +146,7 @@ class HydrusPage(QWidget):
             tags_label="Tags to Add:",
             placeholder="Add tag to apply after processing...",
             allow_search_all=False,
+            theme=CardTheme.ADD,
             add_btn_text="+ Add Additional Tags Rule",
             empty_text="(No additional tags configured — click '+ Add Additional Tags Rule' below)",
             parent=self,
@@ -167,6 +169,7 @@ class HydrusPage(QWidget):
             tags_label="Tags to Remove:",
             placeholder="Add tag to remove after processing...",
             allow_search_all=False,
+            theme=CardTheme.REMOVE,
             add_btn_text="+ Add Cleanup Tags Rule",
             empty_text="(No cleanup tags configured — click '+ Add Cleanup Tags Rule' below)",
             parent=self,

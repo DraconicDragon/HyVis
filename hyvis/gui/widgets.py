@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hyvis.gui.theme import STYLE_ERROR, STYLE_OVERRIDDEN, CardTheme, get_card_stylesheet
+
 HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
 
 
@@ -68,9 +70,6 @@ def bind_field_metadata(widget: QWidget, field_info: Any, set_placeholder: bool 
 
 
 # region Form Helpers & Styling
-
-STYLE_OVERRIDDEN = "border: 1.5px solid #38bdf8 !important; background-color: rgba(56, 189, 248, 0.08) !important;"
-STYLE_ERROR = "border: 1.5px solid #f85149 !important; background-color: rgba(248, 81, 73, 0.08) !important;"
 
 
 def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bool = False) -> None:
@@ -1089,9 +1088,9 @@ class TagRuleCard(QFrame):
     """
     A single card mapping tags to a specific Hydrus service key.
     Used for:
-      - [[hydrus.tag_queries]] (allow_search_all=True)
-      - [[hydrus.add_tags]] (allow_search_all=False, writable services only)
-      - [[hydrus.remove_tags]] (allow_search_all=False, writable services only)
+      - [[hydrus.tag_queries]] (allow_search_all=True, theme=CardTheme.QUERY)
+      - [[hydrus.add_tags]] (allow_search_all=False, theme=CardTheme.ADD)
+      - [[hydrus.remove_tags]] (allow_search_all=False, theme=CardTheme.REMOVE)
     """
 
     changed = Signal()
@@ -1104,6 +1103,7 @@ class TagRuleCard(QFrame):
         tags_label: str = "Tags:",
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
+        theme: CardTheme = CardTheme.DEFAULT,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -1111,15 +1111,10 @@ class TagRuleCard(QFrame):
         self._index = index
         self._title_prefix = title_prefix
         self._allow_search_all = allow_search_all
+        self._theme = theme
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(
-            "TagRuleCard {"
-            "  border: 1px solid rgba(255, 255, 255, 0.08);"
-            "  border-radius: 6px;"
-            "  background: rgba(255, 255, 255, 0.015);"
-            "}"
-        )
+        self.setStyleSheet(get_card_stylesheet(self._theme, "TagRuleCard"))
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
@@ -1226,7 +1221,6 @@ class TagRuleCard(QFrame):
                 name = str(val)
                 is_virtual = False
 
-            # Exclude virtual services if writable_only / allow_search_all is False
             if not self._allow_search_all and is_virtual:
                 continue
 
@@ -1277,6 +1271,7 @@ class TagRuleListEditor(QWidget):
         tags_label: str = "Tags:",
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
+        theme: CardTheme = CardTheme.DEFAULT,
         add_btn_text: str = "+ Add Rule",
         empty_text: str = "(No rules configured — click button below)",
         parent: QWidget | None = None,
@@ -1288,6 +1283,7 @@ class TagRuleListEditor(QWidget):
         self._tags_label = tags_label
         self._placeholder = placeholder
         self._allow_search_all = allow_search_all
+        self._theme = theme
 
         self._root_layout = QVBoxLayout(self)
         self._root_layout.setContentsMargins(0, 0, 0, 0)
@@ -1357,6 +1353,7 @@ class TagRuleListEditor(QWidget):
             tags_label=self._tags_label,
             placeholder=self._placeholder,
             allow_search_all=self._allow_search_all,
+            theme=self._theme,
             parent=self._cards_widget,
         )
         card.set_available_services(self._available_services)
@@ -1395,7 +1392,7 @@ class TagRuleListEditor(QWidget):
 
 
 class TagQueryListEditor(TagRuleListEditor):
-    """Convenience subclass for [[hydrus.tag_queries]] enabling 'All Known Tags'."""
+    """Convenience subclass for [[hydrus.tag_queries]] with CardTheme.QUERY (Cyan)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -1403,6 +1400,7 @@ class TagQueryListEditor(TagRuleListEditor):
             tags_label="Search Tags:",
             placeholder="Enter search tag and press Enter or Add...",
             allow_search_all=True,
+            theme=CardTheme.QUERY,
             add_btn_text="+ Add Tag Query",
             empty_text="(No tag queries configured — click '+ Add Tag Query' below)",
             parent=parent,
