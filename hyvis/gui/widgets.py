@@ -240,6 +240,7 @@ class StringListEditor(QWidget):
     """
     A widget for viewing, adding, and removing a list of strings.
     Used for include_tags, exclude_tags, and general tag groups.
+    Supports multi-line paste splitting and dynamic height expansion.
     """
 
     changed = Signal()
@@ -255,10 +256,10 @@ class StringListEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. List view
+        # 1. List view (compact default height, auto-expands with items)
         self.list_widget = QListWidget(self)
         self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_widget.setMinimumHeight(95)
+        self._adjust_height()
         layout.addWidget(self.list_widget)
 
         # 2. Input and Action Bar
@@ -280,6 +281,12 @@ class StringListEditor(QWidget):
 
         layout.addLayout(input_layout)
 
+    def _adjust_height(self) -> None:
+        """Starts compact (2-3 items) and expands dynamically up to a maximum cap."""
+        count = self.list_widget.count()
+        target = max(68, min(68 + max(0, count - 2) * 22, 160))
+        self.list_widget.setFixedHeight(target)
+
     def get_items(self) -> list[str]:
         items: list[str] = []
         for i in range(self.list_widget.count()):
@@ -295,17 +302,30 @@ class StringListEditor(QWidget):
             cleaned = str(item).strip()
             if cleaned:
                 self.list_widget.addItem(QListWidgetItem(cleaned))
+        self._adjust_height()
         self.blockSignals(False)
 
     def _on_add(self) -> None:
-        text = self.input_line.text().strip()
-        if not text:
+        raw_text = self.input_line.text()
+        if not raw_text.strip():
+            return
+
+        # Split on newlines, strip each tag, discard empty lines
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        if not lines:
             return
 
         existing = set(self.get_items())
-        if text not in existing:
-            self.list_widget.addItem(QListWidgetItem(text))
-            self.input_line.clear()
+        added_any = False
+        for tag in lines:
+            if tag not in existing:
+                self.list_widget.addItem(QListWidgetItem(tag))
+                existing.add(tag)
+                added_any = True
+
+        self.input_line.clear()
+        if added_any:
+            self._adjust_height()
             self.changed.emit()
 
     def _on_remove(self) -> None:
@@ -317,6 +337,7 @@ class StringListEditor(QWidget):
             row = self.list_widget.row(item)
             self.list_widget.takeItem(row)
 
+        self._adjust_height()
         self.changed.emit()
 
     def keyPressEvent(self, event) -> None:
@@ -324,6 +345,155 @@ class StringListEditor(QWidget):
             self._on_remove()
         else:
             super().keyPressEvent(event)
+
+
+# endregion
+
+
+# region Category Tag Editor
+
+
+class CategoryTagEditor(QWidget):
+    """
+    Dynamic category list editor.
+    Starts empty by default; populates suggestions dynamically from vibe model metadata.
+    Filters out already-added categories from the combobox to prevent duplicates.
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self._suggestions: list[str] = []
+        self._provenance: dict[str, list[str]] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        # 1. List of active categories
+        self.list_widget = QListWidget(self)
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._adjust_height()
+        layout.addWidget(self.list_widget)
+
+        # 2. Add bar with editable combobox
+        input_layout = QHBoxLayout()
+        input_layout.setSpacing(6)
+
+        self.combo = SuggestionComboBox(self)
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.combo.about_to_show_popup.connect(self._refresh_combo)
+        line_edit = self.combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setPlaceholderText("Select or type category...")
+            line_edit.returnPressed.connect(self._on_add)
+        input_layout.addWidget(self.combo, stretch=1)
+
+        self.add_btn = QPushButton("+ Add", self)
+        self.add_btn.clicked.connect(self._on_add)
+        input_layout.addWidget(self.add_btn)
+
+        self.remove_btn = QPushButton("- Remove Selected", self)
+        self.remove_btn.clicked.connect(self._on_remove)
+        input_layout.addWidget(self.remove_btn)
+
+        layout.addLayout(input_layout)
+
+    def _adjust_height(self) -> None:
+        count = self.list_widget.count()
+        target = max(68, min(68 + max(0, count - 2) * 22, 160))
+        self.list_widget.setFixedHeight(target)
+
+    def _refresh_combo(self) -> None:
+        self.combo.blockSignals(True)
+        current = self.combo.currentText()
+        self.combo.clear()
+
+        # Omit categories that are already in the list
+        existing = set(self.get_items())
+        available = [c for c in self._suggestions if c not in existing]
+
+        for cat in available:
+            self.combo.addItem(cat)
+            models = self._provenance.get(cat, [])
+            if models:
+                self.combo.setItemData(
+                    self.combo.count() - 1,
+                    f"From: {', '.join(models)}",
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+
+        if current in available:
+            self.combo.setCurrentText(current)
+        elif available:
+            self.combo.setCurrentText(available[0])
+        else:
+            self.combo.setCurrentText("")
+
+        self.combo.blockSignals(False)
+
+    def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        if isinstance(suggestions, Mapping):
+            self._suggestions = sorted(suggestions.keys())
+            self._provenance = {k: list(v) for k, v in suggestions.items()}
+        else:
+            self._suggestions = sorted(dict.fromkeys(suggestions))
+            self._provenance = {}
+        self._refresh_combo()
+
+    def get_items(self) -> list[str]:
+        items: list[str] = []
+        for i in range(self.list_widget.count()):
+            text = self.list_widget.item(i).text().strip()
+            if text:
+                items.append(text)
+        return items
+
+    def set_items(self, items: Sequence[str]) -> None:
+        self.blockSignals(True)
+        self.list_widget.clear()
+        for item in items:
+            cleaned = str(item).strip()
+            if cleaned:
+                self.list_widget.addItem(QListWidgetItem(cleaned))
+        self._adjust_height()
+        self._refresh_combo()
+        self.blockSignals(False)
+
+    def _on_add(self) -> None:
+        raw_text = self.combo.currentText()
+        lines = [line.strip().lower() for line in raw_text.splitlines() if line.strip()]
+        if not lines:
+            return
+
+        existing = set(self.get_items())
+        added_any = False
+        for cat in lines:
+            if cat not in existing:
+                self.list_widget.addItem(QListWidgetItem(cat))
+                existing.add(cat)
+                added_any = True
+
+        if added_any:
+            self._adjust_height()
+            self._refresh_combo()
+            self.changed.emit()
+
+    def _on_remove(self) -> None:
+        selected = self.list_widget.selectedItems()
+        if not selected:
+            return
+
+        for item in selected:
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
+
+        self._adjust_height()
+        self._refresh_combo()
+        self.changed.emit()
 
 
 # endregion
@@ -509,7 +679,7 @@ class TagServiceListEditor(QWidget):
 class KeyValueEditor(QWidget):
     """
     A 2-column table widget for editing string-to-string mappings.
-    Used for category_tag_prefix_mapping, tag_prefix_overrides, and tag_replacements.
+    Supports editable comboboxes with next-available pre-population and duplicate prevention.
     """
 
     changed = Signal()
@@ -518,29 +688,33 @@ class KeyValueEditor(QWidget):
         self,
         key_header: str = "Key",
         val_header: str = "Value",
+        use_combobox_for_key: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._key_header = key_header
         self._val_header = val_header
+        self._use_combobox_for_key = use_combobox_for_key
+        self._key_suggestions: list[str] = []
+        self._provenance: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. Table
         self.table = QTableWidget(0, 2, self)
         self.table.setHorizontalHeaderLabels([self._key_header, self._val_header])
+        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 160)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_item_changed)
+        self._adjust_height()
         layout.addWidget(self.table)
 
-        # 2. Add / Remove Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
-
         self.add_btn = QPushButton("+ Add Row", self)
         self.add_btn.clicked.connect(self._on_add_row)
         btn_layout.addWidget(self.add_btn)
@@ -548,16 +722,75 @@ class KeyValueEditor(QWidget):
         self.remove_btn = QPushButton("- Remove Selected", self)
         self.remove_btn.clicked.connect(self._on_remove_row)
         btn_layout.addWidget(self.remove_btn)
-
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
+
+    def _adjust_height(self) -> None:
+        rows = self.table.rowCount()
+        target = max(86, min(32 + max(rows, 1) * 30, 210))
+        self.table.setFixedHeight(target)
+
+    def _get_used_keys(self, exclude_row: int = -1) -> set[str]:
+        used = set()
+        for r in range(self.table.rowCount()):
+            if r == exclude_row:
+                continue
+            if self._use_combobox_for_key:
+                combo: QComboBox | None = self.table.cellWidget(r, 0)
+                if combo and combo.currentText().strip():
+                    used.add(combo.currentText().strip())
+            else:
+                item = self.table.item(r, 0)
+                if item and item.text().strip():
+                    used.add(item.text().strip())
+        return used
+
+    def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        used = self._get_used_keys(exclude_row=row_idx)
+        available = [c for c in self._key_suggestions if c not in used or c == current_val]
+
+        for cat in available:
+            combo.addItem(cat)
+            models = self._provenance.get(cat, [])
+            if models:
+                combo.setItemData(
+                    combo.count() - 1,
+                    f"From: {', '.join(models)}",
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+        combo.setCurrentText(current_val)
+        combo.blockSignals(False)
+
+    def _refresh_all_combos(self) -> None:
+        if not self._use_combobox_for_key:
+            return
+        for r in range(self.table.rowCount()):
+            combo: QComboBox | None = self.table.cellWidget(r, 0)
+            if combo:
+                self._populate_combo_items(combo, combo.currentText(), r)
+
+    def set_key_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        if isinstance(suggestions, Mapping):
+            self._key_suggestions = sorted(suggestions.keys())
+            self._provenance = {k: list(v) for k, v in suggestions.items()}
+        else:
+            self._key_suggestions = sorted(dict.fromkeys(suggestions))
+            self._provenance = {}
+        self._refresh_all_combos()
 
     def get_mapping(self) -> dict[str, str]:
         mapping: dict[str, str] = {}
         for row in range(self.table.rowCount()):
-            key_item = self.table.item(row, 0)
+            if self._use_combobox_for_key:
+                combo: QComboBox | None = self.table.cellWidget(row, 0)
+                key = combo.currentText().strip() if combo else ""
+            else:
+                key_item = self.table.item(row, 0)
+                key = key_item.text().strip() if key_item else ""
+
             val_item = self.table.item(row, 1)
-            key = key_item.text().strip() if key_item else ""
             val = val_item.text().strip() if val_item else ""
             if key:
                 mapping[key] = val
@@ -569,22 +802,54 @@ class KeyValueEditor(QWidget):
 
         for row, (k, v) in enumerate(mapping.items()):
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(str(k)))
+            if self._use_combobox_for_key:
+                combo = SuggestionComboBox(self)
+                combo.setEditable(True)
+                self._populate_combo_items(combo, str(k), row)
+                combo.about_to_show_popup.connect(
+                    lambda c=combo, r=row: self._populate_combo_items(c, c.currentText(), r)
+                )
+                combo.currentTextChanged.connect(lambda _: self._on_key_changed())
+                self.table.setCellWidget(row, 0, combo)
+            else:
+                self.table.setItem(row, 0, QTableWidgetItem(str(k)))
+
             self.table.setItem(row, 1, QTableWidgetItem(str(v)))
 
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
+
+    def _on_key_changed(self) -> None:
+        self._refresh_all_combos()
+        self.changed.emit()
 
     def _on_add_row(self) -> None:
         self.table.blockSignals(True)
         row = self.table.rowCount()
         self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(""))
-        self.table.setItem(row, 1, QTableWidgetItem(""))
-        self.table.blockSignals(False)
 
-        item = self.table.item(row, 0)
-        self.table.setCurrentItem(item)
-        self.table.editItem(item)
+        if self._use_combobox_for_key:
+            used = self._get_used_keys()
+            next_cat = next((c for c in self._key_suggestions if c not in used), "")
+            combo = SuggestionComboBox(self)
+            combo.setEditable(True)
+            self._populate_combo_items(combo, next_cat, row)
+            combo.about_to_show_popup.connect(lambda c=combo, r=row: self._populate_combo_items(c, c.currentText(), r))
+            combo.currentTextChanged.connect(lambda _: self._on_key_changed())
+            self.table.setCellWidget(row, 0, combo)
+        else:
+            self.table.setItem(row, 0, QTableWidgetItem(""))
+
+        self.table.setItem(row, 1, QTableWidgetItem(""))
+        self._adjust_height()
+        self.table.blockSignals(False)
+        self._refresh_all_combos()
+
+        if not self._use_combobox_for_key:
+            item = self.table.item(row, 0)
+            self.table.setCurrentItem(item)
+            self.table.editItem(item)
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
@@ -595,7 +860,9 @@ class KeyValueEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
         self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -613,6 +880,7 @@ class ThresholdTableEditor(QWidget):
     """
     A specialized 3-column table for category_thresholds and tag_thresholds.
     Columns: [Target, Threshold, Override TLT].
+    Pre-populates new rows with next unused category and prevents duplicate selections.
     """
 
     changed = Signal()
@@ -620,29 +888,34 @@ class ThresholdTableEditor(QWidget):
     def __init__(
         self,
         target_header: str = "Target",
+        use_combobox_for_target: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._target_header = target_header
+        self._use_combobox_for_target = use_combobox_for_target
+        self._target_suggestions: list[str] = []
+        self._provenance: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. Table
         self.table = QTableWidget(0, 3, self)
         self.table.setHorizontalHeaderLabels([self._target_header, "Threshold", "Override TLT"])
+        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(1, 95)
+        self.table.setColumnWidth(2, 110)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_table_item_changed)
+        self._adjust_height()
         layout.addWidget(self.table)
 
-        # 2. Action buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
-
         self.add_btn = QPushButton("+ Add Entry", self)
         self.add_btn.clicked.connect(self._on_add_row)
         btn_layout.addWidget(self.add_btn)
@@ -650,16 +923,74 @@ class ThresholdTableEditor(QWidget):
         self.remove_btn = QPushButton("- Remove Selected", self)
         self.remove_btn.clicked.connect(self._on_remove_row)
         btn_layout.addWidget(self.remove_btn)
-
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
+    def _adjust_height(self) -> None:
+        rows = self.table.rowCount()
+        target = max(86, min(32 + max(rows, 1) * 30, 210))
+        self.table.setFixedHeight(target)
+
+    def _get_used_targets(self, exclude_row: int = -1) -> set[str]:
+        used = set()
+        for r in range(self.table.rowCount()):
+            if r == exclude_row:
+                continue
+            if self._use_combobox_for_target:
+                combo: QComboBox | None = self.table.cellWidget(r, 0)
+                if combo and combo.currentText().strip():
+                    used.add(combo.currentText().strip())
+            else:
+                item = self.table.item(r, 0)
+                if item and item.text().strip():
+                    used.add(item.text().strip())
+        return used
+
+    def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        used = self._get_used_targets(exclude_row=row_idx)
+        available = [c for c in self._target_suggestions if c not in used or c == current_val]
+
+        for cat in available:
+            combo.addItem(cat)
+            models = self._provenance.get(cat, [])
+            if models:
+                combo.setItemData(
+                    combo.count() - 1,
+                    f"From: {', '.join(models)}",
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+        combo.setCurrentText(current_val)
+        combo.blockSignals(False)
+
+    def _refresh_all_combos(self) -> None:
+        if not self._use_combobox_for_target:
+            return
+        for r in range(self.table.rowCount()):
+            combo: QComboBox | None = self.table.cellWidget(r, 0)
+            if combo:
+                self._populate_combo_items(combo, combo.currentText(), r)
+
+    def set_target_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        if isinstance(suggestions, Mapping):
+            self._target_suggestions = sorted(suggestions.keys())
+            self._provenance = {k: list(v) for k, v in suggestions.items()}
+        else:
+            self._target_suggestions = sorted(dict.fromkeys(suggestions))
+            self._provenance = {}
+        self._refresh_all_combos()
+
     def get_thresholds(self) -> dict[str, dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
-
         for row in range(self.table.rowCount()):
-            target_item = self.table.item(row, 0)
-            target = target_item.text().strip() if target_item else ""
+            if self._use_combobox_for_target:
+                combo: QComboBox | None = self.table.cellWidget(row, 0)
+                target = combo.currentText().strip() if combo else ""
+            else:
+                target_item = self.table.item(row, 0)
+                target = target_item.text().strip() if target_item else ""
+
             if not target:
                 continue
 
@@ -677,7 +1008,6 @@ class ThresholdTableEditor(QWidget):
                 "threshold": float(thresh_val),
                 "override_tlt": bool(override_val),
             }
-
         return results
 
     def set_thresholds(self, data: Mapping[str, Any]) -> None:
@@ -686,7 +1016,18 @@ class ThresholdTableEditor(QWidget):
 
         for row, (target, conf) in enumerate(data.items()):
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(str(target)))
+
+            if self._use_combobox_for_target:
+                combo = SuggestionComboBox(self)
+                combo.setEditable(True)
+                self._populate_combo_items(combo, str(target), row)
+                combo.about_to_show_popup.connect(
+                    lambda c=combo, r=row: self._populate_combo_items(c, c.currentText(), r)
+                )
+                combo.currentTextChanged.connect(lambda _: self._on_target_changed())
+                self.table.setCellWidget(row, 0, combo)
+            else:
+                self.table.setItem(row, 0, QTableWidgetItem(str(target)))
 
             val = conf.threshold if hasattr(conf, "threshold") else conf.get("threshold", 0.40)
             spin = QDoubleSpinBox(self)
@@ -707,17 +1048,32 @@ class ThresholdTableEditor(QWidget):
             chk_layout.setContentsMargins(0, 0, 0, 0)
             chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             chk_layout.addWidget(chk)
-
             self.table.setCellWidget(row, 2, chk_container)
 
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
+
+    def _on_target_changed(self) -> None:
+        self._refresh_all_combos()
+        self.changed.emit()
 
     def _on_add_row(self) -> None:
         row = self.table.rowCount()
         self.table.blockSignals(True)
         self.table.insertRow(row)
 
-        self.table.setItem(row, 0, QTableWidgetItem(""))
+        if self._use_combobox_for_target:
+            used = self._get_used_targets()
+            next_cat = next((c for c in self._target_suggestions if c not in used), "")
+            combo = SuggestionComboBox(self)
+            combo.setEditable(True)
+            self._populate_combo_items(combo, next_cat, row)
+            combo.about_to_show_popup.connect(lambda c=combo, r=row: self._populate_combo_items(c, c.currentText(), r))
+            combo.currentTextChanged.connect(lambda _: self._on_target_changed())
+            self.table.setCellWidget(row, 0, combo)
+        else:
+            self.table.setItem(row, 0, QTableWidgetItem(""))
 
         spin = QDoubleSpinBox(self)
         spin.setRange(0.0, 1.0)
@@ -738,11 +1094,14 @@ class ThresholdTableEditor(QWidget):
         chk_layout.addWidget(chk)
 
         self.table.setCellWidget(row, 2, chk_container)
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
 
-        item = self.table.item(row, 0)
-        self.table.setCurrentItem(item)
-        self.table.editItem(item)
+        if not self._use_combobox_for_target:
+            item = self.table.item(row, 0)
+            self.table.setCurrentItem(item)
+            self.table.editItem(item)
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
@@ -753,128 +1112,12 @@ class ThresholdTableEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
         self.changed.emit()
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
-        del item
-        self.changed.emit()
-
-
-# endregion
-
-
-# region Subset List Editor
-
-
-class SubsetListEditor(QWidget):
-    """
-    Table editor for max_tags_per_subset rule groups.
-    Columns: [Tags (comma-separated), Limit (SpinBox)].
-    """
-
-    changed = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        self.table = QTableWidget(0, 2, self)
-        self.table.setHorizontalHeaderLabels(["Tags (comma-separated)", "Limit"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.itemChanged.connect(self._on_item_changed)
-        layout.addWidget(self.table)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(6)
-
-        self.add_btn = QPushButton("+ Add Subset Group", self)
-        self.add_btn.clicked.connect(self._on_add_row)
-        btn_layout.addWidget(self.add_btn)
-
-        self.remove_btn = QPushButton("- Remove Selected", self)
-        self.remove_btn.clicked.connect(self._on_remove_row)
-        btn_layout.addWidget(self.remove_btn)
-
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
-    def get_subsets(self) -> list[dict[str, Any]]:
-        subsets: list[dict[str, Any]] = []
-
-        for row in range(self.table.rowCount()):
-            tag_item = self.table.item(row, 0)
-            raw_text = tag_item.text().strip() if tag_item else ""
-            if not raw_text:
-                continue
-
-            tags = [t.strip() for t in raw_text.split(",") if t.strip()]
-            if not tags:
-                continue
-
-            spin: QSpinBox | None = self.table.cellWidget(row, 1)
-            limit = spin.value() if spin else 1
-
-            subsets.append({"tags": tags, "limit": limit})
-
-        return subsets
-
-    def set_subsets(self, subsets: Sequence[Any]) -> None:
-        self.table.blockSignals(True)
-        self.table.setRowCount(0)
-
-        for row, subset in enumerate(subsets):
-            self.table.insertRow(row)
-            tags_list = getattr(subset, "tags", None) or subset.get("tags", [])
-            limit_val = getattr(subset, "limit", None) or subset.get("limit", 1)
-
-            self.table.setItem(row, 0, QTableWidgetItem(", ".join(tags_list)))
-
-            spin = QSpinBox(self)
-            spin.setRange(1, 999)
-            spin.setValue(int(limit_val))
-            spin.valueChanged.connect(lambda _: self.changed.emit())
-            self.table.setCellWidget(row, 1, spin)
-
-        self.table.blockSignals(False)
-
-    def _on_add_row(self) -> None:
-        row = self.table.rowCount()
-        self.table.blockSignals(True)
-        self.table.insertRow(row)
-
-        self.table.setItem(row, 0, QTableWidgetItem("safe, questionable, explicit"))
-
-        spin = QSpinBox(self)
-        spin.setRange(1, 999)
-        spin.setValue(1)
-        spin.valueChanged.connect(lambda _: self.changed.emit())
-        self.table.setCellWidget(row, 1, spin)
-
-        self.table.blockSignals(False)
-
-        item = self.table.item(row, 0)
-        self.table.setCurrentItem(item)
-        self.table.editItem(item)
-        self.changed.emit()
-
-    def _on_remove_row(self) -> None:
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
-        if not selected_rows:
-            return
-
-        self.table.blockSignals(True)
-        for row in selected_rows:
-            self.table.removeRow(row)
-        self.table.blockSignals(False)
-        self.changed.emit()
-
-    def _on_item_changed(self, item: QTableWidgetItem) -> None:
         del item
         self.changed.emit()
 
@@ -886,13 +1129,17 @@ class SubsetListEditor(QWidget):
 
 
 class CategoryLimitEditor(QWidget):
-    """Table editor for max_tags_per_category: [Category (Combo/Text), Limit (SpinBox)]."""
+    """
+    Table editor for max_tags_per_category: [Category (Combo/Text), Limit (SpinBox)].
+    Pre-populates new rows with next unused category and prevents duplicate selections.
+    """
 
     changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._suggestions: list[str] = []
+        self._provenance: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -900,9 +1147,12 @@ class CategoryLimitEditor(QWidget):
 
         self.table = QTableWidget(0, 2, self)
         self.table.setHorizontalHeaderLabels(["Category", "Max Tags"])
+        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(1, 100)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._adjust_height()
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -916,8 +1166,53 @@ class CategoryLimitEditor(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-    def set_suggestions(self, suggestions: list[str]) -> None:
-        self._suggestions = list(suggestions)
+    def _adjust_height(self) -> None:
+        rows = self.table.rowCount()
+        target = max(86, min(32 + max(rows, 1) * 30, 210))
+        self.table.setFixedHeight(target)
+
+    def _get_used_categories(self, exclude_row: int = -1) -> set[str]:
+        used = set()
+        for r in range(self.table.rowCount()):
+            if r == exclude_row:
+                continue
+            combo: QComboBox | None = self.table.cellWidget(r, 0)
+            if combo and combo.currentText().strip():
+                used.add(combo.currentText().strip())
+        return used
+
+    def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        used = self._get_used_categories(exclude_row=row_idx)
+        available = [c for c in self._suggestions if c not in used or c == current_val]
+
+        for cat in available:
+            combo.addItem(cat)
+            models = self._provenance.get(cat, [])
+            if models:
+                combo.setItemData(
+                    combo.count() - 1,
+                    f"From: {', '.join(models)}",
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+        combo.setCurrentText(current_val)
+        combo.blockSignals(False)
+
+    def _refresh_all_combos(self) -> None:
+        for r in range(self.table.rowCount()):
+            combo: QComboBox | None = self.table.cellWidget(r, 0)
+            if combo:
+                self._populate_combo_items(combo, combo.currentText(), r)
+
+    def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        if isinstance(suggestions, Mapping):
+            self._suggestions = sorted(suggestions.keys())
+            self._provenance = {k: list(v) for k, v in suggestions.items()}
+        else:
+            self._suggestions = sorted(dict.fromkeys(suggestions))
+            self._provenance = {}
+        self._refresh_all_combos()
 
     def get_limits(self) -> dict[str, int]:
         limits: dict[str, int] = {}
@@ -935,16 +1230,17 @@ class CategoryLimitEditor(QWidget):
         self.table.setRowCount(0)
         for row, (cat, val) in enumerate(limits.items()):
             self._insert_row(row, cat, int(val))
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
 
     def _insert_row(self, row: int, category: str = "", limit: int = 10) -> None:
         self.table.insertRow(row)
-        combo = QComboBox(self)
+        combo = SuggestionComboBox(self)
         combo.setEditable(True)
-        if self._suggestions:
-            combo.addItems(self._suggestions)
-        combo.setCurrentText(category)
-        combo.currentTextChanged.connect(lambda _: self.changed.emit())
+        self._populate_combo_items(combo, category, row)
+        combo.about_to_show_popup.connect(lambda c=combo, r=row: self._populate_combo_items(c, c.currentText(), r))
+        combo.currentTextChanged.connect(lambda _: self._on_category_changed())
         self.table.setCellWidget(row, 0, combo)
 
         spin = QSpinBox(self)
@@ -953,13 +1249,19 @@ class CategoryLimitEditor(QWidget):
         spin.valueChanged.connect(lambda _: self.changed.emit())
         self.table.setCellWidget(row, 1, spin)
 
+    def _on_category_changed(self) -> None:
+        self._refresh_all_combos()
+        self.changed.emit()
+
     def _on_add_row(self) -> None:
         self.table.blockSignals(True)
         row = self.table.rowCount()
-        existing = set(self.get_limits().keys())
-        cat = next((c for c in self._suggestions if c not in existing), "")
-        self._insert_row(row, cat, 10)
+        used = self._get_used_categories()
+        next_cat = next((c for c in self._suggestions if c not in used), "")
+        self._insert_row(row, next_cat, 10)
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
@@ -969,113 +1271,200 @@ class CategoryLimitEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
+        self._adjust_height()
         self.table.blockSignals(False)
+        self._refresh_all_combos()
         self.changed.emit()
 
 
 # endregion
 
 
-# region Category Tag Editor
+# region Tag Subset List Editor (Joint Subset Limits)
 
 
-class CategoryTagEditor(QWidget):
+class TagSubsetCard(QFrame):
     """
-    Dynamic category list editor.
-    Starts empty by default; populates suggestions dynamically from vibe model metadata.
+    A single card representing a Joint Subset Limit rule (max_tags_per_subset).
+    Eliminates comma bugs by managing tags via StringListEditor (with multi-line paste).
+    """
+
+    changed = Signal()
+    delete_requested = Signal()
+
+    def __init__(self, index: int = 1, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._index = index
+
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(get_card_stylesheet(CardTheme.PAGE, "TagSubsetCard"))
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(10, 8, 10, 10)
+        card_layout.setSpacing(8)
+
+        # 1. Header
+        header_layout = QHBoxLayout()
+        self.title_label = QLabel(f"<b>Subset Group #{self._index}</b>", self)
+        self.title_label.setStyleSheet("font-size: 12px;")
+        header_layout.addWidget(self.title_label)
+
+        header_layout.addStretch(1)
+
+        self.del_btn = QPushButton("✕", self)
+        self.del_btn.setFixedWidth(26)
+        self.del_btn.setToolTip("Remove this subset group")
+        self.del_btn.setStyleSheet(
+            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
+            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
+        )
+        self.del_btn.clicked.connect(self.delete_requested.emit)
+        header_layout.addWidget(self.del_btn)
+
+        card_layout.addLayout(header_layout)
+
+        # 2. Limit row
+        limit_row = QHBoxLayout()
+        limit_row.setSpacing(8)
+        limit_lbl = QLabel("Max Output Limit:", self)
+        limit_lbl.setStyleSheet("color: #b0bec5;")
+        limit_row.addWidget(limit_lbl)
+
+        self.limit_spin = QSpinBox(self)
+        self.limit_spin.setRange(1, 999)
+        self.limit_spin.setValue(1)
+        self.limit_spin.valueChanged.connect(lambda _: self.changed.emit())
+        limit_row.addWidget(self.limit_spin)
+
+        tags_suffix = QLabel("tag(s)", self)
+        tags_suffix.setStyleSheet("color: #888;")
+        limit_row.addWidget(tags_suffix)
+
+        limit_row.addStretch(1)
+        card_layout.addLayout(limit_row)
+
+        # 3. Tags in subset
+        t_label = QLabel("Tags in Subset:", self)
+        t_label.setStyleSheet("color: #b0bec5;")
+        card_layout.addWidget(t_label)
+
+        self.tags_editor = StringListEditor(placeholder="Add tag to subset group...", parent=self)
+        self.tags_editor.changed.connect(self.changed.emit)
+        card_layout.addWidget(self.tags_editor)
+
+    def set_index(self, index: int) -> None:
+        self._index = index
+        self.title_label.setText(f"<b>Subset Group #{self._index}</b>")
+
+    def get_subset(self) -> dict[str, Any]:
+        return {
+            "tags": self.tags_editor.get_items(),
+            "limit": int(self.limit_spin.value()),
+        }
+
+    def set_subset(self, tags: Sequence[str], limit: int = 1) -> None:
+        self.tags_editor.set_items(tags)
+        self.limit_spin.setValue(int(limit))
+
+
+class TagSubsetListEditor(QWidget):
+    """
+    Stacked card editor for [[output_filter.max_tags_per_subset]].
+    Eliminates the comma-splitting bug by using individual tag lists per group.
     """
 
     changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-
-        self._suggestions: list[str] = []
+        self._cards: list[TagSubsetCard] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(8)
 
-        # 1. List of active categories (starts completely empty)
-        self.list_widget = QListWidget(self)
-        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_widget.setMinimumHeight(95)
-        layout.addWidget(self.list_widget)
+        # 1. Cards container
+        self._cards_widget = QWidget(self)
+        self._cards_layout = QVBoxLayout(self._cards_widget)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
+        self._cards_layout.setSpacing(8)
+        layout.addWidget(self._cards_widget)
 
-        # 2. Add bar with editable combobox
-        input_layout = QHBoxLayout()
-        input_layout.setSpacing(6)
+        # 2. Empty placeholder
+        self.empty_label = QLabel("(No joint subset limits configured — click '+ Add Subset Group' below)", self)
+        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        layout.addWidget(self.empty_label)
 
-        self.combo = QComboBox(self)
-        self.combo.setEditable(True)
-        self.combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        line_edit = self.combo.lineEdit()
-        if line_edit is not None:
-            line_edit.setPlaceholderText("Select or type category...")
-            line_edit.returnPressed.connect(self._on_add)
-        input_layout.addWidget(self.combo, stretch=1)
+        # 3. Add button
+        btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Subset Group", self)
+        self.add_btn.clicked.connect(self._on_add_clicked)
+        btn_layout.addWidget(self.add_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
-        self.add_btn = QPushButton("+ Add", self)
-        self.add_btn.clicked.connect(self._on_add)
-        input_layout.addWidget(self.add_btn)
+        self._update_empty_state()
 
-        self.remove_btn = QPushButton("- Remove Selected", self)
-        self.remove_btn.clicked.connect(self._on_remove)
-        input_layout.addWidget(self.remove_btn)
+    def get_subsets(self) -> list[dict[str, Any]]:
+        subsets: list[dict[str, Any]] = []
+        for card in self._cards:
+            s = card.get_subset()
+            if s["tags"]:  # Only export groups that have at least one tag
+                subsets.append(s)
+        return subsets
 
-        layout.addLayout(input_layout)
-
-    def _refresh_combo(self) -> None:
-        self.combo.blockSignals(True)
-        current = self.combo.currentText()
-        self.combo.clear()
-        self.combo.addItems(self._suggestions)
-        self.combo.setCurrentText(current)
-        self.combo.blockSignals(False)
-
-    def set_suggestions(self, suggestions: Sequence[str]) -> None:
-        """Update suggestion list strictly from dynamic models / vibe catalog."""
-        self._suggestions = sorted(dict.fromkeys(suggestions))
-        self._refresh_combo()
-
-    def get_items(self) -> list[str]:
-        items: list[str] = []
-        for i in range(self.list_widget.count()):
-            text = self.list_widget.item(i).text().strip()
-            if text:
-                items.append(text)
-        return items
-
-    def set_items(self, items: Sequence[str]) -> None:
+    def set_subsets(self, subsets: Sequence[Any]) -> None:
         self.blockSignals(True)
-        self.list_widget.clear()
-        for item in items:
-            cleaned = str(item).strip()
-            if cleaned:
-                self.list_widget.addItem(QListWidgetItem(cleaned))
+        self._clear_cards()
+        for idx, s in enumerate(subsets, start=1):
+            tags = getattr(s, "tags", None) or (s.get("tags") if isinstance(s, dict) else [])
+            limit = getattr(s, "limit", None) or (s.get("limit", 1) if isinstance(s, dict) else 1)
+            self._add_card(tags, limit, idx)
+        self._update_empty_state()
         self.blockSignals(False)
 
-    def _on_add(self) -> None:
-        text = self.combo.currentText().strip().lower()
-        if not text:
-            return
+    def _clear_cards(self) -> None:
+        for card in self._cards:
+            self._cards_layout.removeWidget(card)
+            card.deleteLater()
+        self._cards.clear()
 
-        existing = set(self.get_items())
-        if text not in existing:
-            self.list_widget.addItem(QListWidgetItem(text))
-            self.combo.setCurrentText("")
+    def _add_card(
+        self,
+        tags: Sequence[str] | None = None,
+        limit: int = 1,
+        index: int | None = None,
+    ) -> TagSubsetCard:
+        idx = index or (len(self._cards) + 1)
+        card = TagSubsetCard(index=idx, parent=self._cards_widget)
+        if tags is not None:
+            card.set_subset(tags, limit)
+        card.changed.connect(self.changed.emit)
+        card.delete_requested.connect(lambda: self._on_delete_card(card))
+        self._cards_layout.addWidget(card)
+        self._cards.append(card)
+        self._update_empty_state()
+        return card
+
+    def _on_add_clicked(self) -> None:
+        self._add_card()
+        self.changed.emit()
+
+    def _on_delete_card(self, card: TagSubsetCard) -> None:
+        if card in self._cards:
+            self._cards.remove(card)
+            self._cards_layout.removeWidget(card)
+            card.deleteLater()
+            self._renumber_cards()
+            self._update_empty_state()
             self.changed.emit()
 
-    def _on_remove(self) -> None:
-        selected = self.list_widget.selectedItems()
-        if not selected:
-            return
+    def _renumber_cards(self) -> None:
+        for idx, card in enumerate(self._cards, start=1):
+            card.set_index(idx)
 
-        for item in selected:
-            row = self.list_widget.row(item)
-            self.list_widget.takeItem(row)
-
-        self.changed.emit()
+    def _update_empty_state(self) -> None:
+        self.empty_label.setVisible(len(self._cards) == 0)
 
 
 # endregion
@@ -1610,6 +1999,25 @@ class PageQueryListEditor(QWidget):
 # endregion
 
 
+# region SuggestionComboBox
+
+
+class SuggestionComboBox(QComboBox):
+    """QComboBox that notifies listeners right before showing its dropdown popup."""
+
+    about_to_show_popup = Signal()
+
+    def showPopup(self) -> None:
+        self.about_to_show_popup.emit()
+        super().showPopup()
+
+
+# enregion
+
+
+# region Smooth Scrolling Area
+
+
 class SmoothScrollArea(QScrollArea):
     """Experimental smooth scrolling area using QPropertyAnimation and Event Filters."""
 
@@ -1672,3 +2080,6 @@ class SmoothScrollArea(QScrollArea):
         self._anim.start()
 
         event.accept()
+
+
+# endregion

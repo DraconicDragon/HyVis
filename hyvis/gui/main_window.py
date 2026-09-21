@@ -233,18 +233,18 @@ class MainWindow(QMainWindow):
         self.state.pages_updated.connect(self.hydrus_page.update_pages)
         self.state.connection_changed.connect(self._on_connection_changed)
 
-        # Connect page changes to central validation and dirty-tracking
-        self.hydrus_page.changed.connect(self._on_page_modified)
-        self.models_page.changed.connect(self._on_page_modified)
-        self.filters_page.changed.connect(self._on_page_modified)
-        self.app_db_page.changed.connect(self._on_page_modified)
-
         # Cross-page synchronization for per-model filters
         self.models_page.request_filter_scope.connect(self._on_request_filter_scope)
         self.models_page.changed.connect(lambda: self.filters_page.sync_models(self.models_page._models_data))
         self.filters_page.changed.connect(
             lambda: self.models_page.update_filter_overrides(self.filters_page._models_data)
         )
+
+        # Connect page changes to central validation and dirty-tracking
+        self.hydrus_page.changed.connect(self._on_page_modified)
+        self.models_page.changed.connect(self._on_page_modified)
+        self.filters_page.changed.connect(self._on_page_modified)
+        self.app_db_page.changed.connect(self._on_page_modified)
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         if self.state.pages:

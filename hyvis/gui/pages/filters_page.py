@@ -31,11 +31,26 @@ from hyvis.gui.widgets import (
     SectionCard,
     SmoothScrollArea,
     StringListEditor,
-    SubsetListEditor,
+    TagSubsetListEditor,
     ThresholdTableEditor,
     add_form_row,
     set_widget_override_state,
 )
+
+
+def extract_model_categories(model_id: str) -> list[str]:
+    """Extract output categories from vibe's native ModelDescriptor."""
+    if not model_id:
+        return []
+    try:
+        from enum import Enum
+
+        import vibe
+
+        desc = vibe.describe(model_id)
+        return [c.value if isinstance(c, Enum) else str(c) for c in desc.output.categories]
+    except Exception:
+        return []
 
 
 def _values_differ(val1: Any, val2: Any) -> bool:
@@ -190,13 +205,17 @@ class FiltersPage(QWidget):
 
         layout.addLayout(inc_exc_row)
 
-        # Card 5: Category Threshold Overrides
+        # Card 5: Category Threshold Overrides (Editable Category ComboBox in Col 0)
         cat_thresh_title = of_fields["category_thresholds"].title or "Category Threshold Overrides"
         self.cat_thresh_card = SectionCard(cat_thresh_title, parent=container)
         self._card_meta[self.cat_thresh_card] = (cat_thresh_title, ["category_thresholds"])
         self.cat_thresh_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_thresh_card, chk))
         cat_thresh_layout = QVBoxLayout()
-        self.cat_thresh_editor = ThresholdTableEditor(target_header="Category Name", parent=self)
+        self.cat_thresh_editor = ThresholdTableEditor(
+            target_header="Category Name",
+            use_combobox_for_target=True,
+            parent=self,
+        )
         self.cat_thresh_editor.changed.connect(self._on_field_changed)
         cat_thresh_layout.addWidget(self.cat_thresh_editor)
         self.cat_thresh_card.setContentLayout(cat_thresh_layout)
@@ -214,13 +233,18 @@ class FiltersPage(QWidget):
         self.tag_thresh_card.setContentLayout(tag_thresh_layout)
         layout.addWidget(self.tag_thresh_card)
 
-        # Card 7: Category Tag Prefix Mapping
+        # Card 7: Category Tag Prefix Mapping (Editable Category ComboBox in Col 0)
         cat_pfx_title = of_fields["category_tag_prefix_mapping"].title or "Category Tag Prefix Mapping"
         self.cat_pfx_card = SectionCard(cat_pfx_title, parent=container)
         self._card_meta[self.cat_pfx_card] = (cat_pfx_title, ["category_tag_prefix_mapping"])
         self.cat_pfx_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_pfx_card, chk))
         cat_pfx_layout = QVBoxLayout()
-        self.cat_prefix_editor = KeyValueEditor(key_header="Category", val_header="Prefix", parent=self)
+        self.cat_prefix_editor = KeyValueEditor(
+            key_header="Category",
+            val_header="Prefix",
+            use_combobox_for_key=True,
+            parent=self,
+        )
         self.cat_prefix_editor.changed.connect(self._on_field_changed)
         cat_pfx_layout.addWidget(self.cat_prefix_editor)
         self.cat_pfx_card.setContentLayout(cat_pfx_layout)
@@ -262,13 +286,13 @@ class FiltersPage(QWidget):
         self.cat_limit_card.setContentLayout(cat_limit_layout)
         layout.addWidget(self.cat_limit_card)
 
-        # Card 11: Joint Subset Limits
+        # Card 11: Joint Subset Limits (Stacked Cards avoiding comma bugs)
         subset_title = of_fields["max_tags_per_subset"].title or "Joint Subset Limits"
         self.subset_card = SectionCard(subset_title, parent=container)
         self._card_meta[self.subset_card] = (subset_title, ["max_tags_per_subset"])
         self.subset_card.toggled.connect(lambda chk: self._on_card_toggled(self.subset_card, chk))
         subset_layout = QVBoxLayout()
-        self.subset_editor = SubsetListEditor(self)
+        self.subset_editor = TagSubsetListEditor(self)
         self.subset_editor.changed.connect(self._on_field_changed)
         subset_layout.addWidget(self.subset_editor)
         self.subset_card.setContentLayout(subset_layout)
@@ -319,28 +343,30 @@ class FiltersPage(QWidget):
         self.scope_combo.blockSignals(False)
 
     def _update_category_suggestions(self) -> None:
-        """Collect category suggestions strictly from loaded models via vibe."""
-        suggestions: set[str] = set()
-        try:
-            import vibe
+        """
+        Collect and distribute category suggestions based on current scope.
+        - Global Scope: Maps categories to all configured models providing them.
+        - Model Scope: Scoped strictly to the active model.
+        """
+        cat_sources: dict[str, list[str]] = {}
 
-            for m in self._models_data:
-                m_id = m.get("model_id")
-                if m_id:
-                    try:
-                        desc = vibe.describe(m_id)
-                        if hasattr(desc, "tagger") and hasattr(desc.tagger, "catalog") and desc.tagger.catalog:
-                            for lbl in desc.tagger.catalog.labels:
-                                if getattr(lbl, "category", None):
-                                    suggestions.add(lbl.category)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        if self._current_scope == 0:
+            target_models = self._models_data
+        else:
+            model_idx = self._current_scope - 1
+            target_models = [self._models_data[model_idx]] if 0 <= model_idx < len(self._models_data) else []
 
-        sorted_suggs = sorted(suggestions)
-        self.cat_editor.set_suggestions(sorted_suggs)
-        self.cat_limit_editor.set_suggestions(sorted_suggs)
+        for m in target_models:
+            mid = str(m.get("model_id") or "")
+            if mid:
+                for cat in extract_model_categories(mid):
+                    cat_sources.setdefault(cat, []).append(mid)
+
+        # Distribute suggestions and model tooltips to all 4 category editors
+        self.cat_editor.set_suggestions(cat_sources)
+        self.cat_limit_editor.set_suggestions(cat_sources)
+        self.cat_thresh_editor.set_target_suggestions(cat_sources)
+        self.cat_prefix_editor.set_key_suggestions(cat_sources)
 
     def _on_scope_changed(self, index: int) -> None:
         if self._is_loading_ui or index < 0:
@@ -352,7 +378,10 @@ class FiltersPage(QWidget):
         # 2. Switch to requested scope
         self._current_scope = index
 
-        # 3. Load target scope into UI
+        # 3. Update category suggestions strictly scoped to this target
+        self._update_category_suggestions()
+
+        # 4. Load target scope into UI
         self._load_active_scope_from_state()
 
     # endregion
