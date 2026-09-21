@@ -539,12 +539,10 @@ async def infer_files(
                                 break
 
                         if all_models_cached:
-                            if config.hydrus.add_tags:
-                                a_cfg = config.hydrus.add_tags
+                            for a_cfg in config.hydrus.add_tags:
                                 for svc_key in a_cfg.tag_service_keys:
                                     db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
-                            if config.hydrus.remove_tags:
-                                r_cfg = config.hydrus.remove_tags
+                            for r_cfg in config.hydrus.remove_tags:
                                 for svc_key in r_cfg.tag_service_keys:
                                     db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
 

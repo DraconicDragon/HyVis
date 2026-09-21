@@ -186,34 +186,31 @@ def print_confirmation(
     # Add tags
     if hydrus.add_tags and mode == "default":
         print(_c("  Additional Tags (added after successful run)", BOLD))
-        a = hydrus.add_tags
-        if a.tag_service_keys:
+        for a in hydrus.add_tags:
             names = []
             for key in a.tag_service_keys:
                 name = service_name_by_key.get(key, "(unknown service)")
                 names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-            svc = ", ".join(names)
-        else:
-            svc = _c("(global output services)", DIM)
+            svc = ", ".join(names) if names else _c("(none)", DIM)
 
-        print(f"    service  {svc}")
-        for tag in a.tags:
-            print(f"      tag    {_c(tag, GREEN)}")
+            print(f"    service  {svc}")
+            for tag in a.tags:
+                print(f"      tag    {_c(tag, GREEN)}")
         print()
 
     # Remove tags
     if hydrus.remove_tags and mode == "default":
         print(_c("  Cleanup Tags (removed after successful run)", BOLD))
-        r = hydrus.remove_tags
-        names = []
-        for key in r.tag_service_keys:
-            name = service_name_by_key.get(key, "(unknown service)")
-            names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-        svc = ", ".join(names)
+        for r in hydrus.remove_tags:
+            names = []
+            for key in r.tag_service_keys:
+                name = service_name_by_key.get(key, "(unknown service)")
+                names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+            svc = ", ".join(names) if names else _c("(none)", DIM)
 
-        print(f"    service  {svc}")
-        for tag in r.tags:
-            print(f"      tag    {_c(tag, RED)}")
+            print(f"    service  {svc}")
+            for tag in r.tags:
+                print(f"      tag    {_c(tag, RED)}")
         print()
 
     # region File / Rejected count

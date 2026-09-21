@@ -580,13 +580,13 @@ class HydrusConfig(StrictBaseModel):
         description="Hydrus tag services where inferred tags will be written.",
         json_schema_extra=field_meta(source="hydrus:tag_services"),
     )
-    add_tags: AddTagConfig | None = Field(
-        default=None,
+    add_tags: list[AddTagConfig] = Field(
+        default_factory=list,
         title="Post-Run Additional Tags",
         description="Extra tags to apply to files after all configured models have processed them successfully.",
     )
-    remove_tags: RemoveTagConfig | None = Field(
-        default=None,
+    remove_tags: list[RemoveTagConfig] = Field(
+        default_factory=list,
         title="Post-Run Cleanup Tags",
         description="Cleanup rules for removing temporary search/queue tags from Hydrus after all models succeed.",
     )
