@@ -18,11 +18,9 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import (
-    AddTagConfig,
     AppConfig,
     HydrusConfig,
     PreviewConfig,
-    RemoveTagConfig,
 )
 from hyvis.gui.widgets import (
     PageQueryListEditor,
@@ -52,8 +50,6 @@ class HydrusPage(QWidget):
     def _setup_ui(self) -> None:
         h_fields = HydrusConfig.model_fields
         prev_fields = PreviewConfig.model_fields
-        add_fields = AddTagConfig.model_fields
-        rem_fields = RemoveTagConfig.model_fields
 
         scroll = SmoothScrollArea(self)
         scroll.setWidgetResizable(True)
