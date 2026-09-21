@@ -222,6 +222,10 @@ class ModelsPage(QWidget):
 
             taggers: list[str] = []
             for mid in vibe.list_models():
+                # Hide generic timm models from the UI
+                if mid.startswith("generic-timm-"):
+                    continue
+
                 try:
                     desc = vibe.describe(mid)
                     kind = desc.output.kind
