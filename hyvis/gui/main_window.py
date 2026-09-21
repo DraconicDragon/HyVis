@@ -90,16 +90,16 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(12, 10, 12, 12)
-        root_layout.setSpacing(10)
+        root_layout.setSpacing(8)
 
         # 1. Top Global Bar (Header & Hydrus Status)
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 2)
         top_bar.setSpacing(10)
 
-        app_title = QLabel("<b>HyVis Configurator</b>", self)
-        app_title.setStyleSheet("font-size: 13px; color: #bbb;")
-        top_bar.addWidget(app_title)
+        # app_title = QLabel("<b>HyVis Configurator</b>", self)
+        # app_title.setStyleSheet("font-size: 13px; color: #bbb;")
+        # top_bar.addWidget(app_title)
 
         top_bar.addStretch()
 
@@ -121,14 +121,48 @@ class MainWindow(QMainWindow):
         divider.setStyleSheet("color: #333;")
         root_layout.addWidget(divider)
 
-        # 2. Main Body Layout (Sidebar + Stacked Pages)
+        # 2. Main Body Layout (Sidebar + Vertical Divider + Stacked Pages)
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(4)
+        # Removed top margin entirely so page content dictates its own top spacing
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(8)
 
         # Left Sidebar
         self.sidebar = QListWidget(self)
         self.sidebar.setFixedWidth(168)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        # Dynamic system accent color extraction
+        palette = self.sidebar.palette()
+        highlight_col = palette.color(palette.ColorRole.Highlight)
+        r, g, b = highlight_col.red(), highlight_col.green(), highlight_col.blue()
+        hover_rgba = f"rgba({r}, {g}, {b}, 30)"
+        selected_rgba = f"rgba({r}, {g}, {b}, 65)"
+        accent_hex = highlight_col.name()
+
+        self.sidebar.setStyleSheet(
+            "QListWidget {"
+            "  background: transparent;"
+            "  border: none;"
+            "  outline: none;"
+            "  padding-top: 6px;"  # Aligns the first item perfectly with the page content cards
+            "}"
+            "QListWidget::item {"
+            "  padding: 10px 14px;"
+            "  margin: 4px 4px 4px 0px;"  # 0px left hugs the window layout margin. 4px right + 8px spacing = 12px to vertical divider.
+            "  border-radius: 6px;"
+            "  color: #b0bec5;"
+            "}"
+            f"QListWidget::item:hover {{"
+            f"  background: {hover_rgba};"
+            f"  color: #eceff1;"
+            f"}}"
+            f"QListWidget::item:selected {{"
+            f"  background: {selected_rgba};"
+            f"  color: {accent_hex};"
+            f"  font-weight: 600;"
+            f"}}"
+        )
 
         sidebar_sections = [
             (app_fields["hydrus"].title, app_fields["hydrus"].description),
@@ -145,6 +179,13 @@ class MainWindow(QMainWindow):
             self.sidebar.addItem(item)
 
         body_layout.addWidget(self.sidebar)
+
+        # Vertical Divider between sidebar and page stack
+        v_divider = QFrame(self)
+        v_divider.setFrameShape(QFrame.Shape.VLine)
+        v_divider.setFrameShadow(QFrame.Shadow.Sunken)
+        v_divider.setStyleSheet("color: #333;")
+        body_layout.addWidget(v_divider)
 
         # Right Stacked Pages
         self.page_stack = QStackedWidget(self)
