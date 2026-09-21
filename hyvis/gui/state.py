@@ -37,7 +37,7 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
         "api_url": "http://127.0.0.1:45869",
         "api_key": "",
         "no_wait": False,
-        "tag_queries": [{"tags": ["system:untagged"]}],
+        "tag_queries": [],
         "output_tag_services": {"keys": [""]},
     },
     "inference": {
@@ -103,7 +103,7 @@ class _HydrusFetchWorker(QRunnable):
             resp = client.get_services()
             raw_services = resp.get("services", {})
 
-            all_tag_services: dict[str, str] = {}
+            all_tag_services: dict[str, Any] = {}
             writable_tag_services: dict[str, str] = {}
 
             for key, info in raw_services.items():
@@ -111,15 +111,22 @@ class _HydrusFetchWorker(QRunnable):
                 type_pretty = str(info.get("type_pretty", "")).lower()
                 stype = info.get("type")
 
-                # Tag services have 'tag' in type_pretty or type in (0, 5)
-                is_tag_domain = "tag" in type_pretty or stype in (0, 5)
+                # Tag services have 'tag' in type_pretty or type in (0, 5, 10)
+                is_tag_domain = "tag" in type_pretty or stype in (0, 5, 10)
                 if is_tag_domain:
-                    all_tag_services[key] = name
+                    # Hydrus service type 10 is 'all known tags' / combined tag domains (virtual union)
+                    is_virtual = (stype == 10) or ("combined" in type_pretty)
+
+                    all_tag_services[key] = {
+                        "name": name,
+                        "type": stype,
+                        "type_pretty": info.get("type_pretty", ""),
+                        "is_virtual": is_virtual,
+                    }
 
                     # Writable services: local tag domains (5) or tag repositories (0)
-                    # Excludes virtual read-only "all known tags"
-                    is_all_known = "all known tags" in name.lower() or stype == 10
-                    if not is_all_known:
+                    # Excludes virtual read-only "all known tags" and combined tag domains
+                    if not is_virtual:
                         writable_tag_services[key] = name
 
             self.signals.success.emit(all_tag_services, writable_tag_services, version_str)
@@ -151,7 +158,7 @@ class ConfigState(QObject):
         self._config: AppConfig | None = None
 
         # Hydrus sourcing state
-        self._tag_services: dict[str, str] = {}
+        self._tag_services: dict[str, Any] = {}
         self._writable_tag_services: dict[str, str] = {}
         self._connection_status: str = "offline"
         self._connection_info: str = "Not connected"
@@ -175,8 +182,8 @@ class ConfigState(QObject):
         return self._config
 
     @property
-    def tag_services(self) -> dict[str, str]:
-        """All tag services (including read-only services like All Known Tags)."""
+    def tag_services(self) -> dict[str, Any]:
+        """All tag services (including read-only and virtual services)."""
         return dict(self._tag_services)
 
     @property
@@ -308,7 +315,7 @@ class ConfigState(QObject):
 
     def _on_fetch_success(
         self,
-        all_tags: dict[str, str],
+        all_tags: dict[str, Any],
         writable_tags: dict[str, str],
         version_str: str,
     ) -> None:

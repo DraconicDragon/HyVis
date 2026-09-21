@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
+
 
 def setup_field_tooltip(widget: QWidget, field_info: Any) -> None:
     """Set the widget tooltip from Pydantic Field description if present."""
@@ -1079,7 +1081,7 @@ class TagQueryCard(QFrame):
     """
     A single query card mapping to one [[hydrus.tag_queries]] entry.
     Contains:
-      - Target Service dropdown (resolving friendly names, with 'All Known Tags' default).
+      - Target Service dropdown (resolving friendly names, with 'All Known Tags (virtual)' default).
       - Tag list editor (StringListEditor) that cleanly supports commas, colons, and parentheses.
     """
 
@@ -1092,7 +1094,7 @@ class TagQueryCard(QFrame):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._available_services: dict[str, str] = {}
+        self._available_services: dict[str, Any] = {}
         self._index = index
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -1156,7 +1158,7 @@ class TagQueryCard(QFrame):
         self._index = index
         self.title_label.setText(f"<b>Query #{self._index}</b>")
 
-    def set_available_services(self, services: dict[str, str]) -> None:
+    def set_available_services(self, services: dict[str, Any]) -> None:
         self._available_services = dict(services)
         current_key = self.service_combo.currentData()
         self._repopulate_services(selected_key=current_key)
@@ -1165,23 +1167,54 @@ class TagQueryCard(QFrame):
         self.service_combo.blockSignals(True)
         self.service_combo.clear()
 
-        # Virtual 'all known tags' default option (empty key)
-        self.service_combo.addItem("All Known Tags (Search All)", userData="")
+        # 1. Look up the built-in 'all known tags' service by its immutable hex key
+        all_known_info = self._available_services.get(HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY)
+        if all_known_info:
+            # Respect whatever custom name the user gave it in Hydrus
+            name = (
+                all_known_info.get("name", "All Known Tags")
+                if isinstance(all_known_info, dict)
+                else str(all_known_info)
+            )
+            short_k = f"{HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY[:8]}..."
+            display = f"{name} (virtual)  ({short_k})"
+        else:
+            # Offline fallback
+            display = "All Known Tags (virtual)"
 
-        for key, name in self._available_services.items():
-            short_key = f"{key[:8]}..." if len(key) > 12 else key
-            display = f"{name}  ({short_key})"
-            self.service_combo.addItem(display, userData=key)
+        # Index 0 is always the default search-all option (maps to empty key in HyVis config)
+        self.service_combo.addItem(display, userData="")
 
-        if selected_key:
-            idx = self.service_combo.findData(selected_key)
-            if idx >= 0:
-                self.service_combo.setCurrentIndex(idx)
+        # 2. Add all other services from Hydrus
+        for key, val in self._available_services.items():
+            # Skip the built-in service key because it is already index 0 above
+            if key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
+                continue
+
+            if isinstance(val, dict):
+                name = val.get("name", key)
+                stype = val.get("type")
+                is_virtual = bool(val.get("is_virtual", False) or stype == 10)
             else:
-                short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
-                display = f"Unknown Service  ({short_key})"
-                self.service_combo.addItem(display, userData=selected_key)
-                self.service_combo.setCurrentIndex(self.service_combo.count() - 1)
+                name = str(val)
+                is_virtual = False
+
+            virt_label = " (virtual)" if is_virtual else ""
+            short_key = f"{key[:8]}..." if len(key) > 12 else key
+            self.service_combo.addItem(f"{name}{virt_label}  ({short_key})", userData=key)
+
+        # 3. Resolve active selection
+        if selected_key:
+            if selected_key == HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY:
+                self.service_combo.setCurrentIndex(0)
+            else:
+                idx = self.service_combo.findData(selected_key)
+                if idx >= 0:
+                    self.service_combo.setCurrentIndex(idx)
+                else:
+                    short_key = f"{selected_key[:8]}..." if len(selected_key) > 12 else selected_key
+                    self.service_combo.addItem(f"Unknown Service  ({short_key})", userData=selected_key)
+                    self.service_combo.setCurrentIndex(self.service_combo.count() - 1)
         else:
             self.service_combo.setCurrentIndex(0)
 
@@ -1210,7 +1243,7 @@ class TagQueryListEditor(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cards: list[TagQueryCard] = []
-        self._available_services: dict[str, str] = {}
+        self._available_services: dict[str, Any] = {}
 
         self._root_layout = QVBoxLayout(self)
         self._root_layout.setContentsMargins(0, 0, 0, 0)
@@ -1238,7 +1271,7 @@ class TagQueryListEditor(QWidget):
 
         self._update_empty_state()
 
-    def set_available_services(self, services: dict[str, str]) -> None:
+    def set_available_services(self, services: dict[str, Any]) -> None:
         self._available_services = dict(services)
         for card in self._cards:
             card.set_available_services(services)
@@ -1279,7 +1312,7 @@ class TagQueryListEditor(QWidget):
         if tags is not None:
             card.set_query(tags, keys or [])
         else:
-            card.set_query(["system:untagged"], [])
+            card.set_query([], [])
 
         card.changed.connect(self.changed.emit)
         card.delete_requested.connect(lambda: self._on_delete_card(card))
