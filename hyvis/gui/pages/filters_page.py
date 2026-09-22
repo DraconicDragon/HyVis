@@ -393,7 +393,20 @@ class FiltersPage(QWidget):
         self._is_loading_ui = True
         try:
             self._global_filter = cfg.output_filter.model_dump(mode="json")
-            self._models_data = [m.model_dump(mode="json") for m in cfg.inference.models]
+
+            # Extract models while strictly preserving only explicitly declared output_filter overrides
+            cleaned_models: list[dict[str, Any]] = []
+            for m in cfg.inference.models:
+                m_dict = m.model_dump(mode="json")
+                if m.output_filter is not None:
+                    m_dict["output_filter"] = {
+                        k: v for k, v in m_dict["output_filter"].items() if k in m.output_filter.model_fields_set
+                    }
+                else:
+                    m_dict["output_filter"] = None
+                cleaned_models.append(m_dict)
+
+            self._models_data = cleaned_models
             self._model_draft_overrides.clear()
 
             # Pre-seed draft cache with active model overrides

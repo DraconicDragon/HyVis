@@ -326,16 +326,35 @@ class ModelsPage(QWidget):
     def load_config(self, cfg: AppConfig) -> None:
         self._is_loading_ui = True
         try:
-            self._models_data = [m.model_dump(mode="json") for m in cfg.inference.models]
+            # 1. Reset current selection index so the first model cleanly loads
+            self._current_index = -1
 
+            # 2. Extract models while strictly preserving explicitly declared overrides
+            cleaned_models: list[dict[str, Any]] = []
+            for m in cfg.inference.models:
+                m_dict = m.model_dump(mode="json")
+                if m.output_filter is not None:
+                    m_dict["output_filter"] = {
+                        k: v for k, v in m_dict["output_filter"].items() if k in m.output_filter.model_fields_set
+                    }
+                else:
+                    m_dict["output_filter"] = None
+                cleaned_models.append(m_dict)
+
+            self._models_data = cleaned_models
+
+            # 3. Repopulate sidebar model list under signal block
             self.model_list.blockSignals(True)
             self.model_list.clear()
             for m in self._models_data:
                 self.model_list.addItem(QListWidgetItem(str(m.get("model_id", "unnamed"))))
             self.model_list.blockSignals(False)
 
+            # 4. Load the first model
             if self._models_data:
+                self.model_list.blockSignals(True)
                 self.model_list.setCurrentRow(0)
+                self.model_list.blockSignals(False)
                 self._load_model_to_form(0)
         finally:
             self._is_loading_ui = False
@@ -361,6 +380,7 @@ class ModelsPage(QWidget):
         if index < 0 or index >= len(self._models_data):
             return
 
+        was_loading = self._is_loading_ui
         self._is_loading_ui = True
         try:
             self._current_index = index
@@ -395,7 +415,7 @@ class ModelsPage(QWidget):
 
             self._update_filter_status_card(m)
         finally:
-            self._is_loading_ui = False
+            self._is_loading_ui = was_loading
 
     def _save_form_to_model(self, index: int) -> None:
         if index < 0 or index >= len(self._models_data):
