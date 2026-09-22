@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
+from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.widgets import (
     SectionCard,
     SmoothScrollArea,
@@ -36,10 +37,9 @@ from hyvis.gui.widgets import (
 )
 
 
-class ModelsPage(QWidget):
+class ModelsPage(BaseConfigPage):
     """Configuration page for [[inference.models]]."""
 
-    changed = Signal()
     request_filter_scope = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:

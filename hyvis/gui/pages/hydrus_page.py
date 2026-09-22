@@ -22,6 +22,7 @@ from hyvis.config import (
     HydrusConfig,
     PreviewConfig,
 )
+from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     PageQueryListEditor,
@@ -35,10 +36,8 @@ from hyvis.gui.widgets import (
 )
 
 
-class HydrusPage(QWidget):
+class HydrusPage(BaseConfigPage):
     """Configuration page for [hydrus] connection and file targeting settings."""
-
-    changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

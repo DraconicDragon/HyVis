@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, OutputFilterConfig
+from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
@@ -60,10 +61,8 @@ def _values_differ(val1: Any, val2: Any) -> bool:
     return val1 != val2
 
 
-class FiltersPage(QWidget):
+class FiltersPage(BaseConfigPage):
     """Configuration page for [output_filter] and per-model filter overrides."""
-
-    changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

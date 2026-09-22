@@ -22,13 +22,12 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
+from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.widgets import SectionCard, SmoothScrollArea, add_form_row, bind_field_metadata, setup_field_tooltip
 
 
-class AppDbPage(QWidget):
+class AppDbPage(BaseConfigPage):
     """Configuration page for [database] and [hyvis] sections."""
-
-    changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
-from hyvis.gui.pages import AppDbPage, FiltersPage, HydrusPage, ModelsPage
+from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState
 
 
@@ -200,10 +200,16 @@ class MainWindow(QMainWindow):
         self.filters_page = FiltersPage(self)
         self.app_db_page = AppDbPage(self)
 
-        self.page_stack.addWidget(self.hydrus_page)
-        self.page_stack.addWidget(self.models_page)
-        self.page_stack.addWidget(self.filters_page)
-        self.page_stack.addWidget(self.app_db_page)
+        # Central registry of configuration pages (inheriting BaseConfigPage)
+        self.pages: list[BaseConfigPage] = [
+            self.hydrus_page,
+            self.models_page,
+            self.filters_page,
+            self.app_db_page,
+        ]
+
+        for page in self.pages:
+            self.page_stack.addWidget(page)
 
         body_layout.addWidget(self.page_stack, stretch=1)
         root_layout.addLayout(body_layout, stretch=1)
@@ -235,7 +241,7 @@ class MainWindow(QMainWindow):
 
         # Hydrus entity sourcing signals
         self.state.services_updated.connect(self._on_services_updated)
-        self.state.pages_updated.connect(self.hydrus_page.update_pages)
+        self.state.pages_updated.connect(self._on_pages_updated)
         self.state.connection_changed.connect(self._on_connection_changed)
 
         # Cross-page synchronization for per-model filters
@@ -245,39 +251,32 @@ class MainWindow(QMainWindow):
             lambda: self.models_page.update_filter_overrides(self.filters_page._models_data)
         )
 
-        # Connect page changes to central validation and dirty-tracking
-        self.hydrus_page.changed.connect(self._on_page_modified)
-        self.models_page.changed.connect(self._on_page_modified)
-        self.filters_page.changed.connect(self._on_page_modified)
-        self.app_db_page.changed.connect(self._on_page_modified)
+        # Universal page modification tracking
+        for page in self.pages:
+            page.changed.connect(self._on_page_modified)
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         """Reset pages to a clean baseline before populating the incoming configuration."""
         default_cfg = AppConfig.model_validate(_DEFAULT_CONFIG_DICT)
 
-        # 1. Baseline Reset (clears tables, lists, and draft overrides)
-        self.hydrus_page.load_config(default_cfg)
-        self.models_page.load_config(default_cfg)
-        self.filters_page.load_config(default_cfg)
-        self.app_db_page.load_config(default_cfg)
+        # 1. Baseline Reset across all pages (clears tables, lists, and draft overrides)
+        for page in self.pages:
+            page.load_config(default_cfg)
 
         # 2. Populate target configuration
         if self.state.pages:
-            self.hydrus_page.update_pages(self.state.pages)
-        self.hydrus_page.load_config(cfg)
-        self.models_page.load_config(cfg)
-        self.filters_page.load_config(cfg)
-        self.app_db_page.load_config(cfg)
+            self._on_pages_updated(self.state.pages)
+
+        for page in self.pages:
+            page.load_config(cfg)
 
         # 3. Synchronize models across dependent pages
         self.filters_page.sync_models(self.models_page._models_data)
 
     def _gather_config_dict(self) -> dict[str, Any]:
         data = self.state.config.model_dump(mode="json")
-        self.hydrus_page.apply_to_dict(data)
-        self.models_page.apply_to_dict(data)
-        self.filters_page.apply_to_dict(data)
-        self.app_db_page.apply_to_dict(data)
+        for page in self.pages:
+            page.apply_to_dict(data)
         return data
 
     def _on_request_filter_scope(self, model_index: int) -> None:
@@ -302,11 +301,13 @@ class MainWindow(QMainWindow):
         self.state.sync_hydrus_services(api_url=url, api_key=key)
 
     def _on_services_updated(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
-        """Propagate updated tag services to all dependent pages."""
-        if hasattr(self.hydrus_page, "update_services"):
-            self.hydrus_page.update_services(all_tags, writable_tags)
-        if hasattr(self.models_page, "update_services"):
-            self.models_page.update_services(all_tags, writable_tags)
+        """Propagate updated tag services to dependent pages."""
+        self.hydrus_page.update_services(all_tags, writable_tags)
+        self.models_page.update_services(all_tags, writable_tags)
+
+    def _on_pages_updated(self, pages: list[dict[str, Any]]) -> None:
+        """Propagate open Hydrus media pages to the page queries editor."""
+        self.hydrus_page.update_pages(pages)
 
     def _on_connection_changed(self, status: str, info: str) -> None:
         """Update top-bar status badge and button state based on connection health."""
