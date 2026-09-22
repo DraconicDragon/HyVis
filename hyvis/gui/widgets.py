@@ -25,6 +25,7 @@ from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSpinBox,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -97,11 +98,16 @@ def add_form_row(
     """
     Add a row to a QFormLayout, assigning field_info.description tooltip
     to BOTH the newly created QLabel and the input widget simultaneously.
+    Proactively neutralizes WheelFocus on spinboxes and comboboxes.
     """
     title = label_text or getattr(field_info, "title", None) or "Field"
     label = QLabel(f"{title}:")
     setup_field_tooltip(label, field_info)
     bind_field_metadata(widget, field_info)
+
+    if isinstance(widget, (QAbstractSpinBox, QComboBox)) and widget.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+        widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
     layout.addRow(label, widget)
     return label
 
@@ -1031,6 +1037,7 @@ class ThresholdTableEditor(QWidget):
 
             val = conf.threshold if hasattr(conf, "threshold") else conf.get("threshold", 0.40)
             spin = QDoubleSpinBox(self)
+            spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             spin.setRange(0.0, 1.0)
             spin.setSingleStep(0.05)
             spin.setDecimals(2)
@@ -1076,6 +1083,7 @@ class ThresholdTableEditor(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(""))
 
         spin = QDoubleSpinBox(self)
+        spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         spin.setRange(0.0, 1.0)
         spin.setSingleStep(0.05)
         spin.setDecimals(2)
@@ -1244,6 +1252,7 @@ class CategoryLimitEditor(QWidget):
         self.table.setCellWidget(row, 0, combo)
 
         spin = QSpinBox(self)
+        spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         spin.setRange(1, 9999)
         spin.setValue(limit)
         spin.valueChanged.connect(lambda _: self.changed.emit())
@@ -1331,6 +1340,7 @@ class TagSubsetCard(QFrame):
         limit_row.addWidget(limit_lbl)
 
         self.limit_spin = QSpinBox(self)
+        self.limit_spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.limit_spin.setRange(1, 999)
         self.limit_spin.setValue(1)
         self.limit_spin.valueChanged.connect(lambda _: self.changed.emit())
@@ -2003,23 +2013,37 @@ class PageQueryListEditor(QWidget):
 
 
 class SuggestionComboBox(QComboBox):
-    """QComboBox that notifies listeners right before showing its dropdown popup."""
+    """QComboBox that notifies listeners right before showing its dropdown popup and enforces StrongFocus."""
 
     about_to_show_popup = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Never allow mouse wheel to steal focus
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def showPopup(self) -> None:
         self.about_to_show_popup.emit()
         super().showPopup()
 
 
-# enregion
+# endregion
 
 
 # region Smooth Scrolling Area
 
 
 class SmoothScrollArea(QScrollArea):
-    """Experimental smooth scrolling area using QPropertyAnimation and Event Filters."""
+    """
+    Momentum-based smooth scrolling area with proactive Safe-Scroll filtering.
+
+    Safe-Scroll Rules:
+      1. Proactively strips WheelFocus from all child spinboxes and comboboxes,
+         preventing the mouse wheel from auto-focusing them on first touch.
+      2. Non-editable QComboBox: Wheel never cycles options; smoothly scrolls the page.
+      3. Spinboxes & Editable ComboBoxes: Wheel only changes value if explicitly clicked/focused;
+         otherwise smoothly scrolls the page.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2029,29 +2053,77 @@ class SmoothScrollArea(QScrollArea):
         self._anim.setDuration(300)  # 300ms animation duration feels snappy but smooth
         self._target_value = 0.0
 
-        # 1. Install filter on the scrollbar itself to fix instant-jumps on hover
+        # Install filter on the scrollbar itself to fix instant-jumps on hover
         self.verticalScrollBar().installEventFilter(self)
 
-        # 2. Install global application filter to monitor child widgets (tables, lists)
+        # Global event filter to intercept wheel events before delivery
         app = QApplication.instance()
         if app:
             app.installEventFilter(self)
 
+    def setWidget(self, widget: QWidget) -> None:
+        super().setWidget(widget)
+        self._neutralize_child_wheel_focus(widget)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        w = self.widget()
+        if w:
+            self._neutralize_child_wheel_focus(w)
+
+    def _neutralize_child_wheel_focus(self, container: QWidget) -> None:
+        """Strip Qt.WheelFocus from all child inputs so wheel rotation never triggers focus."""
+        for spin in container.findChildren(QAbstractSpinBox):
+            if spin.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+                spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        for combo in container.findChildren(QComboBox):
+            if combo.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+                combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.Wheel:
-            # If the user is scrolling while hovering directly over the scrollbar
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            # 1. Scrollbar hover reroute
             if obj == self.verticalScrollBar():
                 self.wheelEvent(event)  # Reroute to smooth scroll
                 return True
 
-            # If the animation is running, prevent child tables/lists from stealing the scroll
-            if (
-                self._anim.state() == QPropertyAnimation.State.Running
-                and isinstance(obj, QWidget)
-                and self.isAncestorOf(obj)
-            ):
-                self.wheelEvent(event)  # Steal the event to continue the smooth glide
-                return True
+            # 2. Only process widgets inside this scroll area
+            if isinstance(obj, QWidget) and self.isAncestorOf(obj):
+                target_input: QWidget | None = None
+                curr: QObject | None = obj
+                while curr is not None and isinstance(curr, QWidget) and self.isAncestorOf(curr):
+                    if isinstance(curr, (QAbstractSpinBox, QComboBox)):
+                        target_input = curr
+                        break
+                    curr = curr.parent()
+
+                if target_input is not None:
+                    # Ensure StrongFocus is active (never auto-focus on wheel)
+                    if target_input.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+                        target_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+                    # Non-editable ComboBox: never cycle with wheel on closed widget
+                    if isinstance(target_input, QComboBox) and not target_input.isEditable():
+                        self.wheelEvent(event)
+                        return True
+
+                    # SpinBox or Editable ComboBox: only allow if user explicitly focused it
+                    active_focus = QApplication.focusWidget()
+                    is_focused = active_focus is not None and (
+                        active_focus == target_input or target_input.isAncestorOf(active_focus)
+                    )
+
+                    if not is_focused:
+                        self.wheelEvent(event)  # Steal the event to continue the smooth glide
+                        return True
+                    else:
+                        return False
+
+                # Prevent child widgets from interrupting an active glide animation
+                if self._anim.state() == QPropertyAnimation.State.Running:
+                    self.wheelEvent(event)
+                    return True
 
         return super().eventFilter(obj, event)
 
