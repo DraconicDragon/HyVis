@@ -28,7 +28,7 @@ from hyvis.cli import get_version
 from hyvis.config import AppConfig
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.pages import AppDbPage, FiltersPage, HydrusPage, ModelsPage
-from hyvis.gui.state import ConfigState
+from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState
 
 
 class MainWindow(QMainWindow):
@@ -252,12 +252,25 @@ class MainWindow(QMainWindow):
         self.app_db_page.changed.connect(self._on_page_modified)
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
+        """Reset pages to a clean baseline before populating the incoming configuration."""
+        default_cfg = AppConfig.model_validate(_DEFAULT_CONFIG_DICT)
+
+        # 1. Baseline Reset (clears tables, lists, and draft overrides)
+        self.hydrus_page.load_config(default_cfg)
+        self.models_page.load_config(default_cfg)
+        self.filters_page.load_config(default_cfg)
+        self.app_db_page.load_config(default_cfg)
+
+        # 2. Populate target configuration
         if self.state.pages:
             self.hydrus_page.update_pages(self.state.pages)
         self.hydrus_page.load_config(cfg)
         self.models_page.load_config(cfg)
         self.filters_page.load_config(cfg)
         self.app_db_page.load_config(cfg)
+
+        # 3. Synchronize models across dependent pages
+        self.filters_page.sync_models(self.models_page._models_data)
 
     def _gather_config_dict(self) -> dict[str, Any]:
         data = self.state.config.model_dump(mode="json")
