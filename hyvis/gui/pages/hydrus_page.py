@@ -262,20 +262,20 @@ class HydrusPage(QWidget):
             # Remove Tags rules
             self.rem_tags_editor.set_rules(h.remove_tags)
 
-            # Preview
+            # Preview (disabled by default, with friendly default names pre-filled)
             if h.preview:
                 self.prev_card.setChecked(True)
-                self.prev_name_edit.setText(h.preview.page_name or "")
+                self.prev_name_edit.setText(h.preview.page_name or "hyvis preview")
                 self.prev_index_spin.setValue(h.preview.page_index if h.preview.page_index is not None else 0)
-                self.prev_rej_edit.setText(h.preview.rejected_page_name or "")
+                self.prev_rej_edit.setText(h.preview.rejected_page_name or "hyvis rejected")
                 self.prev_rej_index_spin.setValue(
                     h.preview.rejected_page_index if h.preview.rejected_page_index is not None else 0
                 )
             else:
                 self.prev_card.setChecked(False)
-                self.prev_name_edit.clear()
+                self.prev_name_edit.setText("hyvis preview")
                 self.prev_index_spin.setValue(0)
-                self.prev_rej_edit.clear()
+                self.prev_rej_edit.setText("hyvis rejected")
                 self.prev_rej_index_spin.setValue(0)
         finally:
             self._is_loading_ui = False
