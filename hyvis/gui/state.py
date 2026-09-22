@@ -36,36 +36,23 @@ _DEFAULT_CONFIG_DICT: dict[str, Any] = {
     "hydrus": {
         "api_url": "http://127.0.0.1:45869",
         "api_key": "",
-        "no_wait": False,
-        "tag_queries": [],
-        "page_queries": [],
+        "tag_queries": [
+            {
+                "tags": ["system:limit is 50"],
+                "tag_service_keys": [""],
+            }
+        ],
         "output_tag_services": {"keys": [""]},
-        "add_tags": [],
-        "remove_tags": [],
     },
     "inference": {
         "models": [
             {
                 "model_id": "wd-swinv2-v3",
-                "device": "auto",
-                "batch_size": 1,
             }
         ]
     },
-    "output_filter": {
-        "default_threshold": 0.4,
-        "prefer_tag_level_thresholds": True,
-        "output_categories": [],
-    },
-    "database": {
-        "path": "data/hyvis.db",
-        "cache_raw_predictions": True,
-        "min_cache_score": 0.01,
-    },
-    "hyvis": {
-        "log_level": "WARNING",
-        "infer_only": False,
-    },
+    # output_filter must be kept or it errors
+    "output_filter": {},
 }
 
 
