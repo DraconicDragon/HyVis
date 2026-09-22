@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hyvis.cli import get_version
 from hyvis.config import AppConfig
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.pages import AppDbPage, FiltersPage, HydrusPage, ModelsPage
@@ -97,9 +98,13 @@ class MainWindow(QMainWindow):
         top_bar.setContentsMargins(0, 0, 0, 2)
         top_bar.setSpacing(10)
 
-        # app_title = QLabel("<b>HyVis Configurator</b>", self)
-        # app_title.setStyleSheet("font-size: 13px; color: #bbb;")
-        # top_bar.addWidget(app_title)
+        app_title = QLabel(
+            f"<span style='font-size: 24px; font-weight: 650; letter-spacing: 0.5px;'>HyVis</span> "
+            f"<span style='color: #8a9ba5; font-size: 14px; font-weight: 450;'>{get_version()}</span>",
+            self,
+        )
+
+        top_bar.addWidget(app_title)
 
         top_bar.addStretch()
 
