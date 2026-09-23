@@ -248,7 +248,6 @@ class OutputTagServices(StrictBaseModel):
 
     keys: list[str] = Field(
         default_factory=list,
-        min_length=1,
         title="Destination Service Keys",
         description="A list of Hydrus tag service keys representing the destination service(s) to push tags to.",
         json_schema_extra=field_meta(source="hydrus:tag_services"),
