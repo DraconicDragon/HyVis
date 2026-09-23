@@ -4,8 +4,10 @@ main_window.py — Modern sidebar-driven desktop interface for HyVis.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
@@ -19,6 +21,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -29,6 +33,123 @@ from hyvis.config import AppConfig
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    message: str
+    page_index: int  # 0: Hydrus, 1: Models, 2: Filters, 3: AppDb
+    section_title: str
+    field_name: str | None = None
+    model_index: int | None = None
+
+
+def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
+    loc = err.get("loc", ())
+    msg = err.get("msg", "Invalid value")
+
+    top_section = str(loc[0]) if loc else ""
+    page_idx = 0
+    section_title = "General"
+    field_name = None
+    model_idx = None
+
+    if top_section == "hydrus":
+        page_idx = 0
+        section_title = "Hydrus"
+        if len(loc) > 1:
+            field_name = str(loc[1])
+            from hyvis.config import HydrusConfig
+
+            field_info = HydrusConfig.model_fields.get(field_name)
+            title = field_info.title if field_info and field_info.title else field_name
+            msg = f"{title}: {msg}"
+
+    elif top_section == "output_filter":
+        page_idx = 2
+        section_title = "Output Filter"
+        if len(loc) > 1:
+            field_name = str(loc[1])
+            from hyvis.config import OutputFilterConfig
+
+            field_info = OutputFilterConfig.model_fields.get(field_name)
+            title = field_info.title if field_info and field_info.title else field_name
+            msg = f"{title}: {msg}"
+
+    elif top_section in ("database", "hyvis"):
+        page_idx = 3
+        section_title = "Database & App"
+        if len(loc) > 1:
+            field_name = str(loc[1])
+            from hyvis.config import DatabaseConfig, HyvisConfig
+
+            fields = DatabaseConfig.model_fields if top_section == "database" else HyvisConfig.model_fields
+            field_info = fields.get(field_name)
+            title = field_info.title if field_info and field_info.title else field_name
+            msg = f"{title}: {msg}"
+
+    elif top_section == "inference":
+        if len(loc) >= 3 and str(loc[1]) == "models":
+            try:
+                model_idx = int(loc[2])
+            except (ValueError, TypeError):
+                model_idx = None
+
+            if len(loc) >= 5 and str(loc[3]) == "output_filter":
+                page_idx = 2  # Model-specific filter override
+                section_title = f"Model #{model_idx + 1} Filter" if model_idx is not None else "Model Filter"
+                field_name = str(loc[4])
+                from hyvis.config import OutputFilterConfig
+
+                field_info = OutputFilterConfig.model_fields.get(field_name)
+                title = field_info.title if field_info and field_info.title else field_name
+                msg = f"{title}: {msg}"
+            else:
+                page_idx = 1
+                section_title = f"Model #{model_idx + 1}" if model_idx is not None else "Inference Models"
+                if len(loc) >= 4:
+                    field_name = str(loc[3])
+                    from hyvis.config import ModelConfig
+
+                    field_info = ModelConfig.model_fields.get(field_name)
+                    title = field_info.title if field_info and field_info.title else field_name
+                    msg = f"{title}: {msg}"
+        else:
+            page_idx = 1
+            section_title = "Inference Models"
+
+    return ValidationIssue(
+        message=msg,
+        page_index=page_idx,
+        section_title=section_title,
+        field_name=field_name,
+        model_index=model_idx,
+    )
+
+
+def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
+    msg = rule_err
+    page_idx = 0
+    section_title = "General"
+
+    if rule_err.startswith("[hydrus]"):
+        page_idx = 0
+        section_title = "Hydrus"
+        msg = rule_err.replace("[hydrus] ", "").strip()
+    elif rule_err.startswith("[output_filter]"):
+        page_idx = 2
+        section_title = "Output Filter"
+        msg = rule_err.replace("[output_filter] ", "").strip()
+    elif rule_err.startswith("[inference]"):
+        page_idx = 1
+        section_title = "Inference Models"
+        msg = rule_err.replace("[inference] ", "").strip()
+
+    return ValidationIssue(
+        message=msg,
+        page_index=page_idx,
+        section_title=section_title,
+    )
 
 
 class MainWindow(QMainWindow):
@@ -47,7 +168,7 @@ class MainWindow(QMainWindow):
         # Initial synchronization
         self._load_config_to_pages(self.state.config)
         self._update_title()
-        self._update_validation(self.state.validate())
+        self._on_page_modified()
         self._on_connection_changed(self.state.connection_status, self.state.connection_info)
 
     def _setup_menu_bar(self) -> None:
@@ -103,7 +224,6 @@ class MainWindow(QMainWindow):
             f"<span style='color: #8a9ba5; font-size: 14px; font-weight: 450;'>{get_version()}</span>",
             self,
         )
-
         top_bar.addWidget(app_title)
 
         top_bar.addStretch()
@@ -126,18 +246,21 @@ class MainWindow(QMainWindow):
         divider.setStyleSheet("color: #333;")
         root_layout.addWidget(divider)
 
-        # 2. Main Body Layout (Sidebar + Vertical Divider + Stacked Pages)
-        body_layout = QHBoxLayout()
-        # Removed top margin entirely so page content dictates its own top spacing
+        # 2. Main Vertical Splitter (Page Body + Issues Drawer)
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical, central)
+        self.main_splitter.setChildrenCollapsible(False)
+
+        # Body container (Sidebar + Divider + Page Stack)
+        body_container = QWidget(self.main_splitter)
+        body_layout = QHBoxLayout(body_container)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(8)
 
         # Left Sidebar
-        self.sidebar = QListWidget(self)
+        self.sidebar = QListWidget(body_container)
         self.sidebar.setFixedWidth(168)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        # Dynamic system accent color extraction
         palette = self.sidebar.palette()
         highlight_col = palette.color(palette.ColorRole.Highlight)
         r, g, b = highlight_col.red(), highlight_col.green(), highlight_col.blue()
@@ -150,11 +273,11 @@ class MainWindow(QMainWindow):
             "  background: transparent;"
             "  border: none;"
             "  outline: none;"
-            "  padding-top: 6px;"  # Aligns the first item perfectly with the page content cards
+            "  padding-top: 6px;"
             "}"
             "QListWidget::item {"
             "  padding: 10px 14px;"
-            "  margin: 4px 4px 4px 0px;"  # 0px left hugs the window layout margin. 4px right + 8px spacing = 12px to vertical divider.
+            "  margin: 4px 4px 4px 0px;"
             "  border-radius: 6px;"
             "  color: #b0bec5;"
             "}"
@@ -186,14 +309,14 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.sidebar)
 
         # Vertical Divider between sidebar and page stack
-        v_divider = QFrame(self)
+        v_divider = QFrame(body_container)
         v_divider.setFrameShape(QFrame.Shape.VLine)
         v_divider.setFrameShadow(QFrame.Shadow.Sunken)
         v_divider.setStyleSheet("color: #333;")
         body_layout.addWidget(v_divider)
 
         # Right Stacked Pages
-        self.page_stack = QStackedWidget(self)
+        self.page_stack = QStackedWidget(body_container)
 
         self.hydrus_page = HydrusPage(self)
         self.models_page = ModelsPage(self)
@@ -212,14 +335,80 @@ class MainWindow(QMainWindow):
             self.page_stack.addWidget(page)
 
         body_layout.addWidget(self.page_stack, stretch=1)
-        root_layout.addLayout(body_layout, stretch=1)
+        self.main_splitter.addWidget(body_container)
 
-        # 3. Bottom Action & Status Bar
+        # 3. Resizable Issues Panel (Drawer)
+        self.issues_panel = QFrame(self.main_splitter)
+        self.issues_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        self.issues_panel.setStyleSheet(
+            "QFrame {  background: rgba(255, 255, 255, 0.015);  border-top: 1px solid rgba(255, 255, 255, 0.08);}"
+        )
+        issues_layout = QVBoxLayout(self.issues_panel)
+        issues_layout.setContentsMargins(8, 6, 8, 8)
+        issues_layout.setSpacing(6)
+
+        issues_header = QHBoxLayout()
+        # Clean, unstyled label
+        self.issues_title = QLabel("Issues (0)", self.issues_panel)
+        issues_header.addWidget(self.issues_title)
+        issues_header.addStretch(1)
+
+        close_issues_btn = QPushButton("✕", self.issues_panel)
+        close_issues_btn.setFixedWidth(24)
+        close_issues_btn.setFixedHeight(24)
+        close_issues_btn.setToolTip("Hide Issues Panel")
+        close_issues_btn.setStyleSheet(
+            "QPushButton { border: none; color: #888; font-weight: bold; border-radius: 3px; }"
+            "QPushButton:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }"
+        )
+        close_issues_btn.clicked.connect(lambda: self.issues_panel.setVisible(False))
+        issues_header.addWidget(close_issues_btn)
+        issues_layout.addLayout(issues_header)
+
+        self.issues_list = QListWidget(self.issues_panel)
+        self.issues_list.setStyleSheet(
+            "QListWidget {"
+            "  background: transparent;"
+            "  border: 1px solid rgba(255, 255, 255, 0.06);"
+            "  border-radius: 4px;"
+            "  outline: none;"  # Removes the dotted focus rect
+            "}"
+            "QListWidget::item {"
+            "  padding: 6px 10px;"
+            "  color: #ff8585;"  # Immediately visible red error text
+            "  border-bottom: 1px solid rgba(255, 255, 255, 0.03);"
+            "  border-radius: 3px;"
+            "}"
+            "QListWidget::item:hover {"
+            "  background: rgba(248, 81, 73, 0.12);"
+            "  color: #ffffff;"
+            "}"
+            "QListWidget::item:selected {"
+            "  background: rgba(248, 81, 73, 0.22);"
+            "  color: #ffffff;"
+            "}"
+        )
+        self.issues_list.itemClicked.connect(self._on_issue_selected)
+        self.issues_list.itemDoubleClicked.connect(self._on_issue_selected)
+        issues_layout.addWidget(self.issues_list)
+
+        self.main_splitter.addWidget(self.issues_panel)
+        self.issues_panel.setVisible(False)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 0)
+
+        root_layout.addWidget(self.main_splitter, stretch=1)
+
+        # 4. Bottom Action & Status Bar
         bottom_bar = QHBoxLayout()
         bottom_bar.setSpacing(10)
 
-        self.status_label = QLabel("Ready", self)
-        bottom_bar.addWidget(self.status_label, stretch=1)
+        # Native-text button without bare HTML tags
+        self.status_btn = QPushButton(self)
+        self.status_btn.setObjectName("status_btn")
+        self.status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_btn.clicked.connect(self._toggle_issues_panel)
+        bottom_bar.addWidget(self.status_btn, stretch=1)
 
         self.copy_btn = QPushButton("Copy CLI Command", self)
         self.copy_btn.clicked.connect(self._on_copy_command)
@@ -285,14 +474,115 @@ class MainWindow(QMainWindow):
         self.sidebar.setCurrentRow(2)
         self.filters_page.set_scope_by_model_index(model_index)
 
+    def _toggle_issues_panel(self) -> None:
+        """Toggle the visibility of the issues drawer."""
+        is_visible = self.issues_panel.isVisible()
+        self.issues_panel.setVisible(not is_visible)
+        if not is_visible:
+            sizes = self.main_splitter.sizes()
+            total = sum(sizes)
+            self.main_splitter.setSizes([max(total - 140, 200), 140])
+
     def _on_page_modified(self) -> None:
+        issues = self._run_validation()
+        self._update_validation_issues(issues)
+
+    def _run_validation(self) -> list[ValidationIssue]:
+        issues: list[ValidationIssue] = []
+        data = self._gather_config_dict()
+
         try:
-            data = self._gather_config_dict()
             updated_cfg = AppConfig.model_validate(data)
             self.state.update_config(updated_cfg)
+
+            # Check business rules from hyvis_validate
+            for err_str in updated_cfg.hyvis_validate():
+                issues.append(_parse_business_rule_issue(err_str))
+
+        except ValidationError as exc:
+            self.state.set_dirty(True)
+            for err in exc.errors():
+                issues.append(_parse_pydantic_error(err))
         except Exception as exc:
             self.state.set_dirty(True)
-            self._update_validation([str(exc)])
+            issues.append(
+                ValidationIssue(
+                    message=str(exc),
+                    page_index=0,
+                    section_title="Configuration",
+                )
+            )
+
+        return issues
+
+    def _update_validation(self, errors: list[str]) -> None:
+        """Adapter for state.validation_changed signal."""
+        issues = [_parse_business_rule_issue(err) for err in errors]
+        self._update_validation_issues(issues)
+
+    def _update_validation_issues(self, issues: list[ValidationIssue]) -> None:
+        self.issues_list.clear()
+        count = len(issues)
+        # Always updates the title count cleanly
+        self.issues_title.setText(f"Issues ({count})")
+
+        if count == 0:
+            self.status_btn.setText("● Configuration Valid")
+            self.status_btn.setStyleSheet(
+                "QPushButton#status_btn {"
+                "  background: transparent; border: none; text-align: left;"
+                "  padding: 4px 8px; border-radius: 4px; color: #2e7d32; font-weight: 600;"
+                "}"
+                "QPushButton#status_btn:hover { background: rgba(46, 125, 50, 0.08); }"
+            )
+            self.status_btn.setToolTip("No validation issues found")
+            self.launch_btn.setEnabled(True)
+            self.issues_panel.setVisible(False)
+        else:
+            self.status_btn.setText(f"▲ {count} Issue{'s' if count != 1 else ''} Found  (Click to toggle)")
+            self.status_btn.setStyleSheet(
+                "QPushButton#status_btn {"
+                "  background: transparent; border: none; text-align: left;"
+                "  padding: 4px 8px; border-radius: 4px; color: #f85149; font-weight: 600;"
+                "}"
+                "QPushButton#status_btn:hover { background: rgba(248, 81, 73, 0.1); }"
+            )
+            self.status_btn.setToolTip(f"{count} validation issues blocking launch. Click to toggle panel.")
+            self.launch_btn.setEnabled(False)
+
+            for issue in issues:
+                item = QListWidgetItem(f"▲ [{issue.section_title}] {issue.message}")
+                item.setData(Qt.ItemDataRole.UserRole, issue)
+                item.setToolTip(f"Click to navigate to {issue.section_title}")
+                self.issues_list.addItem(item)
+
+    def _on_issue_selected(self, item: QListWidgetItem) -> None:
+        issue: ValidationIssue | None = item.data(Qt.ItemDataRole.UserRole)
+        if not issue:
+            return
+
+        # 1. Switch to target page
+        if 0 <= issue.page_index < len(self.pages):
+            self.sidebar.setCurrentRow(issue.page_index)
+
+        # 2. Scope navigation
+        if issue.page_index == 2:  # FiltersPage
+            if issue.model_index is not None:
+                self.filters_page.set_scope_by_model_index(issue.model_index)
+            else:
+                self.filters_page.scope_combo.setCurrentIndex(0)
+        elif issue.page_index == 1 and issue.model_index is not None:  # ModelsPage
+            self.models_page.model_list.setCurrentRow(issue.model_index)
+
+        # 3. Focus & scroll to widget using Qt's native recursive findChild
+        if issue.field_name and 0 <= issue.page_index < len(self.pages):
+            target_page = self.pages[issue.page_index]
+            widget = target_page.findChild(QWidget, issue.field_name)
+            if widget:
+                widget.setFocus()
+                scroll = target_page.findChild(QScrollArea)
+                if scroll:
+                    scroll.ensureWidgetVisible(widget, 50, 50)
 
     def _on_sync_services(self) -> None:
         """Trigger background query to Hydrus using active credentials from the page."""
@@ -334,16 +624,6 @@ class MainWindow(QMainWindow):
         path_str = path.name if path else "Untitled Config"
         dirty_str = " *" if self.state.is_dirty else ""
         self.setWindowTitle(f"HyVis Configurator — {path_str}{dirty_str}")
-
-    def _update_validation(self, errors: list[str]) -> None:
-        if not errors:
-            self.status_label.setText("<span style='color: #2e7d32;'>● Configuration Valid</span>")
-            self.launch_btn.setEnabled(True)
-        else:
-            first_err = errors[0]
-            count_str = f" (+{len(errors) - 1} more)" if len(errors) > 1 else ""
-            self.status_label.setText(f"<span style='color: #d32f2f;'>▲ {first_err}{count_str}</span>")
-            self.launch_btn.setEnabled(False)
 
     def _on_new_config(self) -> None:
         if self._confirm_discard_changes():
