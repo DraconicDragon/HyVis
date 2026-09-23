@@ -144,9 +144,10 @@ class FiltersPage(BaseConfigPage):
         self.default_thresh_spin.setDecimals(2)
         self.default_thresh_spin.setValue(0.40)
         self.default_thresh_spin.valueChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(thresh_layout, of_fields["default_threshold"], self.default_thresh_spin)
+        add_form_row(thresh_layout, of_fields, "default_threshold", self.default_thresh_spin)
 
         self.prefer_tlt_chk = QCheckBox(of_fields["prefer_tag_level_thresholds"].title, self)
+        self.prefer_tlt_chk.setObjectName("prefer_tag_level_thresholds")
         self.prefer_tlt_chk.setChecked(True)
         self.prefer_tlt_chk.toggled.connect(lambda _: self._on_field_changed())
         thresh_layout.addRow("", self.prefer_tlt_chk)
@@ -157,14 +158,14 @@ class FiltersPage(BaseConfigPage):
         self.tlt_offset_spin.setDecimals(2)
         self.tlt_offset_spin.setValue(0.00)
         self.tlt_offset_spin.valueChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(thresh_layout, of_fields["tag_level_threshold_relative_offset"], self.tlt_offset_spin)
+        add_form_row(thresh_layout, of_fields, "tag_level_threshold_relative_offset", self.tlt_offset_spin)
 
         self.thresh_card.setContentLayout(thresh_layout)
         layout.addWidget(self.thresh_card)
 
         # Card 2: Output Categories (Dynamic)
         cat_title = of_fields["output_categories"].title or "Output Categories"
-        self.cat_card = SectionCard(cat_title, parent=container)
+        self.cat_card = SectionCard(cat_title, field_name="output_categories", parent=container)
         self._card_meta[self.cat_card] = (cat_title, ["output_categories"])
         self.cat_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_card, chk))
         cat_layout = QVBoxLayout()
@@ -180,7 +181,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 3: Include Tags
         inc_title = of_fields["include_tags"].title or "Include Tags"
-        self.inc_card = SectionCard(inc_title, parent=container)
+        self.inc_card = SectionCard(inc_title, field_name="include_tags", parent=container)
         self._card_meta[self.inc_card] = (inc_title, ["include_tags"])
         self.inc_card.toggled.connect(lambda chk: self._on_card_toggled(self.inc_card, chk))
         inc_layout = QVBoxLayout()
@@ -192,7 +193,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 4: Exclude Tags
         exc_title = of_fields["exclude_tags"].title or "Exclude Tags"
-        self.exc_card = SectionCard(exc_title, parent=container)
+        self.exc_card = SectionCard(exc_title, field_name="exclude_tags", parent=container)
         self._card_meta[self.exc_card] = (exc_title, ["exclude_tags"])
         self.exc_card.toggled.connect(lambda chk: self._on_card_toggled(self.exc_card, chk))
         exc_layout = QVBoxLayout()
@@ -206,7 +207,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 5: Category Threshold Overrides (Editable Category ComboBox in Col 0)
         cat_thresh_title = of_fields["category_thresholds"].title or "Category Threshold Overrides"
-        self.cat_thresh_card = SectionCard(cat_thresh_title, parent=container)
+        self.cat_thresh_card = SectionCard(cat_thresh_title, field_name="category_thresholds", parent=container)
         self._card_meta[self.cat_thresh_card] = (cat_thresh_title, ["category_thresholds"])
         self.cat_thresh_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_thresh_card, chk))
         cat_thresh_layout = QVBoxLayout()
@@ -222,7 +223,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 6: Tag Threshold Overrides
         tag_thresh_title = of_fields["tag_thresholds"].title or "Tag Threshold Overrides"
-        self.tag_thresh_card = SectionCard(tag_thresh_title, parent=container)
+        self.tag_thresh_card = SectionCard(tag_thresh_title, field_name="tag_thresholds", parent=container)
         self._card_meta[self.tag_thresh_card] = (tag_thresh_title, ["tag_thresholds"])
         self.tag_thresh_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_thresh_card, chk))
         tag_thresh_layout = QVBoxLayout()
@@ -234,7 +235,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 7: Category Tag Prefix Mapping (Editable Category ComboBox in Col 0)
         cat_pfx_title = of_fields["category_tag_prefix_mapping"].title or "Category Tag Prefix Mapping"
-        self.cat_pfx_card = SectionCard(cat_pfx_title, parent=container)
+        self.cat_pfx_card = SectionCard(cat_pfx_title, field_name="category_tag_prefix_mapping", parent=container)
         self._card_meta[self.cat_pfx_card] = (cat_pfx_title, ["category_tag_prefix_mapping"])
         self.cat_pfx_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_pfx_card, chk))
         cat_pfx_layout = QVBoxLayout()
@@ -251,7 +252,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 8: Tag Prefix Overrides
         tag_pfx_title = of_fields["tag_prefix_overrides"].title or "Tag Prefix Overrides"
-        self.tag_pfx_card = SectionCard(tag_pfx_title, parent=container)
+        self.tag_pfx_card = SectionCard(tag_pfx_title, field_name="tag_prefix_overrides", parent=container)
         self._card_meta[self.tag_pfx_card] = (tag_pfx_title, ["tag_prefix_overrides"])
         self.tag_pfx_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_pfx_card, chk))
         tag_pfx_layout = QVBoxLayout()
@@ -263,7 +264,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 9: Tag Replacements
         tag_rep_title = of_fields["tag_replacements"].title or "Tag Replacements"
-        self.tag_rep_card = SectionCard(tag_rep_title, parent=container)
+        self.tag_rep_card = SectionCard(tag_rep_title, field_name="tag_replacements", parent=container)
         self._card_meta[self.tag_rep_card] = (tag_rep_title, ["tag_replacements"])
         self.tag_rep_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_rep_card, chk))
         rep_layout = QVBoxLayout()
@@ -275,7 +276,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 10: Max Tags Per Category
         cat_lim_title = of_fields["max_tags_per_category"].title or "Max Tags Per Category"
-        self.cat_limit_card = SectionCard(cat_lim_title, parent=container)
+        self.cat_limit_card = SectionCard(cat_lim_title, field_name="max_tags_per_category", parent=container)
         self._card_meta[self.cat_limit_card] = (cat_lim_title, ["max_tags_per_category"])
         self.cat_limit_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_limit_card, chk))
         cat_limit_layout = QVBoxLayout()
@@ -287,7 +288,7 @@ class FiltersPage(BaseConfigPage):
 
         # Card 11: Joint Subset Limits (Stacked Cards avoiding comma bugs)
         subset_title = of_fields["max_tags_per_subset"].title or "Joint Subset Limits"
-        self.subset_card = SectionCard(subset_title, parent=container)
+        self.subset_card = SectionCard(subset_title, field_name="max_tags_per_subset", parent=container)
         self._card_meta[self.subset_card] = (subset_title, ["max_tags_per_subset"])
         self.subset_card.toggled.connect(lambda chk: self._on_card_toggled(self.subset_card, chk))
         subset_layout = QVBoxLayout()

@@ -76,10 +76,11 @@ class AppDbPage(BaseConfigPage):
         self.browse_db_btn.clicked.connect(self._on_browse_db)
         path_row.addWidget(self.browse_db_btn)
 
-        add_form_row(db_layout, db_fields["path"], path_box)
+        add_form_row(db_layout, db_fields, "path", path_box)
 
         # Cache raw predictions checkbox
         self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, container)
+        self.cache_raw_chk.setObjectName("cache_raw_predictions")
         setup_field_tooltip(self.cache_raw_chk, db_fields["cache_raw_predictions"])
         self.cache_raw_chk.setChecked(True)
         self.cache_raw_chk.toggled.connect(lambda _: self._on_field_changed())
@@ -92,7 +93,7 @@ class AppDbPage(BaseConfigPage):
         self.min_score_spin.setDecimals(3)
         self.min_score_spin.setValue(0.010)
         self.min_score_spin.valueChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(db_layout, db_fields["min_cache_score"], self.min_score_spin)
+        add_form_row(db_layout, db_fields, "min_cache_score", self.min_score_spin)
 
         self.db_card.setContentLayout(db_layout)
         layout.addWidget(self.db_card)
@@ -110,9 +111,10 @@ class AppDbPage(BaseConfigPage):
         self.log_level_combo = QComboBox(container)
         self.log_level_combo.addItems(["WARNING", "INFO", "DEBUG", "ERROR"])
         self.log_level_combo.currentTextChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(app_layout, hy_fields["log_level"], self.log_level_combo)
+        add_form_row(app_layout, hy_fields, "log_level", self.log_level_combo)
 
         self.infer_only_chk = QCheckBox(hy_fields["infer_only"].title, container)
+        self.infer_only_chk.setObjectName("infer_only")
         setup_field_tooltip(self.infer_only_chk, hy_fields["infer_only"])
         self.infer_only_chk.setChecked(False)
         self.infer_only_chk.toggled.connect(lambda _: self._on_field_changed())

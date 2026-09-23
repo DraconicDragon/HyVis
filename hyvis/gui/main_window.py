@@ -131,15 +131,22 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
     msg = rule_err
     page_idx = 0
     section_title = "General"
+    field_name = None
 
     if rule_err.startswith("[hydrus]"):
         page_idx = 0
         section_title = "Hydrus"
         msg = rule_err.replace("[hydrus] ", "").strip()
+        if "tag_queries" in rule_err:
+            field_name = "tag_queries"
+        elif "output_tag_services" in rule_err:
+            field_name = "output_tag_services"
     elif rule_err.startswith("[output_filter]"):
         page_idx = 2
         section_title = "Output Filter"
         msg = rule_err.replace("[output_filter] ", "").strip()
+        if "output_categories" in rule_err:
+            field_name = "output_categories"
     elif rule_err.startswith("[inference]"):
         page_idx = 1
         section_title = "Inference Models"
@@ -149,6 +156,7 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         message=msg,
         page_index=page_idx,
         section_title=section_title,
+        field_name=field_name,
     )
 
 
@@ -156,6 +164,7 @@ class MainWindow(QMainWindow):
     def __init__(self, state: ConfigState | None = None) -> None:
         super().__init__()
         self.state = state or ConfigState()
+        self._highlighted_error_widgets: set[QWidget] = set()
 
         self.setWindowTitle("HyVis Configurator")
         self.setMinimumSize(540, 374)
@@ -490,28 +499,28 @@ class MainWindow(QMainWindow):
     def _run_validation(self) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
         data = self._gather_config_dict()
+        cfg_for_business_rules: AppConfig | None = None
 
+        # 1. Pydantic schema validation
         try:
-            updated_cfg = AppConfig.model_validate(data)
-            self.state.update_config(updated_cfg)
-
-            # Check business rules from hyvis_validate
-            for err_str in updated_cfg.hyvis_validate():
-                issues.append(_parse_business_rule_issue(err_str))
-
+            cfg_for_business_rules = AppConfig.model_validate(data)
+            self.state.update_config(cfg_for_business_rules)
         except ValidationError as exc:
             self.state.set_dirty(True)
             for err in exc.errors():
                 issues.append(_parse_pydantic_error(err))
         except Exception as exc:
             self.state.set_dirty(True)
-            issues.append(
-                ValidationIssue(
-                    message=str(exc),
-                    page_index=0,
-                    section_title="Configuration",
-                )
-            )
+            issues.append(ValidationIssue(message=str(exc), page_index=0, section_title="Configuration"))
+
+        # 2. Business rules validation (runs on valid model or active state config)
+        eval_cfg = cfg_for_business_rules or self.state.config
+        if eval_cfg is not None:
+            for err_str in eval_cfg.hyvis_validate():
+                b_issue = _parse_business_rule_issue(err_str)
+                # Deduplicate if already reported
+                if not any(i.message == b_issue.message for i in issues):
+                    issues.append(b_issue)
 
         return issues
 
@@ -523,9 +532,16 @@ class MainWindow(QMainWindow):
     def _update_validation_issues(self, issues: list[ValidationIssue]) -> None:
         self.issues_list.clear()
         count = len(issues)
-        # Always updates the title count cleanly
         self.issues_title.setText(f"Issues ({count})")
 
+        # 1. Clear previous error highlights
+        from hyvis.gui.widgets import set_widget_override_state
+
+        for w in self._highlighted_error_widgets:
+            set_widget_override_state(w, is_overridden=False, is_error=False)
+        self._highlighted_error_widgets.clear()
+
+        # 2. Update status button and panel
         if count == 0:
             self.status_btn.setText("● Configuration Valid")
             self.status_btn.setStyleSheet(
@@ -556,6 +572,14 @@ class MainWindow(QMainWindow):
                 item.setToolTip(f"Click to navigate to {issue.section_title}")
                 self.issues_list.addItem(item)
 
+                # 3. Real-time red error highlight on the source widget
+                if issue.field_name and 0 <= issue.page_index < len(self.pages):
+                    target_page = self.pages[issue.page_index]
+                    w = target_page.findChild(QWidget, issue.field_name)
+                    if w:
+                        set_widget_override_state(w, is_overridden=False, is_error=True)
+                        self._highlighted_error_widgets.add(w)
+
     def _on_issue_selected(self, item: QListWidgetItem) -> None:
         issue: ValidationIssue | None = item.data(Qt.ItemDataRole.UserRole)
         if not issue:
@@ -574,7 +598,7 @@ class MainWindow(QMainWindow):
         elif issue.page_index == 1 and issue.model_index is not None:  # ModelsPage
             self.models_page.model_list.setCurrentRow(issue.model_index)
 
-        # 3. Focus & scroll to widget using Qt's native recursive findChild
+        # 3. Focus & scroll to widget
         if issue.field_name and 0 <= issue.page_index < len(self.pages):
             target_page = self.pages[issue.page_index]
             widget = target_page.findChild(QWidget, issue.field_name)
@@ -582,7 +606,7 @@ class MainWindow(QMainWindow):
                 widget.setFocus()
                 scroll = target_page.findChild(QScrollArea)
                 if scroll:
-                    scroll.ensureWidgetVisible(widget, 50, 50)
+                    scroll.ensureWidgetVisible(widget, 50, 80)
 
     def _on_sync_services(self) -> None:
         """Trigger background query to Hydrus using active credentials from the page."""

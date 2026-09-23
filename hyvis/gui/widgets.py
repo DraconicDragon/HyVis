@@ -74,12 +74,16 @@ def bind_field_metadata(widget: QWidget, field_info: Any, set_placeholder: bool 
 
 
 def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bool = False) -> None:
-    """Apply or clear visual override/error highlighting on an input widget or table/list."""
+    """Apply or clear visual override/error highlighting on an input widget, card, or table/list."""
     target = widget
     if hasattr(widget, "list_widget"):
         target = widget.list_widget
     elif hasattr(widget, "table"):
         target = widget.table
+
+    if isinstance(target, SectionCard):
+        target.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
+        return
 
     if is_error:
         target.setStyleSheet(STYLE_ERROR)
@@ -91,24 +95,42 @@ def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bo
 
 def add_form_row(
     layout: QFormLayout,
-    field_info: Any,
-    widget: QWidget,
+    fields_or_info: Any,
+    field_name_or_widget: str | QWidget,
+    widget: QWidget | None = None,
     label_text: str | None = None,
 ) -> QLabel:
     """
     Add a row to a QFormLayout, assigning field_info.description tooltip
     to BOTH the newly created QLabel and the input widget simultaneously.
-    Proactively neutralizes WheelFocus on spinboxes and comboboxes.
+    Automatically assigns widget.setObjectName(field_name) when field_name is passed.
     """
+    if isinstance(field_name_or_widget, str):
+        field_name = field_name_or_widget
+        field_info = fields_or_info[field_name]
+        target_widget = widget
+    else:
+        field_name = None
+        field_info = fields_or_info
+        target_widget = field_name_or_widget
+
+    assert target_widget is not None
+
+    if field_name:
+        target_widget.setObjectName(field_name)
+
     title = label_text or getattr(field_info, "title", None) or "Field"
     label = QLabel(f"{title}:")
     setup_field_tooltip(label, field_info)
-    bind_field_metadata(widget, field_info)
+    bind_field_metadata(target_widget, field_info)
 
-    if isinstance(widget, (QAbstractSpinBox, QComboBox)) and widget.focusPolicy() == Qt.FocusPolicy.WheelFocus:
-        widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    if (
+        isinstance(target_widget, (QAbstractSpinBox, QComboBox))
+        and target_widget.focusPolicy() == Qt.FocusPolicy.WheelFocus
+    ):
+        target_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    layout.addRow(label, widget)
+    layout.addRow(label, target_widget)
     return label
 
 
@@ -131,11 +153,15 @@ class SectionCard(QFrame):
         self,
         title: str = "",
         tooltip: str = "",
+        field_name: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._title = title
         self._is_checkable = False
+
+        if field_name:
+            self.setObjectName(field_name)
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setStyleSheet(
@@ -186,6 +212,33 @@ class SectionCard(QFrame):
     @property
     def content_layout(self) -> QVBoxLayout:
         return self._content_layout
+
+    def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
+        """Apply error or override border highlight without destroying card geometry."""
+        if is_error:
+            self.setStyleSheet(
+                "SectionCard {"
+                "  border: 1.5px solid #f85149;"
+                "  border-radius: 6px;"
+                "  background: rgba(248, 81, 73, 0.08);"
+                "}"
+            )
+        elif is_overridden:
+            self.setStyleSheet(
+                "SectionCard {"
+                "  border: 1.5px solid #38bdf8;"
+                "  border-radius: 6px;"
+                "  background: rgba(56, 189, 248, 0.08);"
+                "}"
+            )
+        else:
+            self.setStyleSheet(
+                "SectionCard {"
+                "  border: 1px solid rgba(255, 255, 255, 0.10);"
+                "  border-radius: 6px;"
+                "  background: rgba(255, 255, 255, 0.015);"
+                "}"
+            )
 
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""

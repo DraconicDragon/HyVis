@@ -109,7 +109,7 @@ class ModelsPage(BaseConfigPage):
         self.model_id_combo.setEditable(True)
         self._populate_available_models()
         self.model_id_combo.currentTextChanged.connect(self._on_model_id_changed)
-        add_form_row(param_layout, m_fields["model_id"], self.model_id_combo)
+        add_form_row(param_layout, m_fields, "model_id", self.model_id_combo)
 
         # Source
         source_box = QWidget(self)
@@ -128,44 +128,40 @@ class ModelsPage(BaseConfigPage):
         self.browse_src_btn.clicked.connect(self._on_browse_source)
         source_row.addWidget(self.browse_src_btn)
 
-        add_form_row(param_layout, m_fields["source"], source_box)
+        add_form_row(param_layout, m_fields, "source", source_box)
 
         # Device
         self.device_combo = QComboBox(self)
         self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
         self.device_combo.setEditable(True)
         self.device_combo.currentTextChanged.connect(self._on_device_changed)
-        add_form_row(param_layout, m_fields["device"], self.device_combo)
+        add_form_row(param_layout, m_fields, "device", self.device_combo)
 
         # Backend
         self.backend_combo = QComboBox(self)
         self.backend_combo.addItems(["auto", "pytorch", "onnx"])
         self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
-        add_form_row(param_layout, m_fields["backend"], self.backend_combo)
+        add_form_row(param_layout, m_fields, "backend", self.backend_combo)
 
         # Precision
         self.precision_combo = QComboBox(self)
         self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
         self.precision_combo.currentTextChanged.connect(self._on_field_changed)
-        add_form_row(param_layout, m_fields["precision"], self.precision_combo)
+        add_form_row(param_layout, m_fields, "precision", self.precision_combo)
 
         # Batch Size
         self.batch_spin = QSpinBox(self)
         self.batch_spin.setRange(1, 128)
         self.batch_spin.setValue(1)
         self.batch_spin.valueChanged.connect(self._on_field_changed)
-        add_form_row(param_layout, m_fields["batch_size"], self.batch_spin)
+        add_form_row(param_layout, m_fields, "batch_size", self.batch_spin)
 
         self.param_card.setContentLayout(param_layout)
         self.form_layout.addWidget(self.param_card)
 
         # Card 2: Model Output Services Override (Checkable)
         svc_title = m_fields["output_tag_services"].title or "Destination Tag Services"
-        self.svc_card = SectionCard(
-            title=svc_title,
-            tooltip=m_fields["output_tag_services"].description or "",
-            parent=right_container,
-        )
+        self.svc_card = SectionCard(title=svc_title, field_name="output_tag_services", parent=right_container)
         self.svc_card.setCheckable(True)
         self.svc_card.setChecked(False)
         self.svc_card.toggled.connect(self._on_svc_card_toggled)

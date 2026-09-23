@@ -54,8 +54,8 @@ SEMANTIC_CARD_COLORS: dict[CardTheme, ThemeColors] = {
 }
 
 # Centralized status and override highlights
-STYLE_OVERRIDDEN = "border: 1.5px solid #38bdf8 !important; background-color: rgba(56, 189, 248, 0.08) !important;"
-STYLE_ERROR = "border: 1.5px solid #f85149 !important; background-color: rgba(248, 81, 73, 0.08) !important;"
+STYLE_OVERRIDDEN = "border: 1.5px solid #38bdf8; background-color: rgba(56, 189, 248, 0.08);"
+STYLE_ERROR = "border: 1.5px solid #f85149; background-color: rgba(248, 81, 73, 0.08);"
 
 
 def get_card_stylesheet(theme: CardTheme, class_name: str = "QFrame") -> str:

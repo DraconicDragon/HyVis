@@ -71,15 +71,16 @@ class HydrusPage(BaseConfigPage):
 
         self.api_url_edit = QLineEdit(self)
         self.api_url_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(conn_layout, h_fields["api_url"], self.api_url_edit)
+        add_form_row(conn_layout, h_fields, "api_url", self.api_url_edit)
 
         self.api_key_edit = QLineEdit(self)
         self.api_key_edit.setPlaceholderText("Paste your Hydrus API key here")
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
         self.api_key_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(conn_layout, h_fields["api_key"], self.api_key_edit)
+        add_form_row(conn_layout, h_fields, "api_key", self.api_key_edit)
 
         self.no_wait_chk = QCheckBox(h_fields["no_wait"].title, self)
+        self.no_wait_chk.setObjectName("no_wait")
         setup_field_tooltip(self.no_wait_chk, h_fields["no_wait"])
         self.no_wait_chk.toggled.connect(lambda _: self._on_field_changed())
         conn_layout.addRow("", self.no_wait_chk)
@@ -89,11 +90,7 @@ class HydrusPage(BaseConfigPage):
 
         # 2. Output Tag Services (Global) Card
         out_title = h_fields["output_tag_services"].title or "Destination Tag Services (Global)"
-        self.output_card = SectionCard(
-            title=out_title,
-            tooltip=h_fields["output_tag_services"].description or "",
-            parent=container,
-        )
+        self.output_card = SectionCard(title=out_title, field_name="output_tag_services", parent=container)
         output_layout = QVBoxLayout()
         self.output_services_editor = TagServiceListEditor(writable_only=True, parent=self)
         self.output_services_editor.changed.connect(self._on_field_changed)
@@ -104,11 +101,7 @@ class HydrusPage(BaseConfigPage):
 
         # 3. Tag Queries Card (Stacked Query Cards)
         tag_q_title = h_fields["tag_queries"].title or "Tag Queries"
-        self.tag_q_card = SectionCard(
-            title=tag_q_title,
-            tooltip=h_fields["tag_queries"].description or "",
-            parent=container,
-        )
+        self.tag_q_card = SectionCard(title=tag_q_title, field_name="tag_queries", parent=container)
         tag_q_layout = QVBoxLayout()
         self.tag_queries_editor = TagQueryListEditor(parent=self)
         self.tag_queries_editor.changed.connect(self._on_field_changed)
@@ -119,11 +112,7 @@ class HydrusPage(BaseConfigPage):
 
         # 4. Page Queries Card (Stacked Live Page Selector)
         page_q_title = h_fields["page_queries"].title or "Page Queries"
-        self.page_q_card = SectionCard(
-            title=page_q_title,
-            tooltip=h_fields["page_queries"].description or "",
-            parent=container,
-        )
+        self.page_q_card = SectionCard(title=page_q_title, field_name="page_queries", parent=container)
         page_q_layout = QVBoxLayout()
         self.page_queries_editor = PageQueryListEditor(parent=self)
         self.page_queries_editor.changed.connect(self._on_field_changed)
@@ -134,11 +123,7 @@ class HydrusPage(BaseConfigPage):
 
         # 5. Additional Post-Run Tags Card (Stacked Multi-Rule Editor)
         add_title = h_fields["add_tags"].title or "Post-Run Additional Tags"
-        self.add_tags_card = SectionCard(
-            title=add_title,
-            tooltip=h_fields["add_tags"].description or "",
-            parent=container,
-        )
+        self.add_tags_card = SectionCard(title=add_title, field_name="add_tags", parent=container)
         add_layout = QVBoxLayout()
         self.add_tags_editor = TagRuleListEditor(
             title_prefix="Add Rule",
@@ -157,11 +142,7 @@ class HydrusPage(BaseConfigPage):
 
         # 6. Cleanup Tags Card (Stacked Multi-Rule Editor)
         rem_title = h_fields["remove_tags"].title or "Post-Run Cleanup Tags"
-        self.rem_tags_card = SectionCard(
-            title=rem_title,
-            tooltip=h_fields["remove_tags"].description or "",
-            parent=container,
-        )
+        self.rem_tags_card = SectionCard(title=rem_title, field_name="remove_tags", parent=container)
         rem_layout = QVBoxLayout()
         self.rem_tags_editor = TagRuleListEditor(
             title_prefix="Remove Rule",
