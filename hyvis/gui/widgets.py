@@ -2194,7 +2194,7 @@ class SmoothScrollArea(QScrollArea):
 
         # Each notch (120 delta) scrolls a certain amount.
         # Tuning: vbar.singleStep() * 3.5 is roughly standard OS scroll speed.
-        step = vbar.singleStep() * 3.5 * (delta / 120.0)
+        step = vbar.singleStep() * 5.25 * (delta / 120.0)
 
         self._target_value -= step
         self._target_value = max(vbar.minimum(), min(self._target_value, vbar.maximum()))
