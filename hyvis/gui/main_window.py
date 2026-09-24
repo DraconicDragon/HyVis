@@ -401,7 +401,6 @@ class MainWindow(QMainWindow):
         self.issues_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.issues_list.customContextMenuRequested.connect(self._on_issues_context_menu)
         self.issues_list.itemClicked.connect(self._on_issue_selected)
-        self.issues_list.itemDoubleClicked.connect(self._on_issue_selected)
         issues_layout.addWidget(self.issues_list)
 
         self.main_splitter.addWidget(self.issues_panel)
