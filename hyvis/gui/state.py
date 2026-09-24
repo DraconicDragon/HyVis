@@ -274,11 +274,14 @@ class ConfigState(QObject):
         self.config_loaded.emit(self._config)
         self.validate()
 
-    def load_from_file(self, path: Path | str) -> bool:
-        """Parse and load a TOML configuration file."""
+    def load_from_file(self, path: Path | str) -> tuple[bool, str | None]:
+        """
+        Parse and load a TOML configuration file with resilient schema tolerance.
+        Returns: (success: bool, error_message: str | None)
+        """
         file_path = Path(path).resolve()
         try:
-            loaded = AppConfig.from_file(file_path)
+            loaded = AppConfig.from_file(file_path, exit_on_error=False, lenient=True)
             self._config = loaded
             self._current_path = file_path
             self.set_dirty(False)
@@ -290,10 +293,27 @@ class ConfigState(QObject):
             if loaded.hydrus.api_url and loaded.hydrus.api_key:
                 self.sync_hydrus_services(loaded.hydrus.api_url, loaded.hydrus.api_key)
 
-            return True
+            return True, None
         except Exception as exc:
             logger.error("Failed to load config '%s': %s", file_path, exc)
-            return False
+            return False, str(exc)
+
+    def validate(self) -> list[str]:
+        """Run full Pydantic and business validation and emit validation status."""
+        errors: list[str] = []
+        if self._config is None:
+            errors.append("No configuration loaded.")
+        else:
+            try:
+                # Force Pydantic re-validation of the current state
+                dumped = self._config.model_dump(mode="json", exclude_none=True)
+                clean_cfg = AppConfig.model_validate(dumped)
+                errors.extend(clean_cfg.hyvis_validate())
+            except Exception as exc:
+                errors.append(str(exc))
+
+        self.validation_changed.emit(errors)
+        return errors
 
     def save_to_file(
         self,

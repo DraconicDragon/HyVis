@@ -49,7 +49,9 @@ def run_gui(initial_config: Path | str | None = None) -> int:
 
     state = ConfigState()
     if initial_config:
-        state.load_from_file(initial_config)
+        ok, err = state.load_from_file(initial_config)
+        if not ok and err:
+            print(f"Warning: Could not open '{initial_config}': {err}", file=sys.stderr)
 
     window = MainWindow(state)
     window.show()

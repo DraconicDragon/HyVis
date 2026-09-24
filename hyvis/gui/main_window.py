@@ -5,6 +5,7 @@ main_window.py — Modern sidebar-driven desktop interface for HyVis.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -178,7 +179,6 @@ class MainWindow(QMainWindow):
         # Initial synchronization
         self._load_config_to_pages(self.state.config)
         self._update_title()
-        self._on_page_modified()
         self._on_connection_changed(self.state.connection_status, self.state.connection_info)
 
     def _setup_menu_bar(self) -> None:
@@ -436,7 +436,6 @@ class MainWindow(QMainWindow):
         self.sidebar.currentRowChanged.connect(self.page_stack.setCurrentIndex)
         self.state.dirty_changed.connect(lambda _: self._update_title())
         self.state.config_saved.connect(lambda _: self._update_title())
-        self.state.validation_changed.connect(self._update_validation)
         self.state.config_loaded.connect(self._load_config_to_pages)
 
         # Hydrus entity sourcing signals
@@ -473,6 +472,13 @@ class MainWindow(QMainWindow):
         # 3. Synchronize models across dependent pages
         self.filters_page.sync_models(self.models_page._models_data)
 
+        # 4. Run a full validation pass to instantly highlight Pydantic/Schema errors from lenient loads.
+        # We restore the dirty flag immediately so opening a file doesn't instantly mark it as unsaved.
+        was_dirty = self.state.is_dirty
+        issues = self._run_validation()
+        self._update_validation_issues(issues)
+        self.state.set_dirty(was_dirty)
+
     def _gather_config_dict(self) -> dict[str, Any]:
         data = self.state.config.model_dump(mode="json")
         for page in self.pages:
@@ -499,6 +505,8 @@ class MainWindow(QMainWindow):
         self._update_validation_issues(issues)
 
     def _run_validation(self) -> list[ValidationIssue]:
+        from hyvis.config import construct_lenient
+
         issues: list[ValidationIssue] = []
         data = self._gather_config_dict()
         cfg_for_business_rules: AppConfig | None = None
@@ -511,25 +519,23 @@ class MainWindow(QMainWindow):
             self.state.set_dirty(True)
             for err in exc.errors():
                 issues.append(_parse_pydantic_error(err))
+
+            # Build a lenient config so we can STILL check business rules
+            # against the user's current WIP data even if schema validation failed!
+            cfg_for_business_rules = construct_lenient(AppConfig, data)
         except Exception as exc:
             self.state.set_dirty(True)
             issues.append(ValidationIssue(message=str(exc), page_index=0, section_title="Configuration"))
 
-        # 2. Business rules validation (runs on valid model or active state config)
-        eval_cfg = cfg_for_business_rules or self.state.config
-        if eval_cfg is not None:
-            for err_str in eval_cfg.hyvis_validate():
+        # 2. Business rules validation (runs on valid model or lenient fallback)
+        if cfg_for_business_rules is not None:
+            for err_str in cfg_for_business_rules.hyvis_validate():
                 b_issue = _parse_business_rule_issue(err_str)
                 # Deduplicate if already reported
                 if not any(i.message == b_issue.message for i in issues):
                     issues.append(b_issue)
 
         return issues
-
-    def _update_validation(self, errors: list[str]) -> None:
-        """Adapter for state.validation_changed signal."""
-        issues = [_parse_business_rule_issue(err) for err in errors]
-        self._update_validation_issues(issues)
 
     def _update_validation_issues(self, issues: list[ValidationIssue]) -> None:
         self.issues_list.clear()
@@ -567,6 +573,7 @@ class MainWindow(QMainWindow):
             )
             self.status_btn.setToolTip(f"{count} validation issues blocking launch. Click to toggle panel.")
             self.launch_btn.setEnabled(False)
+            # self.issues_panel.setVisible(True)  # Auto-expand drawer on issues detected
 
             for issue in issues:
                 item = QListWidgetItem(f"▲ [{issue.section_title}] {issue.message}")
@@ -628,8 +635,6 @@ class MainWindow(QMainWindow):
             clean_text = item.text().lstrip("▲ ").strip()
             QApplication.clipboard().setText(clean_text)
 
-
-
     def _on_sync_services(self) -> None:
         """Trigger background query to Hydrus using active credentials from the page."""
         url = self.hydrus_page.api_url_edit.text().strip()
@@ -682,7 +687,13 @@ class MainWindow(QMainWindow):
             self, "Open HyVis TOML Configuration", "", "TOML Files (*.toml);;All Files (*)"
         )
         if file_path:
-            self.state.load_from_file(file_path)
+            ok, err = self.state.load_from_file(file_path)
+            if not ok and err:
+                QMessageBox.critical(
+                    self,
+                    "Failed to Open Configuration",
+                    f"Could not read or parse '{Path(file_path).name}':\n\n{err}",
+                )
 
     def _on_save_config(self) -> bool:
         if self.state.current_path is None:
