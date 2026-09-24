@@ -17,12 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 def _prune_none(obj: Any) -> Any:
-    """Recursively prune None values from dictionaries and collections since TOML does not support null."""
+    """
+    Recursively prune None values and empty sub-tables from dictionaries.
+    Ensures empty mappings don't emit dangling [section.table] headers in TOML.
+    """
     if isinstance(obj, dict):
         cleaned: dict[str, Any] = {}
         for k, v in obj.items():
             if v is not None:
                 pruned = _prune_none(v)
+                # Prune empty sub-dictionaries (except required root sections)
+                if isinstance(pruned, dict) and not pruned and k not in ("hydrus", "inference"):
+                    continue
                 if pruned is not None:
                     cleaned[k] = pruned
         return cleaned
