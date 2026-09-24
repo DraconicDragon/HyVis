@@ -561,12 +561,12 @@ class FiltersPage(BaseConfigPage):
                 if self.subset_card.isChecked():
                     draft["max_tags_per_subset"] = self.subset_editor.get_subsets()
 
-                # Build final overrides dict containing only checked keys
+                # Build final overrides dict containing only checked keys that genuinely diverge from global
                 active_overrides: dict[str, Any] = {}
                 for card, (_, keys) in self._card_meta.items():
                     if card.isChecked():
                         for k in keys:
-                            if k in draft:
+                            if k in draft and _values_differ(draft[k], self._global_filter.get(k)):
                                 active_overrides[k] = draft[k]
 
                 m["output_filter"] = active_overrides if active_overrides else None
