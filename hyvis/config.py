@@ -699,13 +699,15 @@ class AppConfig(StrictBaseModel):
     # region Factory
 
     @classmethod
-    def from_file(cls, path: Path) -> AppConfig:
+    def from_file(cls, path: Path, *, exit_on_error: bool = True) -> AppConfig:
         try:
             with path.open("rb") as fh:
                 raw: dict[str, Any] = tomllib.load(fh)
             return cls.model_validate(raw)
         except ValidationError as e:
-            raise SystemExit(_format_validation_error(e, path)) from None
+            if exit_on_error:
+                raise SystemExit(_format_validation_error(e, path)) from None
+            raise
 
     @classmethod
     def from_toml_string(cls, toml_str: str) -> AppConfig:
