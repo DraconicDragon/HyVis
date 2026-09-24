@@ -150,6 +150,57 @@ def _format_validation_error(e: ValidationError, path: Path | str) -> str:
     return "\n".join(lines).rstrip()
 
 
+# region Lenient Construction Helper
+
+
+def construct_lenient(model_cls: type[BaseModel], data: Any) -> Any:
+    """
+    Construct a BaseModel instance leniently for GUI resilience.
+    Validates valid fields strictly; falls back to model_construct() for invalid fields
+    so work-in-progress or broken configuration files can be inspected and fixed in the UI.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    try:
+        return model_cls.model_validate(data)
+    except ValidationError:
+        pass
+
+    from pydantic_core import PydanticUndefined
+
+    fields_data: dict[str, Any] = {}
+    for field_name, field_info in model_cls.model_fields.items():
+        if field_name not in data:
+            if field_info.default is not PydanticUndefined:
+                fields_data[field_name] = field_info.default
+            elif field_info.default_factory is not None:
+                fields_data[field_name] = field_info.default_factory()
+            else:
+                fields_data[field_name] = None
+            continue
+
+        val = data[field_name]
+        annotation = field_info.annotation
+        target_cls = _extract_model_cls(annotation)
+
+        if target_cls is not None and issubclass(target_cls, BaseModel):
+            if isinstance(val, dict):
+                fields_data[field_name] = construct_lenient(target_cls, val)
+            elif isinstance(val, list):
+                fields_data[field_name] = [
+                    construct_lenient(target_cls, item) if isinstance(item, dict) else item for item in val
+                ]
+            else:
+                fields_data[field_name] = val
+        else:
+            fields_data[field_name] = val
+
+    return model_cls.model_construct(_fields_set=set(data.keys()), **fields_data)
+
+
+# endregion
+
 # region Config Models
 
 
@@ -699,12 +750,26 @@ class AppConfig(StrictBaseModel):
     # region Factory
 
     @classmethod
-    def from_file(cls, path: Path, *, exit_on_error: bool = True) -> AppConfig:
+    def from_file(
+        cls,
+        path: Path,
+        *,
+        exit_on_error: bool = True,
+        lenient: bool = False,
+    ) -> AppConfig:
         try:
             with path.open("rb") as fh:
                 raw: dict[str, Any] = tomllib.load(fh)
+        except Exception as exc:
+            if exit_on_error:
+                raise SystemExit(f"Failed to read TOML file {path}: {exc}") from None
+            raise
+
+        try:
             return cls.model_validate(raw)
         except ValidationError as e:
+            if lenient:
+                return construct_lenient(cls, raw)
             if exit_on_error:
                 raise SystemExit(_format_validation_error(e, path)) from None
             raise
