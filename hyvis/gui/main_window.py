@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -397,6 +398,8 @@ class MainWindow(QMainWindow):
             "  color: #ffffff;"
             "}"
         )
+        self.issues_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.issues_list.customContextMenuRequested.connect(self._on_issues_context_menu)
         self.issues_list.itemClicked.connect(self._on_issue_selected)
         self.issues_list.itemDoubleClicked.connect(self._on_issue_selected)
         issues_layout.addWidget(self.issues_list)
@@ -607,6 +610,26 @@ class MainWindow(QMainWindow):
                 scroll = target_page.findChild(QScrollArea)
                 if scroll:
                     scroll.ensureWidgetVisible(widget, 50, 80)
+
+    def _on_issues_context_menu(self, pos: QPoint) -> None:
+        """Display right-click context menu to copy issue details."""
+        item = self.issues_list.itemAt(pos)
+        if not item:
+            return
+
+        issue: ValidationIssue | None = item.data(Qt.ItemDataRole.UserRole)
+        if not issue:
+            return
+
+        menu = QMenu(self)
+        copy_msg_action = menu.addAction("Copy Message")
+
+        action = menu.exec(self.issues_list.mapToGlobal(pos))
+        if action == copy_msg_action:
+            clean_text = item.text().lstrip("▲ ").strip()
+            QApplication.clipboard().setText(clean_text)
+
+
 
     def _on_sync_services(self) -> None:
         """Trigger background query to Hydrus using active credentials from the page."""
