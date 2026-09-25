@@ -5,6 +5,7 @@ app.py — Desktop GUI entry point for HyVis.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -26,6 +27,11 @@ def parse_gui_args() -> argparse.Namespace:
 
 def run_gui(initial_config: Path | str | None = None) -> int:
     """Initialize and run the desktop PySide6 application."""
+
+    # On Linux/BSD, tell Qt to use the modern native system file chooser via XDG Desktop Portal
+    if sys.platform.startswith("linux") or "bsd" in sys.platform:
+        os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
+
     try:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
