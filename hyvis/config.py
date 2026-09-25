@@ -817,6 +817,17 @@ class AppConfig(StrictBaseModel):
                 "No tags will ever be emitted under this configuration."
             )
 
+        # Check per-model overrides for dead emission paths
+        for idx, model_cfg in enumerate(self.inference.models):
+            if model_cfg.output_filter is not None:
+                eff_of = self.resolved_output_filter(model_cfg)
+                if eff_of.allowed_categories is not None and not eff_of.allowed_categories and not eff_of.include_tags:
+                    errors.append(
+                        f"[inference.models.{idx}.output_filter] Model #{idx + 1} ('{model_cfg.model_id}'): "
+                        "'allowed_categories' is set to an empty list [] and 'include_tags' is empty. "
+                        "No tags will ever be emitted for this model."
+                    )
+
         return errors
 
 

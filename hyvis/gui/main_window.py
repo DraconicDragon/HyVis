@@ -134,6 +134,7 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
     page_idx = 0
     section_title = "General"
     field_name = None
+    model_idx = None
 
     if rule_err.startswith("[hydrus]"):
         page_idx = 0
@@ -149,6 +150,18 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         msg = rule_err.replace("[output_filter] ", "").strip()
         if "allowed_categories" in rule_err:
             field_name = "allowed_categories"
+    elif rule_err.startswith("[inference.models.") and ".output_filter]" in rule_err:
+        page_idx = 2  # FiltersPage
+        try:
+            prefix = rule_err[len("[inference.models.") : rule_err.index(".output_filter]")]
+            model_idx = int(prefix)
+            section_title = f"Model #{model_idx + 1} Filter"
+        except Exception:
+            section_title = "Model Filter"
+        tag_end = rule_err.index("]") + 1
+        msg = rule_err[tag_end:].strip()
+        if "allowed_categories" in rule_err:
+            field_name = "allowed_categories"
     elif rule_err.startswith("[inference]"):
         page_idx = 1
         section_title = "Inference Models"
@@ -159,6 +172,7 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         page_index=page_idx,
         section_title=section_title,
         field_name=field_name,
+        model_index=model_idx,
     )
 
 
@@ -588,6 +602,13 @@ class MainWindow(QMainWindow):
                 # 3. Real-time red error highlight on the source widget
                 if issue.field_name and 0 <= issue.page_index < len(self.pages):
                     target_page = self.pages[issue.page_index]
+
+                    # For FiltersPage, only highlight if the issue matches the actively displayed scope
+                    if isinstance(target_page, FiltersPage):
+                        active_model_idx = target_page._current_scope - 1 if target_page._current_scope > 0 else None
+                        if issue.model_index != active_model_idx:
+                            continue
+
                     w = target_page.findChild(QWidget, issue.field_name)
                     if w:
                         set_widget_override_state(w, is_overridden=False, is_error=True)

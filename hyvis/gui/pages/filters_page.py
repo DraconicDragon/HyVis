@@ -386,6 +386,9 @@ class FiltersPage(BaseConfigPage):
         # 4. Load target scope into UI
         self._load_active_scope_from_state()
 
+        # 5. Notify window to update scope-aware error highlights
+        self.changed.emit()
+
     # endregion
 
     # region Data Loading & Saving
