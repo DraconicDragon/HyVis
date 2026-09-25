@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.state = state or ConfigState()
         self._highlighted_error_widgets: set[QWidget] = set()
+        self._manual_connect_requested: bool = False
 
         self.setWindowTitle("HyVis Configurator")
         self.setMinimumSize(540, 374)
@@ -239,11 +240,14 @@ class MainWindow(QMainWindow):
         top_bar.addStretch()
 
         self.conn_indicator = QLabel(self)
-        self.conn_indicator.setText("<span style='color: #888;'>○ Offline</span>")
+        self.conn_indicator.setText("<span style='color: #d4a359; font-weight: 600;'>○ Hydrus Offline</span>")
+        self.conn_indicator.setToolTip(
+            "Hydrus Client API is not connected.\nClick 'Connect' to fetch live tag services and open tabs."
+        )
         top_bar.addWidget(self.conn_indicator)
 
-        self.sync_services_btn = QPushButton("⟳ Sync Services", self)
-        self.sync_services_btn.setToolTip("Connect to Hydrus API and refresh available tag services")
+        self.sync_services_btn = QPushButton("Connect", self)
+        self.sync_services_btn.setToolTip("Connect to Hydrus Client API and fetch tag services")
         self.sync_services_btn.clicked.connect(self._on_sync_services)
         top_bar.addWidget(self.sync_services_btn)
 
@@ -636,9 +640,19 @@ class MainWindow(QMainWindow):
             QApplication.clipboard().setText(clean_text)
 
     def _on_sync_services(self) -> None:
-        """Trigger background query to Hydrus using active credentials from the page."""
+        """Trigger connection query to Hydrus using active credentials from the page."""
         url = self.hydrus_page.api_url_edit.text().strip()
         key = self.hydrus_page.api_key_edit.text().strip()
+
+        if not url or not key:
+            QMessageBox.warning(
+                self,
+                "Missing Credentials",
+                "Please enter a valid Hydrus API URL and API Key on the Hydrus page before connecting.",
+            )
+            return
+
+        self._manual_connect_requested = True
         self.state.sync_hydrus_services(api_url=url, api_key=key)
 
     def _on_services_updated(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
@@ -653,21 +667,60 @@ class MainWindow(QMainWindow):
     def _on_connection_changed(self, status: str, info: str) -> None:
         """Update top-bar status badge and button state based on connection health."""
         if status == "connected":
-            self.conn_indicator.setText(f"<span style='color: #2e7d32; font-weight: bold;'>● {info}</span>")
-            self.conn_indicator.setToolTip("Hydrus connection verified and active")
+            self._manual_connect_requested = False
+            self.conn_indicator.setText(f"<span style='color: #34d399; font-weight: 600;'>● {info}</span>")
+            url = self.hydrus_page.api_url_edit.text().strip()
+            self.conn_indicator.setToolTip(
+                f"Connected to {info} at {url}.\nClick 'Refresh' to re-sync tag services and open tabs."
+            )
+            self.sync_services_btn.setText("Refresh")
+            self.sync_services_btn.setToolTip("Re-sync available tag services and open media tabs from Hydrus")
             self.sync_services_btn.setEnabled(True)
+
         elif status == "connecting":
-            self.conn_indicator.setText(f"<span style='color: #f57c00;'>◌ {info}</span>")
-            self.conn_indicator.setToolTip("Connecting to Hydrus API...")
+            self.conn_indicator.setText("<span style='color: #fbbf24; font-weight: 600;'>◌ Connecting...</span>")
+            self.conn_indicator.setToolTip("Attempting to reach Hydrus Client API...")
+            self.sync_services_btn.setText("Connecting...")
+            self.sync_services_btn.setToolTip("Connection attempt in progress")
             self.sync_services_btn.setEnabled(False)
+
         elif status == "error":
-            short_info = info if len(info) <= 40 else f"{info[:37]}..."
-            self.conn_indicator.setText(f"<span style='color: #d32f2f; font-weight: bold;'>▲ {short_info}</span>")
-            self.conn_indicator.setToolTip(info)
+            was_manual = self._manual_connect_requested
+            self._manual_connect_requested = False
+
+            self.conn_indicator.setText("<span style='color: #f85149; font-weight: 600;'>▲ Connection Failed</span>")
+            self.conn_indicator.setToolTip(
+                f"Hydrus connection failed:\n{info}\n\nClick 'Retry' to attempt reconnection."
+            )
+            self.sync_services_btn.setText("Retry")
+            self.sync_services_btn.setToolTip("Retry connection to Hydrus Client API")
             self.sync_services_btn.setEnabled(True)
+
+            # Only show modal error dialog if user explicitly clicked Connect/Retry
+            if was_manual:
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                msg_box.setWindowTitle("Hydrus Connection Failed")
+                msg_box.setText("Could not connect to the Hydrus Client API.")
+                msg_box.setInformativeText(
+                    "Suggestions:\n"
+                    "  • Verify that your Hydrus client is running.\n"
+                    "  • Check that the Client API is enabled (services -> manage services -> client api).\n"
+                    "  • Verify the API URL and port match your Hydrus settings.\n"
+                    "  • Ensure your API key is authorized with read and write permissions."
+                )
+                msg_box.setDetailedText(info)
+                msg_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                msg_box.exec()
+
         else:  # offline
-            self.conn_indicator.setText("<span style='color: #888;'>○ Offline</span>")
-            self.conn_indicator.setToolTip("Hydrus client is offline or credentials not set")
+            self._manual_connect_requested = False
+            self.conn_indicator.setText("<span style='color: #d4a359; font-weight: 600;'>○ Hydrus Offline</span>")
+            self.conn_indicator.setToolTip(
+                "Hydrus Client API is not connected.\nClick 'Connect' to fetch live tag services and open tabs."
+            )
+            self.sync_services_btn.setText("Connect")
+            self.sync_services_btn.setToolTip("Connect to Hydrus Client API and fetch tag services")
             self.sync_services_btn.setEnabled(True)
 
     def _update_title(self) -> None:

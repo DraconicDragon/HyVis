@@ -402,7 +402,7 @@ class ConfigState(QObject):
         self._writable_tag_services = writable_tags
         self._pages = pages
         self._connection_status = "connected"
-        self._connection_info = f"Connected: Hydrus v{version_str}"
+        self._connection_info = f"Hydrus v{version_str}"
         self.services_updated.emit(self._tag_services, self._writable_tag_services)
         self.pages_updated.emit(self._pages)
         self.connection_changed.emit(self._connection_status, self._connection_info)
