@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -432,7 +432,7 @@ class MainWindow(QMainWindow):
         bottom_bar = QHBoxLayout()
         bottom_bar.setSpacing(10)
 
-        # Native-text button without bare HTML tags
+        # Native-text button for issues toggle
         self.status_btn = QPushButton(self)
         self.status_btn.setObjectName("status_btn")
         self.status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -837,7 +837,8 @@ class MainWindow(QMainWindow):
 
         cmd_str = format_cli_command_str(self.state.current_path)
         QApplication.clipboard().setText(cmd_str)
-        self.status_label.setText("<span>✓ Command copied to clipboard!</span>")
+        self.copy_btn.setText("✓ Copied!")
+        QTimer.singleShot(1800, lambda: self.copy_btn.setText("Copy CLI Command"))
 
     def _on_launch_terminal(self) -> None:
         if self.state.current_path is None or self.state.is_dirty:
@@ -856,7 +857,8 @@ class MainWindow(QMainWindow):
         assert self.state.current_path is not None
         ok = launch_in_external_terminal(self.state.current_path)
         if ok:
-            self.status_label.setText("<span>✓ Launched HyVis in detached terminal</span>")
+            self.launch_btn.setText("✓ Launched!")
+            QTimer.singleShot(1800, lambda: self.launch_btn.setText("Launch in Terminal"))
         else:
             cmd_str = format_cli_command_str(self.state.current_path)
             QApplication.clipboard().setText(cmd_str)
