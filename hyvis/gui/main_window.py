@@ -567,7 +567,7 @@ class MainWindow(QMainWindow):
             self.launch_btn.setEnabled(True)
             self.issues_panel.setVisible(False)
         else:
-            self.status_btn.setText(f"▲ {count} Issue{'s' if count != 1 else ''} Found  (Click to toggle)")
+            self.status_btn.setText(f"▲ {count} Issue{'s' if count != 1 else ''} Found  (Click to view)")
             self.status_btn.setStyleSheet(
                 "QPushButton#status_btn {"
                 "  background: transparent; border: none; text-align: left;"
