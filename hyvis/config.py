@@ -449,7 +449,7 @@ class OutputFilterConfig(StrictBaseModel):
     allowed_categories: list[str] | None = Field(
         default=None,
         title="Allowed Categories",
-        description="Limit output tags to specified categories. If omitted (null), all categories are allowed. An empty list [] allows no categories (useful if only allowing tags in include_tags).",
+        description="Limit output tags to specified categories. If disabled/omitted (null/None), all categories are allowed. An empty list [] allows no categories (useful if only allowing tags in include_tags).",
         examples=[["rating", "general", "character"]],
     )
     include_tags: list[str] = Field(
