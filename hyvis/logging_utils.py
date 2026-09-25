@@ -64,4 +64,6 @@ def setup_logging(level: str) -> None:
     # Silence noisy third-party libraries even in DEBUG mode
     logging.getLogger("PIL").setLevel(logging.INFO)
     logging.getLogger("urllib3").setLevel(logging.INFO)
-    #logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.INFO)
+    # logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
