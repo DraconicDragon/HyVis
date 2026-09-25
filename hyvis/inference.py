@@ -167,7 +167,7 @@ def extract_tags(
             is_allowed = norm_tag in include_set
 
             # 3. Category Whitelist: If not explicitly included, check category allowance
-            if not is_allowed and (not categories or category not in categories):
+            if not is_allowed and (categories is not None and category not in categories):
                 continue
 
             record = TagRecord(

@@ -280,7 +280,13 @@ def print_confirmation(
             tlt_note = _c(" [overrides TLT]", DIM) if cfg_.override_tlt else ""
             print(f"      {tag:<24} {cfg_.threshold:.2f}{tlt_note}")
     cats = of.output_categories
-    print(f"    output categories   {', '.join(cats) if cats else '(all)'}")
+    if cats is None:
+        cats_str = "(all)"
+    elif not cats:
+        cats_str = "(none)"
+    else:
+        cats_str = ", ".join(cats)
+    print(f"    output categories   {cats_str}")
 
     # region tag incl. / excl.
     if of.include_tags:
