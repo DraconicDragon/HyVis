@@ -559,7 +559,7 @@ class MainWindow(QMainWindow):
             self.status_btn.setStyleSheet(
                 "QPushButton#status_btn {"
                 "  background: transparent; border: none; text-align: left;"
-                "  padding: 4px 8px; border-radius: 4px; color: #2e7d32; font-weight: 600;"
+                "  padding: 4px 8px; border-radius: 4px; color: #2e7d32; font-weight: normal;"
                 "}"
                 "QPushButton#status_btn:hover { background: rgba(46, 125, 50, 0.08); }"
             )
