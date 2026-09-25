@@ -72,7 +72,7 @@ default_threshold = 0.4
 # Only emit tags from these categories.  
 # Empty list -> no categories -> you should probably look at using include_tags
 # For a list of available categories please check https://github.com/DraconicDragon/HyVis/blob/main/CONFIGURATION.md#available-categories
-output_categories = [
+allowed_categories = [
     "rating",
     "general",
     #"artist",
@@ -84,13 +84,13 @@ output_categories = [
     "lore",
 ]
 
-# Explicitly include these specific tags, regardless of output_categories setting
+# Explicitly include these specific tags, regardless of allowed_categories setting
 include_tags = [
     # "some_unlisted_meta_tag",
     # "particular_artist_tag",
 ]
 
-# Explicitly drop these specific tags, regardless of output_categories setting
+# Explicitly drop these specific tags, regardless of allowed_categories setting
 exclude_tags = [
     # "generic_background",
 ]

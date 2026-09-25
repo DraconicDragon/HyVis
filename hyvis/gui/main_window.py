@@ -147,8 +147,8 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         page_idx = 2
         section_title = "Output Filter"
         msg = rule_err.replace("[output_filter] ", "").strip()
-        if "output_categories" in rule_err:
-            field_name = "output_categories"
+        if "allowed_categories" in rule_err:
+            field_name = "allowed_categories"
     elif rule_err.startswith("[inference]"):
         page_idx = 1
         section_title = "Inference Models"

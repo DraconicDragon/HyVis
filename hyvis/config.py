@@ -446,16 +446,16 @@ class OutputFilterConfig(StrictBaseModel):
         description="Fallback confidence threshold (0.0 to 1.0) when tag-level thresholds are disabled or unavailable.",
         examples=[0.40],
     )
-    output_categories: list[str] | None = Field(
+    allowed_categories: list[str] | None = Field(
         default=None,
-        title="Output Categories",
-        description="Limit output tags to specified categories. If disabled/omitted (null/None), all categories are allowed. An empty list [] emits no categories (useful if only allowing tags in include_tags).",
+        title="Allowed Categories",
+        description="Limit output tags to specified categories. If omitted (null), all categories are allowed. An empty list [] allows no categories (useful if only allowing tags in include_tags).",
         examples=[["rating", "general", "character"]],
     )
     include_tags: list[str] = Field(
         default_factory=list,
         title="Include Tags",
-        description="Explicit list of tags to always include, bypassing any output_categories restriction (exact matches).",
+        description="Explicit list of tags to always include, bypassing any allowed_categories restriction (exact matches).",
     )
     exclude_tags: list[str] = Field(
         default_factory=list,
@@ -811,9 +811,9 @@ class AppConfig(StrictBaseModel):
 
         # Cross-field rule: at least one emission path must exist
         of = self.output_filter
-        if of.output_categories is not None and not of.output_categories and not of.include_tags:
+        if of.allowed_categories is not None and not of.allowed_categories and not of.include_tags:
             errors.append(
-                "[output_filter] 'output_categories' is set to an empty list [] and 'include_tags' is empty. "
+                "[output_filter] 'allowed_categories' is set to an empty list [] and 'include_tags' is empty. "
                 "No tags will ever be emitted under this configuration."
             )
 

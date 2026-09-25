@@ -163,12 +163,12 @@ class FiltersPage(BaseConfigPage):
         self.thresh_card.setContentLayout(thresh_layout)
         layout.addWidget(self.thresh_card)
 
-        # Card 2: Output Categories (Dynamic & Checkable in Global Scope)
-        cat_title = of_fields["output_categories"].title or "Output Categories"
-        self.cat_card = SectionCard(cat_title, field_name="output_categories", parent=container)
+        # Card 2: Allowed Categories (Dynamic & Checkable in Global Scope)
+        cat_title = of_fields["allowed_categories"].title or "Allowed Categories"
+        self.cat_card = SectionCard(cat_title, field_name="allowed_categories", parent=container)
         self.cat_card.setCheckable(True)
         self.cat_card.setChecked(False)
-        self._card_meta[self.cat_card] = (cat_title, ["output_categories"])
+        self._card_meta[self.cat_card] = (cat_title, ["allowed_categories"])
         self.cat_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_card, chk))
         cat_layout = QVBoxLayout()
         self.cat_editor = CategoryTagEditor(self)
@@ -454,7 +454,7 @@ class FiltersPage(BaseConfigPage):
                 for card, (base_title, _) in self._card_meta.items():
                     if card is self.cat_card:
                         # cat_card stays checkable in Global Scope
-                        is_filtered = self._global_filter.get("output_categories") is not None
+                        is_filtered = self._global_filter.get("allowed_categories") is not None
                         card.setCheckable(True)
                         card.setChecked(is_filtered)
                         card.setBadge(
@@ -504,7 +504,7 @@ class FiltersPage(BaseConfigPage):
             self.prefer_tlt_chk.setChecked(bool(d.get("prefer_tag_level_thresholds", True)))
             self.tlt_offset_spin.setValue(float(d.get("tag_level_threshold_relative_offset", 0.00)))
         elif card is self.cat_card:
-            cats = d.get("output_categories")
+            cats = d.get("allowed_categories")
             self.cat_editor.set_items(cats if cats is not None else [])
         elif card is self.inc_card:
             self.include_editor.set_items(d.get("include_tags", []))
@@ -535,9 +535,9 @@ class FiltersPage(BaseConfigPage):
 
             # Unchecked card = None (All Categories Allowed), Checked card = list of categories
             if self.cat_card.isChecked():
-                self._global_filter["output_categories"] = self.cat_editor.get_items()
+                self._global_filter["allowed_categories"] = self.cat_editor.get_items()
             else:
-                self._global_filter["output_categories"] = None
+                self._global_filter["allowed_categories"] = None
 
             self._global_filter["include_tags"] = self.include_editor.get_items()
             self._global_filter["exclude_tags"] = self.exclude_editor.get_items()
@@ -561,7 +561,7 @@ class FiltersPage(BaseConfigPage):
                     draft["prefer_tag_level_thresholds"] = self.prefer_tlt_chk.isChecked()
                     draft["tag_level_threshold_relative_offset"] = float(self.tlt_offset_spin.value())
                 if self.cat_card.isChecked():
-                    draft["output_categories"] = self.cat_editor.get_items()
+                    draft["allowed_categories"] = self.cat_editor.get_items()
                 if self.inc_card.isChecked():
                     draft["include_tags"] = self.include_editor.get_items()
                 if self.exc_card.isChecked():
@@ -728,8 +728,8 @@ class FiltersPage(BaseConfigPage):
         )
         self._update_widget_diff(
             self.cat_editor,
-            "output_categories",
-            of_fields["output_categories"].description or "",
+            "allowed_categories",
+            of_fields["allowed_categories"].description or "",
             is_global,
             current_model_idx,
         )

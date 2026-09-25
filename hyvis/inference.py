@@ -135,7 +135,7 @@ def extract_tags(
                 elif isinstance(entries, dict):
                     tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
 
-    categories = output_filter.output_categories
+    categories = output_filter.allowed_categories
     # sets for fast lookups (normalized)
     include_set = {_norm(t) for t in output_filter.include_tags}
     exclude_set = {_norm(t) for t in output_filter.exclude_tags}
