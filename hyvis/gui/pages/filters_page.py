@@ -7,7 +7,6 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
