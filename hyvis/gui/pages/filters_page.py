@@ -163,9 +163,11 @@ class FiltersPage(BaseConfigPage):
         self.thresh_card.setContentLayout(thresh_layout)
         layout.addWidget(self.thresh_card)
 
-        # Card 2: Output Categories (Dynamic)
+        # Card 2: Output Categories (Dynamic & Checkable in Global Scope)
         cat_title = of_fields["output_categories"].title or "Output Categories"
         self.cat_card = SectionCard(cat_title, field_name="output_categories", parent=container)
+        self.cat_card.setCheckable(True)
+        self.cat_card.setChecked(False)
         self._card_meta[self.cat_card] = (cat_title, ["output_categories"])
         self.cat_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_card, chk))
         cat_layout = QVBoxLayout()
@@ -450,8 +452,19 @@ class FiltersPage(BaseConfigPage):
 
             if is_global:
                 for card, (base_title, _) in self._card_meta.items():
-                    card.setCheckable(False)
-                    card.setChecked(True)
+                    if card is self.cat_card:
+                        # cat_card stays checkable in Global Scope
+                        is_filtered = self._global_filter.get("output_categories") is not None
+                        card.setCheckable(True)
+                        card.setChecked(is_filtered)
+                        card.setBadge(
+                            "(Filter Active)" if is_filtered else "(All Categories Allowed)",
+                            color="#34d399" if is_filtered else "#888",
+                        )
+                    else:
+                        card.setCheckable(False)
+                        card.setChecked(True)
+                        card.setBadge("")
                     card.setTitle(base_title)
 
                 self._populate_all_widgets(self._global_filter)
@@ -491,7 +504,8 @@ class FiltersPage(BaseConfigPage):
             self.prefer_tlt_chk.setChecked(bool(d.get("prefer_tag_level_thresholds", True)))
             self.tlt_offset_spin.setValue(float(d.get("tag_level_threshold_relative_offset", 0.00)))
         elif card is self.cat_card:
-            self.cat_editor.set_items(d.get("output_categories", []))
+            cats = d.get("output_categories")
+            self.cat_editor.set_items(cats if cats is not None else [])
         elif card is self.inc_card:
             self.include_editor.set_items(d.get("include_tags", []))
         elif card is self.exc_card:
@@ -518,7 +532,13 @@ class FiltersPage(BaseConfigPage):
             self._global_filter["default_threshold"] = float(self.default_thresh_spin.value())
             self._global_filter["prefer_tag_level_thresholds"] = self.prefer_tlt_chk.isChecked()
             self._global_filter["tag_level_threshold_relative_offset"] = float(self.tlt_offset_spin.value())
-            self._global_filter["output_categories"] = self.cat_editor.get_items()
+
+            # Unchecked card = None (All Categories Allowed), Checked card = list of categories
+            if self.cat_card.isChecked():
+                self._global_filter["output_categories"] = self.cat_editor.get_items()
+            else:
+                self._global_filter["output_categories"] = None
+
             self._global_filter["include_tags"] = self.include_editor.get_items()
             self._global_filter["exclude_tags"] = self.exclude_editor.get_items()
             self._global_filter["category_thresholds"] = self.cat_thresh_editor.get_thresholds()
@@ -576,7 +596,18 @@ class FiltersPage(BaseConfigPage):
     # region User Actions & Live Diff Tooltips
 
     def _on_card_toggled(self, card: SectionCard, checked: bool) -> None:
-        if self._is_loading_ui or self._current_scope == 0:
+        if self._is_loading_ui:
+            return
+
+        if self._current_scope == 0:
+            # Global Scope toggling is specifically supported for cat_card
+            if card is self.cat_card:
+                card.setBadge(
+                    "(Filter Active)" if checked else "(All Categories Allowed)", color="#34d399" if checked else "#888"
+                )
+                self._save_active_scope_to_state()
+                self._update_badges_and_tooltips()
+                self.changed.emit()
             return
 
         model_idx = self._current_scope - 1
