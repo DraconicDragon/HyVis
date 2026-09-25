@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
@@ -14,6 +14,8 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 from hyvis.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+ConnectionStatus = Literal["offline", "connecting", "connected", "error"]
 
 
 def _prune_none(obj: Any) -> Any:
@@ -213,7 +215,7 @@ class ConfigState(QObject):
         self._tag_services: dict[str, Any] = {}
         self._writable_tag_services: dict[str, str] = {}
         self._pages: list[dict[str, Any]] = []
-        self._connection_status: str = "offline"
+        self._connection_status: ConnectionStatus = "offline"
         self._connection_info: str = "Not connected"
 
         # Start with default template
@@ -250,7 +252,7 @@ class ConfigState(QObject):
         return list(self._pages)
 
     @property
-    def connection_status(self) -> str:
+    def connection_status(self) -> ConnectionStatus:
         """One of: 'connected', 'connecting', 'offline', 'error'."""
         return self._connection_status
 

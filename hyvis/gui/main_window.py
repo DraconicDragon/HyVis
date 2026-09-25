@@ -34,7 +34,7 @@ from hyvis.cli import get_version
 from hyvis.config import AppConfig
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
-from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState
+from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
 
 
 @dataclass(frozen=True)
@@ -664,7 +664,7 @@ class MainWindow(QMainWindow):
         """Propagate open Hydrus media pages to the page queries editor."""
         self.hydrus_page.update_pages(pages)
 
-    def _on_connection_changed(self, status: str, info: str) -> None:
+    def _on_connection_changed(self, status: ConnectionStatus, info: str) -> None:
         """Update top-bar status badge and button state based on connection health."""
         if status == "connected":
             self._manual_connect_requested = False
