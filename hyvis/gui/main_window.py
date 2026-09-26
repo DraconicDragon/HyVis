@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer
+from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
-from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
+from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
 
@@ -176,6 +177,46 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
     )
 
 
+class WindowDragFilter(QObject):
+    """
+    Event filter that enables native window dragging when clicking empty areas.
+    Uses modern Qt startSystemMove() for seamless Wayland/X11/Windows integration.
+    """
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(event, QMouseEvent)
+            and event.button() == Qt.MouseButton.LeftButton
+            and isinstance(obj, QWidget)
+        ):
+            pos = event.position().toPoint()
+
+            if isinstance(obj, QMenuBar) and obj.actionAt(pos):
+                return False
+
+            if not isinstance(obj, QMenuBar):
+                child = obj.childAt(pos)
+                if child is not None and not isinstance(child, QLabel):
+                    return False
+
+            # If a menu dropdown is open, dismiss it and consume the click (matches native title bar behavior)
+            had_popup = False
+            while (popup := QApplication.activePopupWidget()) is not None:
+                popup.close()
+                had_popup = True
+
+            if had_popup:
+                return True
+
+            win = obj.window()
+            win_handle = win.windowHandle() if win else None
+            if win_handle and win_handle.startSystemMove():
+                return True
+
+        return super().eventFilter(obj, event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, state: ConfigState | None = None) -> None:
         super().__init__()
@@ -190,6 +231,11 @@ class MainWindow(QMainWindow):
         self._setup_menu_bar()
         self._setup_ui()
         self._setup_signals()
+
+        # Enable native window dragging on menu and top bar
+        self._drag_filter = WindowDragFilter(self)
+        self.menuBar().installEventFilter(self._drag_filter)
+        self.top_bar_widget.installEventFilter(self._drag_filter)
 
         # Initial synchronization
         self._load_config_to_pages(self.state.config)
@@ -236,36 +282,37 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(12, 10, 12, 12)
+        root_layout.setContentsMargins(12, 0, 12, 12)
         root_layout.setSpacing(8)
 
         # 1. Top Global Bar (Header & Hydrus Status)
-        top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(0, 0, 0, 2)
+        self.top_bar_widget = QWidget(self)
+        top_bar = QHBoxLayout(self.top_bar_widget)
+        top_bar.setContentsMargins(0, 10, 0, 2)
         top_bar.setSpacing(10)
 
         app_title = QLabel(
             f"<span style='font-size: 24px; font-weight: 650; letter-spacing: 0.5px;'>HyVis</span> "
             f"<span style='color: #8a9ba5; font-size: 14px; font-weight: 450;'>{get_version()}</span>",
-            self,
+            self.top_bar_widget,
         )
         top_bar.addWidget(app_title)
 
         top_bar.addStretch()
 
-        self.conn_indicator = QLabel(self)
+        self.conn_indicator = QLabel(self.top_bar_widget)
         self.conn_indicator.setText("<span style='color: #d4a359; font-weight: 600;'>○ Hydrus Offline</span>")
         self.conn_indicator.setToolTip(
             "Hydrus Client API is not connected.\nClick 'Connect' to fetch live tag services and open tabs."
         )
         top_bar.addWidget(self.conn_indicator)
 
-        self.sync_services_btn = QPushButton("Connect", self)
+        self.sync_services_btn = QPushButton("Connect", self.top_bar_widget)
         self.sync_services_btn.setToolTip("Connect to Hydrus Client API and fetch tag services")
         self.sync_services_btn.clicked.connect(self._on_sync_services)
         top_bar.addWidget(self.sync_services_btn)
 
-        root_layout.addLayout(top_bar)
+        root_layout.addWidget(self.top_bar_widget)
 
         # Divider line
         divider = QFrame(self)
