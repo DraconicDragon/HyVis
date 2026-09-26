@@ -443,7 +443,7 @@ class MainWindow(QMainWindow):
         self.copy_btn.clicked.connect(self._on_copy_command)
         bottom_bar.addWidget(self.copy_btn)
 
-        self.launch_btn = QPushButton("Launch in Terminal", self)
+        self.launch_btn = QPushButton("Launch in Terminal...", self)
         self.launch_btn.clicked.connect(self._on_launch_terminal)
         bottom_bar.addWidget(self.launch_btn)
 
@@ -855,19 +855,10 @@ class MainWindow(QMainWindow):
                 return
 
         assert self.state.current_path is not None
-        ok = launch_in_external_terminal(self.state.current_path)
-        if ok:
-            self.launch_btn.setText("✓ Launched!")
-            QTimer.singleShot(1800, lambda: self.launch_btn.setText("Launch in Terminal"))
-        else:
-            cmd_str = format_cli_command_str(self.state.current_path)
-            QApplication.clipboard().setText(cmd_str)
-            QMessageBox.warning(
-                self,
-                "Terminal Launch Failed",
-                "Could not detect or launch an external terminal window automatically.\n\n"
-                "The execution command has been copied to your clipboard instead.",
-            )
+        from hyvis.gui.launch_dialog import LaunchDialog
+
+        dialog = LaunchDialog(self.state.config, self.state.current_path, self)
+        dialog.exec()
 
     def closeEvent(self, event) -> None:
         if self._confirm_discard_changes():
