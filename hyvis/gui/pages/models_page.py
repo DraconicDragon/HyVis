@@ -1,0 +1,549 @@
+"""
+models_page.py — Model session management with dynamic discovery from vibe.
+"""
+
+from __future__ import annotations
+
+import copy
+from typing import Any
+
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from hyvis.config import AppConfig, InferenceConfig, ModelConfig
+from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.widgets import (
+    SectionCard,
+    SmoothScrollArea,
+    TagServiceListEditor,
+    add_form_row,
+    bind_field_metadata,
+    setup_field_tooltip,
+)
+
+
+class ModelsPage(BaseConfigPage):
+    """Configuration page for [[inference.models]]."""
+
+    request_filter_scope = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._models_data: list[dict[str, Any]] = []
+        self._current_index: int = -1
+        self._writable_tag_services: dict[str, str] = {}
+        self._is_loading_ui: bool = False
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        m_fields = ModelConfig.model_fields
+        inf_fields = InferenceConfig.model_fields
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 10, 0, 10)
+
+        splitter = QSplitter(self)
+        splitter.setChildrenCollapsible(False)
+
+        # 1. Left: Models list (Enforce generous min and max widths)
+        left_widget = QWidget(splitter)
+        left_widget.setMinimumWidth(132)
+        left_widget.setMaximumWidth(380)
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+
+        models_label = QLabel(f"<b>{inf_fields['models'].title}:</b>", left_widget)
+        setup_field_tooltip(models_label, inf_fields["models"])
+        left_layout.addWidget(models_label)
+
+        self.model_list = QListWidget(left_widget)
+        setup_field_tooltip(self.model_list, inf_fields["models"])
+        self.model_list.currentRowChanged.connect(self._on_model_selected)
+        left_layout.addWidget(self.model_list, stretch=1)
+
+        btn_row = QHBoxLayout()
+        self.add_model_btn = QPushButton("+ Add", left_widget)
+        self.add_model_btn.clicked.connect(self._on_add_model)
+        btn_row.addWidget(self.add_model_btn)
+
+        self.remove_model_btn = QPushButton("- Remove", left_widget)
+        self.remove_model_btn.clicked.connect(self._on_remove_model)
+        btn_row.addWidget(self.remove_model_btn)
+        left_layout.addLayout(btn_row)
+
+        splitter.addWidget(left_widget)
+
+        # 2. Right: Active Model Settings (Scrollable Container)
+        right_scroll = SmoothScrollArea(splitter)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        right_container = QWidget()
+        self.form_layout = QVBoxLayout(right_container)
+        self.form_layout.setContentsMargins(12, 0, 10, 0)
+        self.form_layout.setSpacing(14)
+
+        # Card 1: Model Runtime Parameters
+        self.param_card = SectionCard("Model Runtime Settings", parent=right_container)
+        param_layout = QFormLayout()
+        param_layout.setSpacing(8)
+
+        # Model ID
+        self.model_id_combo = QComboBox(self)
+        self.model_id_combo.setEditable(True)
+        self._populate_available_models()
+        self.model_id_combo.currentTextChanged.connect(self._on_model_id_changed)
+        add_form_row(param_layout, m_fields, "model_id", self.model_id_combo)
+
+        # Source
+        source_box = QWidget(self)
+        source_row = QHBoxLayout(source_box)
+        source_row.setContentsMargins(0, 0, 0, 0)
+        source_row.setSpacing(6)
+
+        self.source_edit = QLineEdit(source_box)
+        bind_field_metadata(self.source_edit, m_fields["source"])
+        if not self.source_edit.placeholderText():
+            self.source_edit.setPlaceholderText("Default HF repo (or 'local:/path' or 'user/repo')")
+        self.source_edit.textChanged.connect(self._on_field_changed)
+        source_row.addWidget(self.source_edit, stretch=1)
+
+        self.browse_src_btn = QPushButton("Browse Folder...", source_box)
+        self.browse_src_btn.clicked.connect(self._on_browse_source)
+        source_row.addWidget(self.browse_src_btn)
+
+        add_form_row(param_layout, m_fields, "source", source_box)
+
+        # Device
+        self.device_combo = QComboBox(self)
+        self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
+        self.device_combo.setEditable(True)
+        self.device_combo.currentTextChanged.connect(self._on_device_changed)
+        add_form_row(param_layout, m_fields, "device", self.device_combo)
+
+        # Backend
+        self.backend_combo = QComboBox(self)
+        self.backend_combo.addItems(["auto", "pytorch", "onnx"])
+        self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
+        add_form_row(param_layout, m_fields, "backend", self.backend_combo)
+
+        # Precision
+        self.precision_combo = QComboBox(self)
+        self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
+        self.precision_combo.currentTextChanged.connect(self._on_field_changed)
+        add_form_row(param_layout, m_fields, "precision", self.precision_combo)
+
+        # Batch Size
+        self.batch_spin = QSpinBox(self)
+        self.batch_spin.setRange(1, 128)
+        self.batch_spin.setValue(1)
+        self.batch_spin.valueChanged.connect(self._on_field_changed)
+        add_form_row(param_layout, m_fields, "batch_size", self.batch_spin)
+
+        self.param_card.setContentLayout(param_layout)
+        self.form_layout.addWidget(self.param_card)
+
+        # Card 2: Model Output Services Override (Checkable)
+        svc_title = m_fields["output_tag_services"].title or "Destination Tag Services"
+        self.svc_card = SectionCard(title=svc_title, field_name="output_tag_services", parent=right_container)
+        self.svc_card.setCheckable(True)
+        self.svc_card.setChecked(False)
+        self.svc_card.toggled.connect(self._on_svc_card_toggled)
+
+        svc_layout = QVBoxLayout()
+        self.model_services_editor = TagServiceListEditor(writable_only=True, parent=self)
+        self.model_services_editor.changed.connect(self._on_field_changed)
+        svc_layout.addWidget(self.model_services_editor)
+
+        self.svc_card.setContentLayout(svc_layout)
+        self.form_layout.addWidget(self.svc_card)
+
+        # Card 3: Model Output Filter Status Card
+        self.filter_card = SectionCard(
+            title="Model Output Filter",
+            tooltip="Configure model-specific output filter overrides that take precedence over the global filter.",
+            parent=right_container,
+        )
+        filter_card_layout = QHBoxLayout()
+        filter_card_layout.setContentsMargins(0, 0, 0, 0)
+        filter_card_layout.setSpacing(10)
+
+        self.filter_status_label = QLabel("Inheriting all settings from Global Filter", self)
+        filter_card_layout.addWidget(self.filter_status_label, stretch=1)
+
+        self.edit_filter_btn = QPushButton("⚙ Configure Filter Overrides...", self)
+        self.edit_filter_btn.setToolTip("Switch to Filters page and edit custom overrides for this model")
+        self.edit_filter_btn.clicked.connect(self._on_edit_filter_clicked)
+        filter_card_layout.addWidget(self.edit_filter_btn)
+
+        self.filter_card.setContentLayout(filter_card_layout)
+        self.form_layout.addWidget(self.filter_card)
+
+        self.form_layout.addStretch()
+        right_scroll.setWidget(right_container)
+        splitter.addWidget(right_scroll)
+
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter)
+
+    def update_services(self, all_tags: dict[str, str], writable_tags: dict[str, str]) -> None:
+        """Update available tag services for per-model destination overrides."""
+        self._writable_tag_services = dict(writable_tags)
+        self.model_services_editor.set_available_services(writable_tags)
+
+    def _populate_available_models(self) -> None:
+        """Populate model_id combo strictly with models that produce tag outputs."""
+        self.model_id_combo.blockSignals(True)
+        self.model_id_combo.clear()
+        try:
+            import vibe
+            from vibe.metadata import OutputKind
+
+            taggers: list[str] = []
+            for mid in vibe.list_models():
+                # Hide generic timm models from the UI
+                if mid.startswith("generic-timm-"):
+                    continue
+
+                try:
+                    desc = vibe.describe(mid)
+                    kind = desc.output.kind
+                    is_tagger = (kind == OutputKind.TAGS) or (getattr(kind, "value", str(kind)) == "tags")
+                    if is_tagger:
+                        taggers.append(mid)
+                except Exception:
+                    taggers.append(mid)
+
+            self.model_id_combo.addItems(sorted(taggers))
+        except Exception:
+            self.model_id_combo.addItems(["wd-swinv2-v3", "wd-eva02-large-v3", "jtp-3", "taggerine"])
+        self.model_id_combo.blockSignals(False)
+
+    def _update_backend_options(self, model_id: str, preferred_backend: str | None = None) -> None:
+        """Query vibe variants for the model and filter the execution backend combobox."""
+        available_backends = ["auto"]
+        if model_id:
+            try:
+                import vibe
+
+                desc = vibe.describe(model_id)
+                found = set()
+                for v in desc.variants:
+                    b_val = v.backend.value if hasattr(v.backend, "value") else str(v.backend)
+                    found.add(b_val.lower())
+
+                for b in ("pytorch", "onnx"):
+                    if b in found:
+                        available_backends.append(b)
+                for b in sorted(found):
+                    if b not in available_backends:
+                        available_backends.append(b)
+            except Exception:
+                available_backends = ["auto", "pytorch", "onnx"]
+        else:
+            available_backends = ["auto", "pytorch", "onnx"]
+
+        self.backend_combo.blockSignals(True)
+        self.backend_combo.clear()
+        self.backend_combo.addItems(available_backends)
+
+        target = preferred_backend if preferred_backend in available_backends else "auto"
+        self.backend_combo.setCurrentText(target)
+        self.backend_combo.blockSignals(False)
+
+    def _update_device_constraints(self) -> None:
+        """Enforce batch_size=1 when hardware device is CPU."""
+        dev = self.device_combo.currentText().strip().lower()
+        is_cpu = dev == "cpu"
+        m_fields = ModelConfig.model_fields
+
+        if is_cpu:
+            self.batch_spin.blockSignals(True)
+            self.batch_spin.setValue(1)
+            self.batch_spin.blockSignals(False)
+            self.batch_spin.setEnabled(False)
+            self.batch_spin.setToolTip("Batch size is fixed to 1 when hardware device is CPU.")
+        else:
+            self.batch_spin.setEnabled(True)
+            setup_field_tooltip(self.batch_spin, m_fields["batch_size"])
+
+    def _update_backend_constraints(self) -> None:
+        """Disable precision selection when backend is ONNX."""
+        backend = self.backend_combo.currentText().strip().lower()
+        is_onnx = backend == "onnx"
+        m_fields = ModelConfig.model_fields
+
+        if is_onnx:
+            self.precision_combo.setEnabled(False)
+            self.precision_combo.setToolTip("Precision setting has no effect on ONNX models.")
+        else:
+            self.precision_combo.setEnabled(True)
+            setup_field_tooltip(self.precision_combo, m_fields["precision"])
+
+    def _on_model_id_changed(self, text: str) -> None:
+        if self._is_loading_ui:
+            return
+        current_backend = self.backend_combo.currentText().strip()
+        self._update_backend_options(text.strip(), current_backend)
+        self._update_backend_constraints()
+        self._on_field_changed()
+
+    def _on_device_changed(self, text: str) -> None:
+        del text
+        if self._is_loading_ui:
+            return
+        self._update_device_constraints()
+        self._on_field_changed()
+
+    def _on_backend_changed(self, text: str) -> None:
+        del text
+        if self._is_loading_ui:
+            return
+        self._update_backend_constraints()
+        self._on_field_changed()
+
+    def load_config(self, cfg: AppConfig) -> None:
+        self._is_loading_ui = True
+        try:
+            # 1. Reset current selection index so the first model cleanly loads
+            self._current_index = -1
+
+            # 2. Extract models while strictly preserving explicitly declared overrides
+            cleaned_models: list[dict[str, Any]] = []
+            for m in cfg.inference.models:
+                m_dict = m.model_dump(mode="json")
+                if m.output_filter is not None:
+                    m_dict["output_filter"] = {
+                        k: v for k, v in m_dict["output_filter"].items() if k in m.output_filter.model_fields_set
+                    }
+                else:
+                    m_dict["output_filter"] = None
+                cleaned_models.append(m_dict)
+
+            self._models_data = cleaned_models
+
+            # 3. Repopulate sidebar model list under signal block
+            self.model_list.blockSignals(True)
+            self.model_list.clear()
+            for m in self._models_data:
+                self.model_list.addItem(QListWidgetItem(str(m.get("model_id", "unnamed"))))
+            self.model_list.blockSignals(False)
+
+            # 4. Load the first model
+            if self._models_data:
+                self.model_list.blockSignals(True)
+                self.model_list.setCurrentRow(0)
+                self.model_list.blockSignals(False)
+                self._load_model_to_form(0)
+        finally:
+            self._is_loading_ui = False
+
+    def apply_to_dict(self, data: dict[str, Any]) -> None:
+        self._save_form_to_model(self._current_index)
+        inf_dict: dict[str, Any] = data.setdefault("inference", {})
+        inf_dict["models"] = list(self._models_data)
+
+    def _on_model_selected(self, row: int) -> None:
+        if self._is_loading_ui or row < 0 or row >= len(self._models_data):
+            return
+        if self._current_index == row:
+            return
+
+        # Save previous model form state before switching
+        if 0 <= self._current_index < len(self._models_data):
+            self._save_form_to_model(self._current_index)
+
+        self._load_model_to_form(row)
+
+    def _load_model_to_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._models_data):
+            return
+
+        was_loading = self._is_loading_ui
+        self._is_loading_ui = True
+        try:
+            self._current_index = index
+            m = self._models_data[index]
+
+            model_id = str(m.get("model_id", ""))
+            self.model_id_combo.setCurrentText(model_id)
+            self.source_edit.setText(str(m.get("source") or ""))
+            self.device_combo.setCurrentText(str(m.get("device") or "auto"))
+
+            backend_val = m.get("backend")
+            self._update_backend_options(model_id, str(backend_val) if backend_val else "auto")
+
+            self.precision_combo.setCurrentText(str(m.get("precision") or "auto"))
+            self.batch_spin.setValue(int(m.get("batch_size", 1)))
+
+            # Enforce dynamic reactive constraints
+            self._update_device_constraints()
+            self._update_backend_constraints()
+
+            svcs = m.get("output_tag_services")
+            if svcs is not None:
+                self.svc_card.setChecked(True)
+                keys = svcs.get("keys", []) if isinstance(svcs, dict) else getattr(svcs, "keys", [])
+                self.model_services_editor.set_items(keys)
+            else:
+                self.svc_card.setChecked(False)
+                self.model_services_editor.set_items([])
+
+            if self._writable_tag_services:
+                self.model_services_editor.set_available_services(self._writable_tag_services)
+
+            self._update_filter_status_card(m)
+        finally:
+            self._is_loading_ui = was_loading
+
+    def _save_form_to_model(self, index: int) -> None:
+        if index < 0 or index >= len(self._models_data):
+            return
+
+        m = self._models_data[index]
+        model_id = self.model_id_combo.currentText().strip()
+        m["model_id"] = model_id
+        m["source"] = self.source_edit.text().strip() or None
+
+        device_val = self.device_combo.currentText().strip()
+        m["device"] = device_val
+
+        backend_text = self.backend_combo.currentText().strip()
+        m["backend"] = None if backend_text in ("auto", "") else backend_text
+
+        m["precision"] = self.precision_combo.currentText().strip()
+
+        if device_val.lower() == "cpu":
+            m["batch_size"] = 1
+        else:
+            m["batch_size"] = self.batch_spin.value()
+
+        if self.svc_card.isChecked():
+            svcs = self.model_services_editor.get_items()
+            m["output_tag_services"] = {"keys": svcs}
+        else:
+            m["output_tag_services"] = None
+
+        # Update sidebar item label
+        item = self.model_list.item(index)
+        if item and model_id:
+            item.setText(model_id)
+
+    def _on_add_model(self) -> None:
+        # Save current active form state first
+        if 0 <= self._current_index < len(self._models_data):
+            self._save_form_to_model(self._current_index)
+
+        new_model = {
+            "model_id": "wd-swinv2-v3",
+            "source": None,
+            "device": "auto",
+            "backend": None,
+            "precision": "auto",
+            "batch_size": 1,
+            "output_tag_services": None,
+        }
+        self._models_data.append(new_model)
+
+        self._is_loading_ui = True
+        new_row = len(self._models_data) - 1
+        try:
+            self.model_list.blockSignals(True)
+            self.model_list.addItem(QListWidgetItem("wd-swinv2-v3"))
+            self.model_list.setCurrentRow(new_row)
+            self.model_list.blockSignals(False)
+
+            self._load_model_to_form(new_row)
+        finally:
+            self._is_loading_ui = False
+
+        self.changed.emit()
+
+    def _on_remove_model(self) -> None:
+        row = self.model_list.currentRow()
+        if row < 0 or len(self._models_data) <= 1:
+            return  # Must maintain at least one model
+
+        self._is_loading_ui = True
+        try:
+            # 1. Remove model from internal data list without saving the form
+            self._models_data.pop(row)
+
+            # 2. Block list widget signals while adjusting the UI row
+            self.model_list.blockSignals(True)
+            self.model_list.takeItem(row)
+
+            # 3. Select the next available model
+            next_row = min(row, len(self._models_data) - 1)
+            self.model_list.setCurrentRow(next_row)
+            self.model_list.blockSignals(False)
+
+            # 4. Safely load the newly selected model into the form
+            self._load_model_to_form(next_row)
+        finally:
+            self._is_loading_ui = False
+
+        self.changed.emit()
+
+    def _on_svc_card_toggled(self, checked: bool) -> None:
+        del checked
+        self._on_field_changed()
+
+    def _on_field_changed(self) -> None:
+        if self._is_loading_ui:
+            return
+        self._save_form_to_model(self._current_index)
+        self.changed.emit()
+
+    def _on_browse_source(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Local Model Directory")
+        if folder:
+            # Automatically prepend 'local:' so vibe treats it as offline local storage
+            formatted_source = f"local:{folder}"
+            self.source_edit.setText(formatted_source)
+            self._on_field_changed()
+
+    def _update_filter_status_card(self, m: dict[str, Any]) -> None:
+        """Update the filter status card label based on active overrides."""
+        m_filter = m.get("output_filter")
+        if m_filter:
+            override_count = len(m_filter)
+            self.filter_status_label.setText(
+                f"<span style='color: #4fc3f7;'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
+            )
+        else:
+            self.filter_status_label.setText(
+                "<span style='color: #888;'>Inheriting all settings from Global Filter</span>"
+            )
+
+    def update_filter_overrides(self, models_data: list[dict[str, Any]]) -> None:
+        """Sync output_filter overrides modified in FiltersPage back into model data."""
+        for i, m_src in enumerate(models_data):
+            if i < len(self._models_data):
+                self._models_data[i]["output_filter"] = (
+                    copy.deepcopy(m_src.get("output_filter")) if m_src.get("output_filter") else None
+                )
+
+        if 0 <= self._current_index < len(self._models_data):
+            self._update_filter_status_card(self._models_data[self._current_index])
+
+    def _on_edit_filter_clicked(self) -> None:
+        if self._current_index >= 0:
+            self.request_filter_scope.emit(self._current_index)

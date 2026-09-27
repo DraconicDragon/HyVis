@@ -1,33 +1,68 @@
 # HyVis - Hydrus Tagger
 
-HyVis is a vibecoded CLI utility that tags files in your [Hydrus client](https://hydrusnetwork.github.io/hydrus/).
+> [!IMPORTANT]
+> **Work in Progress**: HyVis is fully functional and ready to use, but is still in pre-1.0 development. Minor breaking changes to configuration settings or CLI options may occur prior to v1.0 without automated migration paths.
 
-HyVis retrieves file paths from Hydrus file metadata and reads the files directly from your disk. It requires HyVis to run on the same machine (or have direct access to the same storage) as your Hydrus client. (I don't have a setup to test if files being saved on a NAS or similar works or not)  
-Support for downloading the files remotely over API and processing them that way may or may not be added in the future - if there is need/demand for it, it may be added sooner rather than later
+HyVis is a vibecoded local autotagging utility with optional desktop interface for your [Hydrus client](https://hydrusnetwork.github.io/hydrus/). It pairs vision transformer classification models with customizable tag filtering to automatically tag files and push them to Hydrus.
 
->[!NOTE]
-> It's worth noting that HyVis by default has a single, very simple and non-configurable post-processing step that replaces underscores with spaces before sending the tags to Hydrus (Example - Model outputs: `grea_(shingeki_no_bahamut)` and Hydrus gets: `grea (shingeki no bahamut)`; with [prefix mapping](CONFIGURATION.md#output_filtercategory_tag_prefix_mapping) set it would be `character:grea (shingeki no bahamut)`).
+HyVis reads files directly from your disk using paths retrieved from Hydrus file metadata, so it must run on the same machine (or have direct storage access) as your Hydrus client (I don't have a setup to test if files being saved on a NAS or similar works or not). Downloading files over API would be inefficient, so it's not implemented, but if needed, you can open an issue - I may or may not give it a try
+
+> [!NOTE]
+> HyVis automatically converts underscores to spaces (preserving kaomojis) before pushing tags to Hydrus: `grea_(shingeki_no_bahamut)` becomes `grea (shingeki no bahamut)`.  
+> Non-configurable (open an issue if youw ish this to be configurable).
 
 ## Table of Contents
 
 - [Some Key Features](#some-key-features)
+  - [Showcase](#showcase)
 - [Installation](#installation)
 - [Updating](#updating)
 - [Usage](#usage)
+  - [Desktop Interface (GUI)](#desktop-interface-gui)
+  - [HyVis CLI](#hyvis-cli)
   - [Configuration](#configuration)
     - [Supported and Recommended Models](#supported-and-recommended-models)
-  - [Running HyVis](#running-hyvis)
-  - [Showcase](#showcase)
   - [Useful CLI Flags](#useful-cli-flags)
 
 ---
 
 ## Some Key Features
 
-- File Fetching: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries) or by supplying [`--extra-hash-file`](#extra-hash-file) (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
-- [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus
-- Multi-Model Support: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially.
-- A bunch of configuration settings for filtering and modifying the output before sending it to Hydrus
+- **Desktop GUI (**`hyvis-gui`**)**: PySide6 (Qt) based UI for creating/editing HyVis TOML configuration files - with live Hydrus service sync and real-time validation; Should be a decent UX boost over editing TOMLs directly
+- **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying [`--extra-hash-file`](#extra-hash-file) (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
+- **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
+- **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
+- **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
+
+### Showcase
+
+- GUI
+
+<table align="center">
+  <tr>
+    <td align="center"><b>Main Page</b></td>
+    <td align="center"><b>Models Page</b></td>
+  </tr>
+  <tr>
+    <td><img src=".assets/gui_hydrus_page.png" alt="Main Page" width="100%"></td>
+    <td><img src=".assets/gui_models_page.png" alt="Models Page" width="100%"></td>
+  </tr>
+</table>
+
+<table align="center">
+  <tr>
+    <td align="center"><b>Output Filter + Error</b></td>
+    <td align="center"><b>Launch Dialog</b></td>
+  </tr>
+  <tr>
+    <td><img src=".assets/gui_filters_page.png" alt="Output Filter Page Including Error" width="100%"></td>
+    <td><img src=".assets/gui_preflight_launch_dialog.png" alt="Preflight Launch Dialog" width="100%"></td>
+  </tr>
+</table>
+
+- CLI
+
+<https://github.com/user-attachments/assets/41b6b7ac-1545-40ce-be31-4fa24bfe13e8>
 
 ---
 
@@ -58,10 +93,14 @@ python -m venv .venv
 
 ### 4. Install HyVis
 
-This installs the main utility and its core dependencies:
+Install HyVis and its core dependencies:
 
 ```bash
+# Core CLI only
 pip install .
+
+# With Desktop GUI
+pip install ".[gui]"
 ```
 
 ### 5. Install an Inference Backend
@@ -76,13 +115,13 @@ Feedback on alternative hardware configurations is welcome.
 - **CPU Only:**
 
   ```bash
-  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops"
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.10.0" "einops>=0.8.0"
   ```
 
 - **NVIDIA GPU (CUDA):**
 
   ```bash
-  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.10.0" "einops>=0.8.0" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
   ```
 
 > NOTE: If you have a Maxwell (eg: GTX 9xx), Pascal (GTX 10xx/Tesla P100/P40) or Volta (V100) GPU (or older), then you **MUST** switch out `cu128` in the install command above to `cu126` or `cu124`.  
@@ -96,13 +135,13 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
 - **CPU Only:**
 
   ```bash
-  pip install onnxruntime
+  pip install "onnxruntime>=1.17.3"
   ```
 
 - **NVIDIA GPU:**
 
   ```bash
-  pip install onnxruntime-gpu
+  pip install "onnxruntime-gpu>=1.17.3"
   ```
 
 > On Linux you may need to install CUDA and cuDNN manually through your package manager or whatever the correct method is for your distro.
@@ -127,13 +166,48 @@ pip install .
 
 ## Usage
 
+### Desktop Interface (GUI)
+
+You can launch the desktop configurator to visually configure settings, inspect candidate files, and launch tasks.
+While the venv is activated:
+
+```bash
+# Without TOML
+hyvis-gui
+
+# With TOML
+hyvis-gui path/to/config.toml
+```
+
+Two things you may want to know about:
+
+- Tooltips are on practically every element and show on mouse hover
+- You can interact with the issue items in the issues panel though left-clicking, which will take you to the erroneous page/widget
+  - Right-clicking will allow you to copy the issue message
+
+### HyVis CLI
+
+You can run the HyVis CLI utility through `hyvis` and by passing the path to your configured TOML file:
+
+```bash
+hyvis path/to/config.toml
+```
+
 ### Configuration
 
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
-To get started you can copy one of the examples in the `config_examples/` directory and modify the copy to your liking.
+To get started you can create a copy of one of the examples in the `config_examples/` directory and modify the copy to your liking.
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md). You may want to have this open while checking the example configs and editing/creating your own.
+
+> [!TIP]
+> **Model Downloads & Local Storage:**  
+> HyVis attempts to automatically download required model files from HuggingFace to it's cache (look up the default HuggingFace cache directory for your OS if you need to know that).  
+> You can customize `source` for each model in two ways:
+>
+> - **Existing local directory**: Prefix the path with `local:` (e.g. `source = "local:/path/to/model"`) to use files already on disk without any HuggingFace network requests.
+> - **Custom Hugging Face repo**: Provide a repository ID (e.g. `source = "username/my-custom-model"`) to download from an alternative repository or community fork.
 
 **Available example configs:**
 
@@ -148,18 +222,6 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 #### Supported and Recommended Models
 
 Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
-
-### Running HyVis
-
-You can run HyVis by passing the path to your configured TOML file:
-
-```bash
-hyvis path/to/config.toml
-```
-
-### Showcase
-
-<video controls src=".assets/showcase.mp4" title="HyVis Showcase"></video>
 
 ### Useful CLI Flags
 
@@ -189,4 +251,8 @@ hyvis path/to/config.toml
 
 <!-- ## FAQ
 
-There would be frequently asked questions here, but there are none, because I can't come up with any and nobody asked yet -->
+There would be frequently asked questions here, but there are none, because I can't come up with any and nobody asked yet 
+
+Q: Hydrus executable manager compatibility?
+A: Uhhhhhhh, need hyvis daemon
+-->

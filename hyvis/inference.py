@@ -135,7 +135,7 @@ def extract_tags(
                 elif isinstance(entries, dict):
                     tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
 
-    categories = output_filter.output_categories
+    categories = output_filter.allowed_categories
     # sets for fast lookups (normalized)
     include_set = {_norm(t) for t in output_filter.include_tags}
     exclude_set = {_norm(t) for t in output_filter.exclude_tags}
@@ -167,7 +167,7 @@ def extract_tags(
             is_allowed = norm_tag in include_set
 
             # 3. Category Whitelist: If not explicitly included, check category allowance
-            if not is_allowed and (not categories or category not in categories):
+            if not is_allowed and (categories is not None and category not in categories):
                 continue
 
             record = TagRecord(
@@ -539,12 +539,10 @@ async def infer_files(
                                 break
 
                         if all_models_cached:
-                            if config.hydrus.add_tags:
-                                a_cfg = config.hydrus.add_tags
+                            for a_cfg in config.hydrus.add_tags:
                                 for svc_key in a_cfg.tag_service_keys:
                                     db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
-                            if config.hydrus.remove_tags:
-                                r_cfg = config.hydrus.remove_tags
+                            for r_cfg in config.hydrus.remove_tags:
                                 for svc_key in r_cfg.tag_service_keys:
                                     db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
 

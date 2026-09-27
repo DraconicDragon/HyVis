@@ -1,0 +1,417 @@
+"""
+state.py — Central state management, Pydantic synchronization, and live Hydrus entity sourcing.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Literal
+
+import tomli_w
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+
+from hyvis.config import AppConfig
+
+logger = logging.getLogger(__name__)
+
+ConnectionStatus = Literal["offline", "connecting", "connected", "error"]
+
+
+def _prune_none(obj: Any) -> Any:
+    """
+    Recursively prune None values and empty sub-tables from dictionaries.
+    Ensures empty mappings don't emit dangling [section.table] headers in TOML.
+    """
+    if isinstance(obj, dict):
+        cleaned: dict[str, Any] = {}
+        for k, v in obj.items():
+            if v is not None:
+                pruned = _prune_none(v)
+                # Prune empty sub-dictionaries (except required root sections)
+                if isinstance(pruned, dict) and not pruned and k not in ("hydrus", "inference"):
+                    continue
+                if pruned is not None:
+                    cleaned[k] = pruned
+        return cleaned
+    if isinstance(obj, (list, tuple)):
+        return [_prune_none(v) for v in obj if v is not None]
+    return obj
+
+
+# Minimal starter template for new configurations (starts with clean empty categories)
+_DEFAULT_CONFIG_DICT: dict[str, Any] = {
+    "hydrus": {
+        "api_url": "http://127.0.0.1:45869",
+        "api_key": "",
+        "tag_queries": [
+            {
+                "tags": ["system:limit is 50"],
+                "tag_service_keys": [""],
+            }
+        ],
+        "output_tag_services": {"keys": [""]},
+    },
+    "inference": {
+        "models": [
+            {
+                "model_id": "wd-swinv2-v3",
+            }
+        ]
+    },
+    # output_filter must be kept or it errors
+    "output_filter": {},
+}
+
+
+class _HydrusWorkerSignals(QObject):
+    """Signals emitted by background Hydrus connection worker."""
+
+    success = Signal(dict, dict, list, str)  # (all_services, writable_services, pages, version_str)
+    error = Signal(str)  # error message
+
+
+class _HydrusFetchWorker(QRunnable):
+    """Worker task that queries Hydrus services and open media pages in a background thread."""
+
+    def __init__(self, api_url: str, api_key: str) -> None:
+        super().__init__()
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
+        self.signals = _HydrusWorkerSignals()
+
+    def run(self) -> None:
+        from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
+
+        try:
+            client = HydrusClient(self.api_url, self.api_key)
+            client.verify_connection()
+
+            # 1. Retrieve version info
+            version_str = "unknown"
+            try:
+                v_info = client.get_version_info()
+                version_str = str(
+                    v_info.get("hydrus_version") or v_info.get("client_version") or v_info.get("version") or "unknown"
+                )
+            except Exception:
+                pass
+
+            # 2. Retrieve services
+            resp = client.get_services()
+            raw_services = resp.get("services", {})
+
+            all_tag_services: dict[str, Any] = {}
+            writable_tag_services: dict[str, str] = {}
+
+            for key, info in raw_services.items():
+                name = str(info.get("name", key))
+                type_pretty = str(info.get("type_pretty", "")).lower()
+                stype = info.get("type")
+
+                # Tag services have 'tag' in type_pretty or type in (0, 5, 10)
+                is_tag_domain = "tag" in type_pretty or stype in (0, 5, 10)
+                if is_tag_domain:
+                    # Hydrus service type 10 is 'all known tags' / combined tag domains (virtual union)
+                    is_virtual = (stype == 10) or ("combined" in type_pretty)
+
+                    all_tag_services[key] = {
+                        "name": name,
+                        "type": stype,
+                        "type_pretty": info.get("type_pretty", ""),
+                        "is_virtual": is_virtual,
+                    }
+
+                    # Writable services: local tag domains (5) or tag repositories (0)
+                    # Excludes virtual read-only "all known tags" and combined tag domains
+                    if not is_virtual:
+                        writable_tag_services[key] = name
+
+            # 3. Retrieve open media pages
+            pages: list[dict[str, Any]] = []
+            try:
+                root_pages = client.get_pages()
+                raw_node = root_pages.get("pages", {})
+
+                collected_media: list[dict[str, Any]] = []
+
+                def _walk(node: dict[str, Any]) -> None:
+                    if node.get("is_media_page") is True:
+                        collected_media.append(
+                            {
+                                "name": str(node.get("name", "Unnamed Page")),
+                                "page_key": str(node.get("page_key", "")),
+                            }
+                        )
+                    for child in node.get("pages", []):
+                        _walk(child)
+
+                _walk(raw_node)
+
+                # Count duplicates to calculate disambiguation indices
+                name_totals: dict[str, int] = {}
+                for p in collected_media:
+                    name_totals[p["name"]] = name_totals.get(p["name"], 0) + 1
+
+                name_indices: dict[str, int] = {}
+                for p in collected_media:
+                    name = p["name"]
+                    idx = name_indices.get(name, 0)
+                    name_indices[name] = idx + 1
+                    has_duplicates = name_totals[name] > 1
+
+                    num_files = None
+                    try:
+                        p_info = client.get_page_info(p["page_key"], simple=True)
+                        media = p_info.get("media") or p_info.get("page_info", {}).get("media")
+                        if media:
+                            num_files = media.get("num_files")
+                    except Exception:
+                        pass
+
+                    pages.append(
+                        {
+                            "name": name,
+                            "index": idx if has_duplicates else None,
+                            "raw_index": idx,
+                            "has_duplicates": has_duplicates,
+                            "num_files": num_files,
+                            "page_key": p["page_key"],
+                        }
+                    )
+            except Exception as exc:
+                logger.debug("Failed to fetch Hydrus open pages: %s", exc)
+
+            self.signals.success.emit(all_tag_services, writable_tag_services, pages, version_str)
+
+        except HydrusConnectionError as exc:
+            self.signals.error.emit(f"Offline: {exc}")
+        except HydrusError as exc:
+            self.signals.error.emit(f"API Error: {exc}")
+        except Exception as exc:
+            self.signals.error.emit(f"Connection failed: {exc}")
+
+
+class ConfigState(QObject):
+    """Manages the lifecycle, validation, and live Hydrus entity sourcing of an AppConfig."""
+
+    config_loaded = Signal(object)  # Emits AppConfig instance on open / reset
+    config_saved = Signal(Path)  # Emits Path when saved to disk
+    dirty_changed = Signal(bool)  # Emits True if unsaved changes exist
+    validation_changed = Signal(list)  # Emits list of human-readable error strings
+
+    # Hydrus entity sourcing signals
+    services_updated = Signal(dict, dict)  # (all_tag_services, writable_tag_services)
+    pages_updated = Signal(list)  # list of open media page dicts
+    connection_changed = Signal(str, str)  # (status, display_message)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._current_path: Path | None = None
+        self._is_dirty: bool = False
+        self._config: AppConfig | None = None
+
+        # Hydrus sourcing state
+        self._tag_services: dict[str, Any] = {}
+        self._writable_tag_services: dict[str, str] = {}
+        self._pages: list[dict[str, Any]] = []
+        self._connection_status: ConnectionStatus = "offline"
+        self._connection_info: str = "Not connected"
+
+        # Start with default template
+        self.new_config()
+
+    # region Properties
+
+    @property
+    def current_path(self) -> Path | None:
+        return self._current_path
+
+    @property
+    def is_dirty(self) -> bool:
+        return self._is_dirty
+
+    @property
+    def config(self) -> AppConfig:
+        assert self._config is not None
+        return self._config
+
+    @property
+    def tag_services(self) -> dict[str, Any]:
+        """All tag services (including read-only and virtual services)."""
+        return dict(self._tag_services)
+
+    @property
+    def writable_tag_services(self) -> dict[str, str]:
+        """Writable destination tag services only."""
+        return dict(self._writable_tag_services)
+
+    @property
+    def pages(self) -> list[dict[str, Any]]:
+        """List of open media pages currently in the Hydrus client."""
+        return list(self._pages)
+
+    @property
+    def connection_status(self) -> ConnectionStatus:
+        """One of: 'connected', 'connecting', 'offline', 'error'."""
+        return self._connection_status
+
+    @property
+    def connection_info(self) -> str:
+        """Display label for connection status."""
+        return self._connection_info
+
+    # endregion
+
+    def set_dirty(self, dirty: bool = True) -> None:
+        if self._is_dirty != dirty:
+            self._is_dirty = dirty
+            self.dirty_changed.emit(self._is_dirty)
+
+    def new_config(self) -> None:
+        """Create a fresh default configuration."""
+        self._config = AppConfig.model_validate(_DEFAULT_CONFIG_DICT)
+        self._current_path = None
+        self.set_dirty(False)
+        self.config_loaded.emit(self._config)
+        self.validate()
+
+    def load_from_file(self, path: Path | str) -> tuple[bool, str | None]:
+        """
+        Parse and load a TOML configuration file with resilient schema tolerance.
+        Returns: (success: bool, error_message: str | None)
+        """
+        file_path = Path(path).resolve()
+        try:
+            loaded = AppConfig.from_file(file_path, exit_on_error=False, lenient=True)
+            self._config = loaded
+            self._current_path = file_path
+            self.set_dirty(False)
+            self.config_loaded.emit(self._config)
+            self.validate()
+            logger.info("Loaded configuration from %s", file_path)
+
+            # Auto-sync services if credentials are present
+            if loaded.hydrus.api_url and loaded.hydrus.api_key:
+                self.sync_hydrus_services(loaded.hydrus.api_url, loaded.hydrus.api_key)
+
+            return True, None
+        except Exception as exc:
+            logger.error("Failed to load config '%s': %s", file_path, exc)
+            return False, str(exc)
+
+    def validate(self) -> list[str]:
+        """Run full Pydantic and business validation and emit validation status."""
+        errors: list[str] = []
+        if self._config is None:
+            errors.append("No configuration loaded.")
+        else:
+            try:
+                # Force Pydantic re-validation of the current state
+                dumped = self._config.model_dump(mode="json", exclude_none=True)
+                clean_cfg = AppConfig.model_validate(dumped)
+                errors.extend(clean_cfg.hyvis_validate())
+            except Exception as exc:
+                errors.append(str(exc))
+
+        self.validation_changed.emit(errors)
+        return errors
+
+    def save_to_file(
+        self,
+        path: Path | str | None = None,
+        raw_data: dict[str, Any] | None = None,
+    ) -> bool:
+        """Serialize and save the current configuration to disk as valid TOML."""
+        target_path = Path(path).resolve() if path else self._current_path
+        if target_path is None:
+            raise ValueError("No file path specified for saving.")
+
+        try:
+            if raw_data is not None:
+                data = _prune_none(raw_data)
+            elif self._config is not None:
+                raw_dump = self._config.model_dump(mode="json", exclude_none=True)
+                data = _prune_none(raw_dump)
+            else:
+                return False
+
+            toml_str = tomli_w.dumps(data)
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(toml_str, encoding="utf-8")
+
+            self._current_path = target_path
+            self.set_dirty(False)
+            self.config_saved.emit(target_path)
+            logger.info("Saved configuration to %s", target_path)
+            return True
+        except Exception as exc:
+            logger.error("Failed to save config to '%s': %s", target_path, exc)
+            raise
+
+    def update_config(self, new_config: AppConfig) -> None:
+        """Update active configuration from page views and mark dirty."""
+        self._config = new_config
+        self.set_dirty(True)
+        self.validate()
+
+    def validate(self) -> list[str]:
+        """Run business validation rules and emit validation status."""
+        if self._config is None:
+            errors = ["No configuration loaded."]
+        else:
+            errors = self._config.hyvis_validate()
+
+        self.validation_changed.emit(errors)
+        return errors
+
+    # region Live Hydrus Sourcing
+
+    def sync_hydrus_services(
+        self,
+        api_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Fetch Hydrus services in a background thread without freezing the UI."""
+        cfg = self.config
+        url = api_url or (cfg.hydrus.api_url if cfg else "")
+        key = api_key or (cfg.hydrus.api_key if cfg else "")
+
+        if not url or not key:
+            self._connection_status = "offline"
+            self._connection_info = "Credentials missing"
+            self.connection_changed.emit(self._connection_status, self._connection_info)
+            return
+
+        self._connection_status = "connecting"
+        self._connection_info = "Connecting..."
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+        worker = _HydrusFetchWorker(url, key)
+        worker.signals.success.connect(self._on_fetch_success)
+        worker.signals.error.connect(self._on_fetch_error)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_fetch_success(
+        self,
+        all_tags: dict[str, Any],
+        writable_tags: dict[str, str],
+        pages: list[dict[str, Any]],
+        version_str: str,
+    ) -> None:
+        self._tag_services = all_tags
+        self._writable_tag_services = writable_tags
+        self._pages = pages
+        self._connection_status = "connected"
+        self._connection_info = f"Hydrus v{version_str}"
+        self.services_updated.emit(self._tag_services, self._writable_tag_services)
+        self.pages_updated.emit(self._pages)
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+    def _on_fetch_error(self, err_msg: str) -> None:
+        self._connection_status = "error"
+        self._connection_info = err_msg
+        self.connection_changed.emit(self._connection_status, self._connection_info)
+
+    # endregion

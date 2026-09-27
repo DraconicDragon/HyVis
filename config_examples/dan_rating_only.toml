@@ -32,7 +32,7 @@ default_threshold = 0.4
 
 # *** Output selection ***
 
-output_categories = ["rating"]
+allowed_categories = ["rating"]
 
 [output_filter.max_tags_per_category]
 "rating" = 1

@@ -19,7 +19,7 @@ default_threshold = 0.4
 
 # *** Output selection ***
 
-output_categories = [
+allowed_categories = [
     "rating",
     "general",
     "contributor",

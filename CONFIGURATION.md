@@ -187,42 +187,46 @@ keys = ["your_service_key_here", "another_service_key_here"]
 
 </details>
 
-### `[hydrus.add_tags]`
+### `[[hydrus.add_tags]]`
 
-Specifies arbitrary extra tags to apply to successfully processed files. These tags are added to files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies rules for extra tags to apply to successfully processed files. These tags are added **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+
+Defining multiple blocks allows routing different tags to different tag services (e.g. local workflow tags to your local service, and model metadata tags to a shared service).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | No | List of tags to add to files. |
-| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to write the tags to. <br> **Only required if `tags` is specified*. |
+| `tags` | Array of Strings | **Yes** | List of tags to add to files. |
+| `tag_service_keys` | Array of Strings | **Yes** | Destination Hydrus tag service keys to write these tags to. |
 
 <details>
-<summary>💡 View <code>[hydrus.add_tags]</code> Example</summary>
+<summary>💡 View <code>[[hydrus.add_tags]]</code> Example</summary>
 
 ```toml
-[hydrus.add_tags]
+[[hydrus.add_tags]]
 tags = ["ai:tagged"]
 tag_service_keys = ["my_service_key_here"]
 ```
 
 </details>
 
-### `[hydrus.remove_tags]`
+### `[[hydrus.remove_tags]]`
 
-Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed from files **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed **only after** all configured models have successfully processed them (both inference and pushing succeeded).
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass the inference using the local database cache, and retry the cleanup phase. You can also rerun the cleanup and any pending pushes by executing `hyvis <config> --push-only`.
+Defining multiple blocks allows targeting specific cleanup tags to specific tag services.
+
+If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass inference using the local database cache, and retry the cleanup phase. You can also rerun pending cleanups anytime by executing `hyvis <config> --push-only`.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `tags` | Array of Strings | No | List of tags to remove from successfully processed files. |
-| `tag_service_keys` | Array of Strings | No* | Hydrus tag service keys to remove the tags from. <br> **Only required if `tags` is specified*. |
+| `tag_service_keys` | Array of Strings | No* | Target Hydrus tag service keys to remove these tags from. <br> **Only required if `tags` is specified*. |
 
 <details>
-<summary>💡 View <code>[hydrus.remove_tags]</code> Example</summary>
+<summary>💡 View <code>[[hydrus.remove_tags]]</code> Example</summary>
 
 ```toml
-[hydrus.remove_tags]
+[[hydrus.remove_tags]]
 tags = ["temp:tagme", "queue:ai processing"]
 tag_service_keys = ["my_service_key_here"]
 ```
@@ -240,8 +244,8 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 | `prefer_tag_level_thresholds` | Boolean | No | Uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* <br> Defaults to `true`. |
 | `tag_level_threshold_relative_offset` | Float | No | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. <br> Defaults to `0.0`. |
 | `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. <br> Defaults to `0.4`. |
-| `output_categories` | Array of Strings | No* | Limit output tags to specified categories. Empty list outputs no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. <br> Defaults to `[]`. <br> **Required if `include_tags` is not specified or empty*. |
-| `include_tags` | Array of Strings | No* | Explicit list of tags to **always include**, bypassing any `output_categories` limitations (exact matches only). <br> Defaults to `[]`. <br> **Required if `output_categories` is not specified or empty*. |
+| `allowed_categories` | Array of Strings / Null | No | Limit output tags to specified categories. If omitted (or `null`), **all categories** are emitted. An explicit empty list `[]` allows no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. <br> Defaults to `null`. |
+| `include_tags` | Array of Strings | No* | Explicit list of tags to **always include**, bypassing any `allowed_categories` limitations (exact matches only). <br> Defaults to `[]`. <br> **Required if `allowed_categories` is not specified or empty*. |
 | `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). <br> Defaults to `[]`. |
 
 <details>
@@ -252,9 +256,9 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 prefer_tag_level_thresholds = true
 tag_level_threshold_relative_offset = 0.0
 default_threshold = 0.4
-output_categories = ["rating", "general", "artist", "copyright", "character"]
+allowed_categories = ["rating", "general", "artist", "copyright", "character"]
 
-# Ensure some specific meta tags bypass output_categories restriction:
+# Ensure some specific meta tags bypass allowed_categories restriction:
 include_tags = [
     "some_meta_tag_1",
     "some_meta_tag_2"
@@ -447,7 +451,7 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). You can find all supported and recommended models in the [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md) document. |
-| `source` | String / Null | No | Path to a local folder containing model files (or, if you are experimenting: a HuggingFace repo ID). If omitted, HyVis will attempt to download the model from HuggingFace. <br> If you set source to a local folder which does NOT have any/all model files required present, then HyVis will download the (missing) files into that directory instead of the `HF_HOME` cache directory. <br> Defaults to `null`. |
+| `source` | String / Null | No | Model source location. <br>• **Omitted / `null` (default)**: Automatically downloads from the model's default Hugging Face repository into your HF cache. <br>• **`local:/path/to/folder`**: Uses an existing local directory on disk (skips network requests entirely). <br>• **`username/repo_name`**: Pulls files from a custom or forked Hugging Face repository. <br>Defaults to `null`. |
 | `device` | String | No | Hardware device to run inference on (e.g., `"auto"`, `"cuda"`/`"gpu"`, `"cpu"`). <br> Defaults to `"auto"`. |
 | `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. <br> Defaults to `null` (auto-detect). |
 | `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory. <br> Defaults to `"auto"`. |
@@ -483,10 +487,10 @@ source = "/path/to/models/eva02"
 device = "cuda"
 batch_size = 2
 
-# Overrides default_threshold and output_categories just for the second model
+# Overrides default_threshold and allowed_categories just for the second model
 [inference.models.output_filter]
 default_threshold = 0.5
-output_categories = ["rating", "character", "general"]
+allowed_categories = ["rating", "character", "general"]
 
 # Directs the second model's output to a separate tag service
 [inference.models.output_tag_services]

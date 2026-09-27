@@ -22,7 +22,7 @@ default_threshold = 0.35
 
 # *** Output selection ***
 
-output_categories = [
+allowed_categories = [
     "rating",
     "general",
     #"artist",

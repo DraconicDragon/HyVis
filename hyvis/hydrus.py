@@ -523,16 +523,16 @@ def validate_service_keys(
                     missing.append(f"model '{model_cfg.model_id}' output_tag_services: {key}")
 
     # Add tags service keys
-    if cfg.hydrus.add_tags is not None:
-        for key in cfg.hydrus.add_tags.tag_service_keys:
+    for idx, a_cfg in enumerate(cfg.hydrus.add_tags):
+        for key in a_cfg.tag_service_keys:
             if key not in service_name_by_key:
-                missing.append(f"hydrus.add_tags: {key}")
+                missing.append(f"hydrus.add_tags[{idx}].tag_service_keys: {key}")
 
     # Remove tags service keys
-    if cfg.hydrus.remove_tags is not None:
-        for key in cfg.hydrus.remove_tags.tag_service_keys:
+    for idx, r_cfg in enumerate(cfg.hydrus.remove_tags):
+        for key in r_cfg.tag_service_keys:
             if key not in service_name_by_key:
-                missing.append(f"hydrus.remove_tags: {key}")
+                missing.append(f"hydrus.remove_tags[{idx}].tag_service_keys: {key}")
 
     # Optional: tag query service keys
     for idx, query in enumerate(cfg.hydrus.tag_queries):
