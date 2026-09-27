@@ -535,8 +535,10 @@ class ModelConfig(StrictBaseModel):
     source: str | None = Field(
         default=None,
         title="Source Path / Repo",
-        description="Path to local folder containing model weights, or a HuggingFace repo ID. Defaults to standard HF download.",
+        description="Model location. Leave empty to auto-download from the default Hugging Face repository. "
+        "Use 'local:/path/to/folder' to load from local disk, or provide a Hugging Face repo ID ('username/repo') to load a custom fork.",
         json_schema_extra=field_meta(picker="directory"),
+        examples=["local:/path/to/models/swinv2", "SmilingWolf/wd-swinv2-tagger-v3"],
     )
     device: str = Field(
         default="auto",

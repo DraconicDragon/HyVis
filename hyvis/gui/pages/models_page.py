@@ -120,7 +120,7 @@ class ModelsPage(BaseConfigPage):
         self.source_edit = QLineEdit(source_box)
         bind_field_metadata(self.source_edit, m_fields["source"])
         if not self.source_edit.placeholderText():
-            self.source_edit.setPlaceholderText("Default HuggingFace repo (leave empty)")
+            self.source_edit.setPlaceholderText("Default HF repo (or 'local:/path' or 'user/repo')")
         self.source_edit.textChanged.connect(self._on_field_changed)
         source_row.addWidget(self.source_edit, stretch=1)
 
@@ -515,7 +515,9 @@ class ModelsPage(BaseConfigPage):
     def _on_browse_source(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Local Model Directory")
         if folder:
-            self.source_edit.setText(folder)
+            # Automatically prepend 'local:' so vibe treats it as offline local storage
+            formatted_source = f"local:{folder}"
+            self.source_edit.setText(formatted_source)
             self._on_field_changed()
 
     def _update_filter_status_card(self, m: dict[str, Any]) -> None:

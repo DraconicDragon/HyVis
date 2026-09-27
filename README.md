@@ -62,7 +62,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 
 - CLI
 
-https://github.com/user-attachments/assets/41b6b7ac-1545-40ce-be31-4fa24bfe13e8
+<https://github.com/user-attachments/assets/41b6b7ac-1545-40ce-be31-4fa24bfe13e8>
 
 ---
 
@@ -200,6 +200,14 @@ HyVis uses TOML configuration files to define your Hydrus API connection, search
 To get started you can create a copy of one of the examples in the `config_examples/` directory and modify the copy to your liking.
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md). You may want to have this open while checking the example configs and editing/creating your own.
+
+> [!TIP]
+> **Model Downloads & Local Storage:**  
+> HyVis attempts to automatically download required model files from HuggingFace to it's cache (look up the default HuggingFace cache directory for your OS if you need to know that).  
+> You can customize `source` for each model in two ways:
+>
+> - **Existing local directory**: Prefix the path with `local:` (e.g. `source = "local:/path/to/model"`) to use files already on disk without any HuggingFace network requests.
+> - **Custom Hugging Face repo**: Provide a repository ID (e.g. `source = "username/my-custom-model"`) to download from an alternative repository or community fork.
 
 **Available example configs:**
 

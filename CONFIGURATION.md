@@ -451,7 +451,7 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). You can find all supported and recommended models in the [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md) document. |
-| `source` | String / Null | No | Path to a local folder containing model files (or, if you are experimenting: a HuggingFace repo ID). If omitted, HyVis will attempt to download the model from HuggingFace. <br> If you set source to a local folder which does NOT have any/all model files required present, then HyVis will download the (missing) files into that directory instead of the `HF_HOME` cache directory. <br> Defaults to `null`. |
+| `source` | String / Null | No | Model source location. <br>• **Omitted / `null` (default)**: Automatically downloads from the model's default Hugging Face repository into your HF cache. <br>• **`local:/path/to/folder`**: Uses an existing local directory on disk (skips network requests entirely). <br>• **`username/repo_name`**: Pulls files from a custom or forked Hugging Face repository. <br>Defaults to `null`. |
 | `device` | String | No | Hardware device to run inference on (e.g., `"auto"`, `"cuda"`/`"gpu"`, `"cpu"`). <br> Defaults to `"auto"`. |
 | `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. <br> Defaults to `null` (auto-detect). |
 | `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory. <br> Defaults to `"auto"`. |
