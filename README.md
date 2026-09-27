@@ -115,13 +115,13 @@ Feedback on alternative hardware configurations is welcome.
 - **CPU Only:**
 
   ```bash
-  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops"
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.10.0" "einops>=0.8.0"
   ```
 
 - **NVIDIA GPU (CUDA):**
 
   ```bash
-  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.0.0" "einops" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+  pip install "torch>=2.7.1" "safetensors>=0.6.2" "timm>=1.0.22" "transformers>=5.10.0" "einops>=0.8.0" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
   ```
 
 > NOTE: If you have a Maxwell (eg: GTX 9xx), Pascal (GTX 10xx/Tesla P100/P40) or Volta (V100) GPU (or older), then you **MUST** switch out `cu128` in the install command above to `cu126` or `cu124`.  
@@ -135,13 +135,13 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
 - **CPU Only:**
 
   ```bash
-  pip install onnxruntime
+  pip install "onnxruntime>=1.17.3"
   ```
 
 - **NVIDIA GPU:**
 
   ```bash
-  pip install onnxruntime-gpu
+  pip install "onnxruntime-gpu>=1.17.3"
   ```
 
 > On Linux you may need to install CUDA and cuDNN manually through your package manager or whatever the correct method is for your distro.
