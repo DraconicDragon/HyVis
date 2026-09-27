@@ -62,6 +62,8 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 
 - CLI
 
+https://github.com/user-attachments/assets/41b6b7ac-1545-40ce-be31-4fa24bfe13e8
+
 ---
 
 ## Installation
