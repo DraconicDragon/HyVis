@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.33.0",
     "hydrus-api>=5.3.0",
-    "vibe @ git+https://github.com/DraconicDragon/vibe@1a64a59e4619097fd9e5ab069a9ab1bb8fbf161d",
-    "vibe-result-transforms @ git+https://github.com/DraconicDragon/vibe-result-transforms@12fde856948eaa61795e415c5b691b4d80fef438",
+    "vibe @ git+https://github.com/DraconicDragon/vibe@93c647eb556648fe5c16a589bf9dc89aab3ac827",
+    "vibe-result-transforms @ git+https://github.com/DraconicDragon/vibe-result-transforms@bb8a7331dda60b33c411aee1e423ddfdbeb4c822",
     "tomli-w>=1.2.0",
     "pydantic>=2.4.0,<3",
 ]
