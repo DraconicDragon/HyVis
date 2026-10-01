@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 #: Stop the run after this many consecutive errors (something is clearly wrong).
 MAX_CONSECUTIVE_ERRORS = 10
 
+_CLEANER = CleanTags()
+
 
 # region FileSource protocol
 
@@ -214,14 +216,13 @@ def extract_tags(
     # region Stage 2
     # Presentation layer
 
-    cleaner = CleanTags()
     formatted_map: dict[str, TagRecord] = {}
 
     for r in surviving_records:
         norm_raw = _norm(r.raw_tag)
 
         # 1. Clean underscores to spaces while preserving kaomojis
-        cleaned_tag = cleaner.clean_text(r.raw_tag)
+        cleaned_tag = _CLEANER.clean_text(r.raw_tag)
         norm_cleaned = _norm(cleaned_tag)
 
         # 2. Tag replacement (checks both normalized raw and cleaned versions)
