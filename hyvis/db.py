@@ -215,7 +215,7 @@ class Database:
         self,
         file_hash: str,
         model_id: str,
-        result_dict: dict[str, Any],
+        category_scores: dict[str, dict[str, float]],
         *,
         enabled: bool = True,
     ) -> None:
@@ -228,22 +228,10 @@ class Database:
             json_payload = "{}"
         else:
             pruned_categories: dict[str, dict[str, float]] = {}
-            raw_cats = result_dict.get("categories") or result_dict.get("tags") or {}
-
-            if isinstance(raw_cats, dict):
-                for cat_name, entries in raw_cats.items():
-                    cat_dict: dict[str, float] = {}
-                    if isinstance(entries, list):
-                        for entry in entries:
-                            if isinstance(entry, dict) and entry.get("score", 0.0) >= self._min_cache_score:
-                                cat_dict[entry["tag"]] = round(float(entry["score"]), 4)
-                    elif isinstance(entries, dict):
-                        for tag, score in entries.items():
-                            if float(score) >= self._min_cache_score:
-                                cat_dict[tag] = round(float(score), 4)
-
-                    if cat_dict:
-                        pruned_categories[cat_name] = cat_dict
+            for cat, tag_map in category_scores.items():
+                filtered = {tag: round(score, 4) for tag, score in tag_map.items() if score >= self._min_cache_score}
+                if filtered:
+                    pruned_categories[cat] = filtered
 
             json_payload = json.dumps(pruned_categories, separators=(",", ":"))
 

@@ -515,7 +515,7 @@ async def infer_files(
                         db.save_raw_cache(
                             file_hash,
                             model_cfg.model_id,
-                            raw_result.to_dict(),
+                            raw_result.as_category_score_dict(),
                             enabled=config.database.cache_raw_predictions,
                         )
 
