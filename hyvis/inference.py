@@ -107,10 +107,38 @@ def _norm(tag: str) -> str:
     return tag.strip().replace("_", " ")
 
 
+@dataclass(slots=True, frozen=True)
+class CompiledOutputFilter:
+    """Pre-compiled normalized lookup sets for fast tag extraction."""
+
+    filter_cfg: OutputFilterConfig
+    include_set: set[str]
+    exclude_set: set[str]
+    subset_managed_tags: set[str]
+    prefix_overrides: dict[str, str]
+    category_prefixes: dict[str, str]
+    tag_replacements: dict[str, str]
+    compiled_subsets: list[tuple[set[str], int]]
+
+
+def compile_output_filter(output_filter: OutputFilterConfig) -> CompiledOutputFilter:
+    """Compile an OutputFilterConfig once so sets/dicts aren't rebuilt on every image."""
+    return CompiledOutputFilter(
+        filter_cfg=output_filter,
+        include_set={_norm(t) for t in output_filter.include_tags},
+        exclude_set={_norm(t) for t in output_filter.exclude_tags},
+        subset_managed_tags={_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags},
+        prefix_overrides={_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()},
+        category_prefixes=dict(output_filter.category_tag_prefix_mapping),
+        tag_replacements={_norm(k): v for k, v in output_filter.tag_replacements.items()},
+        compiled_subsets=[({_norm(t) for t in g.tags}, g.limit) for g in output_filter.max_tags_per_subset],
+    )
+
+
 def extract_tags(
     result_input: TagResult | dict[str, Any],
     *,
-    output_filter: OutputFilterConfig,
+    output_filter: OutputFilterConfig | CompiledOutputFilter,
 ) -> list[TagRecord]:
     """
     Convert a TagResult or dictionary representation into TagRecord objects.
@@ -121,6 +149,14 @@ def extract_tags(
       Stage 2 (Presentation Layer): Cleans underscores to spaces, applies tag
               replacements, deduplicates by max score, and applies namespace prefixes.
     """
+    # Accept either raw config or pre-compiled filter
+    if isinstance(output_filter, CompiledOutputFilter):
+        compiled = output_filter
+        filter_cfg = output_filter.filter_cfg
+    else:
+        compiled = compile_output_filter(output_filter)
+        filter_cfg = output_filter
+
     # Normalize input into {category: {tag: score}} mapping
     tags_by_category: dict[str, dict[str, float]] = {}
     if isinstance(result_input, TagResult):
@@ -137,17 +173,14 @@ def extract_tags(
                 elif isinstance(entries, dict):
                     tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
 
-    categories = output_filter.allowed_categories
-    # sets for fast lookups (normalized)
-    include_set = {_norm(t) for t in output_filter.include_tags}
-    exclude_set = {_norm(t) for t in output_filter.exclude_tags}
+    categories = filter_cfg.allowed_categories
+    include_set = compiled.include_set
+    exclude_set = compiled.exclude_set
+    subset_managed_tags = compiled.subset_managed_tags
 
-    # set of all tags governed by custom subset limits (normalized)
-    subset_managed_tags = {_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags}
-
-    prefix_overrides = {_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()}
-    category_prefixes = output_filter.category_tag_prefix_mapping
-    tag_replacements = {_norm(k): v for k, v in output_filter.tag_replacements.items()}
+    prefix_overrides = compiled.prefix_overrides
+    category_prefixes = compiled.category_prefixes
+    tag_replacements = compiled.tag_replacements
 
     # region Stage 1
     # Decision engine
@@ -189,21 +222,20 @@ def extract_tags(
 
     # apply category limits
     for category, cat_records in standard_records_by_category.items():
-        limit = output_filter.max_tags_per_category.get(category)
+        limit = filter_cfg.max_tags_per_category.get(category)
         if limit is not None:
             # sort descending by score, keep top-N
             cat_records.sort(key=lambda r: r.score, reverse=True)
             cat_records = cat_records[:limit]
         surviving_records.extend(cat_records)
 
-    # apply subset limits to isolated tags
-    for group in output_filter.max_tags_per_subset:
-        group_tags_set = {_norm(t) for t in group.tags}
+    # apply subset limits to isolated tags using pre-compiled tag sets
+    for group_tags_set, limit in compiled.compiled_subsets:
         matching_subset_records = [r for r in subset_records if _norm(r.raw_tag) in group_tags_set]
 
-        if len(matching_subset_records) > group.limit:
+        if len(matching_subset_records) > limit:
             matching_subset_records.sort(key=lambda r: r.score, reverse=True)
-            matching_subset_records = matching_subset_records[: group.limit]
+            matching_subset_records = matching_subset_records[:limit]
 
         surviving_records.extend(matching_subset_records)
 
@@ -491,6 +523,11 @@ async def infer_files(
             progress.reset_start_time()
             pipeline = build_transform_pipeline(session, eff_filter)
 
+            # Pre-calculate once per model so the inner loop does zero allocations:
+            compiled_filter = compile_output_filter(eff_filter)
+            total_model_tags = len(session.tagger.catalog.labels) if session.tagger.catalog else 0
+            cache_raw_enabled = config.database.cache_raw_predictions
+
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
 
             async for chunk in session.infer_async(inputs, batch_size=model_cfg.batch_size):
@@ -511,19 +548,19 @@ async def infer_files(
                         # 1. Upsert known_file FIRST to satisfy foreign key constraint!
                         db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
 
-                        # 2. Save un-culled raw predictions to SQLite cache (if enabled)
+                        # 2. Save un-culled raw predictions to SQLite cache (ONLY if enabled)
                         db.save_raw_cache(
                             file_hash,
                             model_cfg.model_id,
-                            raw_result.as_category_score_dict() if config.database.cache_raw_predictions else {},
-                            enabled=config.database.cache_raw_predictions,
+                            raw_result.as_category_score_dict() if cache_raw_enabled else {},
+                            enabled=cache_raw_enabled,
                         )
 
                         # 3. Apply VRT transform pipeline (thresholds + clean tags)
                         filtered_result = pipeline(raw_result)
 
-                        # 4. Extract final tags (prefixes, subset limits, and inclusions/exclusions)
-                        tag_records = extract_tags(filtered_result, output_filter=eff_filter)
+                        # 4. Extract final tags using the pre-compiled filter
+                        tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
                         # 5. Enqueue tags into push_queue for each configured service (merges tags automatically)
@@ -552,7 +589,7 @@ async def infer_files(
 
                         consecutive_errors = 0
                         stats.ok += 1
-                        stats.total_tags_cached += len(raw_result.tags)
+                        stats.total_tags_cached += total_model_tags
                         stats.total_tags_enqueued += len(prefixed_tags)
                         batch_processed += 1
                         last_file_hash = file_hash
