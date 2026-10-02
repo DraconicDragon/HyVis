@@ -527,6 +527,7 @@ async def infer_files(
             compiled_filter = compile_output_filter(eff_filter)
             total_model_tags = len(session.tagger.catalog.labels) if session.tagger.catalog else 0
             cache_raw_enabled = config.database.cache_raw_predictions
+            min_cache_score = config.database.min_cache_score
 
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
 
@@ -549,14 +550,20 @@ async def infer_files(
                         db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
 
                         # 2. Save un-culled raw predictions to SQLite cache (ONLY if enabled)
+                        if cache_raw_enabled:
+                            cache_result = raw_result.filter(lambda _tag, score, _cat, ms=min_cache_score: score >= ms)
+                            raw_cache_payload = cache_result.as_category_score_dict()
+                        else:
+                            raw_cache_payload = {}
+
                         db.save_raw_cache(
                             file_hash,
                             model_cfg.model_id,
-                            raw_result.as_category_score_dict() if cache_raw_enabled else {},
+                            raw_cache_payload,
                             enabled=cache_raw_enabled,
                         )
 
-                        # 3. Apply VRT transform pipeline (thresholds + clean tags)
+                        # 3. Apply VRT transform pipeline on the full, un-culled raw result
                         filtered_result = pipeline(raw_result)
 
                         # 4. Extract final tags using the pre-compiled filter
