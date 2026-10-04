@@ -94,6 +94,7 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")  # Fast & completely safe in WAL mode
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA cache_size = -65536")  # 64MiB
         self._conn.executescript(_SCHEMA_SQL)
 
         # Migration: add missing columns if upgrading from an older HyVis database
