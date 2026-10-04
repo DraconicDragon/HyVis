@@ -654,7 +654,7 @@ class DatabaseConfig(StrictBaseModel):
         examples=["data/hyvis.db"],
     )
     cache_raw_predictions: bool = Field(
-        default=True,
+        default=False,
         title="Cache Raw Predictions",
         description="Save un-culled model predictions in the database to allow instant re-filtering without re-running inference.",
     )
