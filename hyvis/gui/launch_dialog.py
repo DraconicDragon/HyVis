@@ -57,6 +57,47 @@ class _PreflightWorker(QRunnable):
             self.signals.error.emit(str(exc))
 
 
+def _parse_hydrus_version_num(v_str: str) -> int | None:
+    """Extract numeric version from strings like '676', 'v676', or '676.1'."""
+    clean = str(v_str).strip().lstrip("vV")
+    parts = clean.split(".")
+    try:
+        return int(parts[0])
+    except (ValueError, IndexError):
+        return None
+
+
+class _PreviewCheckSignals(QObject):
+    success = Signal(object, object)  # (candidate_preview, rejected_preview)
+    error = Signal(str)
+
+
+class _PreviewCheckWorker(QRunnable):
+    """Fast background worker that strictly checks preview page status without re-fetching candidate files."""
+
+    def __init__(self, cfg: AppConfig) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.signals = _PreviewCheckSignals()
+
+    def run(self) -> None:
+        from hyvis.hydrus import HydrusClient
+        from hyvis.preflight import inspect_preview_page
+
+        try:
+            client = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
+            p = self.cfg.hydrus.preview
+            cp = inspect_preview_page(client, p.page_name, p.page_index) if p and p.page_name else None
+            rp = (
+                inspect_preview_page(client, p.rejected_page_name, p.rejected_page_index)
+                if p and p.rejected_page_name
+                else None
+            )
+            self.signals.success.emit(cp, rp)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
+
+
 class LaunchDialog(QDialog):
     """Modal preflight review and terminal launcher."""
 
@@ -109,7 +150,14 @@ class LaunchDialog(QDialog):
         self.has_rejected_preview = bool(p and p.rejected_page_name)
         self.has_any_preview = self.has_candidate_preview or self.has_rejected_preview
 
-        self.preview_card = SectionCard("Client Previews (Hydurs v676+)", parent=self)
+        self.preview_card = SectionCard("Client Previews", parent=self)
+
+        # Top-right header re-check button (checks page statuses only)
+        self.recheck_btn = QPushButton("⟳ Re-check", self.preview_card)
+        self.recheck_btn.setToolTip("Re-query Hydrus to check preview page status and file counts")
+        self.recheck_btn.clicked.connect(self._recheck_preview_pages)
+        self.preview_card.addHeaderWidget(self.recheck_btn)
+
         prev_layout = QVBoxLayout()
         prev_layout.setContentsMargins(0, 0, 0, 0)
         prev_layout.setSpacing(10)
@@ -154,12 +202,6 @@ class LaunchDialog(QDialog):
             rej_box_layout.addWidget(self.send_rej_btn)
 
             prev_layout.addWidget(rej_box)
-
-        # Recheck Button
-        self.recheck_btn = QPushButton("⟳ Re-check Previews", self.preview_card)
-        self.recheck_btn.setVisible(False)
-        self.recheck_btn.clicked.connect(self._run_preflight)
-        prev_layout.addWidget(self.recheck_btn)
 
         self.preview_card.setContentLayout(prev_layout)
         self.preview_card.setVisible(self.has_any_preview)
@@ -213,7 +255,8 @@ class LaunchDialog(QDialog):
         self.conn_label.setText("◌ Connecting to Hydrus...")
         self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
         self.launch_btn.setEnabled(False)
-        self.recheck_btn.setVisible(False)
+        self.recheck_btn.setEnabled(False)
+
         if hasattr(self, "send_cand_btn"):
             self.send_cand_btn.setEnabled(False)
         if hasattr(self, "send_rej_btn"):
@@ -242,6 +285,7 @@ class LaunchDialog(QDialog):
         # Connection header
         self.conn_label.setText(f"● Connected to Hydrus v{v_str} at {url}")
         self.conn_label.setStyleSheet("font-weight: 600; color: #34d399;")
+        self.recheck_btn.setEnabled(True)
 
         # Candidate and Rejected Files summary
         if cand_count == 0 and rej_count == 0:
@@ -259,70 +303,8 @@ class LaunchDialog(QDialog):
             )
         self.files_label.setText("<br>".join(msg_lines))
 
-        # Update Candidate Preview status & button
-        has_dirty_page = False
-        if self.has_candidate_preview and result.candidate_preview:
-            cp = result.candidate_preview
-            if self._candidate_preview_sent:
-                self.cand_status_label.setText(
-                    f"<span style='color: #34d399;'>✓ Candidate preview sent to '{cp.page_name}'.</span>"
-                )
-                self.send_cand_btn.setEnabled(False)
-            elif cp.status == "dirty":
-                has_dirty_page = True
-                self.cand_status_label.setText(
-                    f"<span style='color: #fbbf24;'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
-                )
-                self.send_cand_btn.setEnabled(False)
-            elif cp.status == "ready":
-                self.cand_status_label.setText(
-                    f"<span style='color: #34d399;'>Page '{cp.page_name}' is empty and ready.</span>"
-                )
-                self.send_cand_btn.setText(f"👁 Send Candidate Preview ({cand_count} files)")
-                self.send_cand_btn.setEnabled(cand_count > 0)
-            elif cp.status == "will_create":
-                self.cand_status_label.setText(
-                    f"<span style='color: #888;'>Page '{cp.page_name}' will be created.</span>"
-                )
-                self.send_cand_btn.setText(f"👁 Send Candidate Preview ({cand_count} files)")
-                self.send_cand_btn.setEnabled(cand_count > 0)
-
-        # Update Rejected Preview status & button
-        if self.has_rejected_preview and result.rejected_preview:
-            rp = result.rejected_preview
-            if self._rejected_preview_sent:
-                self.rej_status_label.setText(
-                    f"<span style='color: #34d399;'>✓ Rejected preview sent to '{rp.page_name}'.</span>"
-                )
-                self.send_rej_btn.setEnabled(False)
-            elif rp.status == "dirty":
-                has_dirty_page = True
-                self.rej_status_label.setText(
-                    f"<span style='color: #fbbf24;'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
-                )
-                self.send_rej_btn.setEnabled(False)
-            elif rp.status == "ready":
-                self.rej_status_label.setText(
-                    f"<span style='color: #34d399;'>Page '{rp.page_name}' is empty and ready.</span>"
-                )
-                if rej_count > 0:
-                    self.send_rej_btn.setText(f"👁 Send Rejected Preview ({rej_count} files)")
-                    self.send_rej_btn.setEnabled(True)
-                else:
-                    self.send_rej_btn.setText("No rejected files to preview")
-                    self.send_rej_btn.setEnabled(False)
-            elif rp.status == "will_create":
-                self.rej_status_label.setText(
-                    f"<span style='color: #888;'>Page '{rp.page_name}' will be created.</span>"
-                )
-                if rej_count > 0:
-                    self.send_rej_btn.setText(f"👁 Send Rejected Preview ({rej_count} files)")
-                    self.send_rej_btn.setEnabled(True)
-                else:
-                    self.send_rej_btn.setText("No rejected files to preview")
-                    self.send_rej_btn.setEnabled(False)
-
-        self.recheck_btn.setVisible(has_dirty_page)
+        # Update preview cards with version-aware creation checks
+        self._update_preview_ui()
         self.launch_btn.setEnabled(cand_count > 0)
 
     def _on_preflight_error(self, err_msg: str) -> None:
@@ -330,12 +312,120 @@ class LaunchDialog(QDialog):
         self.conn_label.setStyleSheet("font-weight: 600; color: #f85149;")
         self.files_label.setText(f"<span style='color: #f85149;'>{err_msg}</span>")
         self.launch_btn.setEnabled(False)
+        self.recheck_btn.setEnabled(True)
+
+    def _update_preview_ui(self) -> None:
+        """Render candidate and rejected preview status labels and buttons."""
+        if not self._result:
+            return
+
+        cand_count = len(self._result.candidate_hashes)
+        rej_count = len(self._result.rejected_hashes)
+        v_num = _parse_hydrus_version_num(self._result.hydrus_version)
+
+        # 1. Candidate Preview
+        if self.has_candidate_preview and self._result.candidate_preview:
+            cp = self._result.candidate_preview
+            btn_prefix = "👁 Re-send" if self._candidate_preview_sent else "👁 Send"
+
+            if cp.status == "dirty":
+                self.cand_status_label.setText(
+                    f"<span style='color: #fbbf24;'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
+                )
+                self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
+                self.send_cand_btn.setEnabled(cand_count > 0)
+
+            elif cp.status == "ready":
+                self.cand_status_label.setText(
+                    f"<span style='color: #34d399;'>Page '{cp.page_name}' is empty and ready.</span>"
+                )
+                self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
+                self.send_cand_btn.setEnabled(cand_count > 0)
+
+            elif cp.status == "will_create":
+                if v_num is not None and v_num < 676:
+                    self.cand_status_label.setText(
+                        f"<span style='color: #f85149;'>⚠ Page '{cp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
+                    )
+                    self.send_cand_btn.setText(f"👁 Send Candidate Preview ({cand_count} files)")
+                    self.send_cand_btn.setEnabled(False)
+                else:
+                    self.cand_status_label.setText(
+                        f"<span style='color: #888;'>Page '{cp.page_name}' will be created.</span>"
+                    )
+                    self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
+                    self.send_cand_btn.setEnabled(cand_count > 0)
+
+        # 2. Rejected Preview
+        if self.has_rejected_preview and self._result.rejected_preview:
+            rp = self._result.rejected_preview
+            btn_prefix = "👁 Re-send" if self._rejected_preview_sent else "👁 Send"
+
+            if rp.status == "dirty":
+                self.rej_status_label.setText(
+                    f"<span style='color: #fbbf24;'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
+                )
+            elif rp.status == "ready":
+                self.rej_status_label.setText(
+                    f"<span style='color: #34d399;'>Page '{rp.page_name}' is empty and ready.</span>"
+                )
+            elif rp.status == "will_create":
+                if v_num is not None and v_num < 676:
+                    self.rej_status_label.setText(
+                        f"<span style='color: #f85149;'>⚠ Page '{rp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
+                    )
+                else:
+                    self.rej_status_label.setText(
+                        f"<span style='color: #888;'>Page '{rp.page_name}' will be created.</span>"
+                    )
+
+            if rej_count > 0:
+                is_blocked = rp.status == "will_create" and (v_num is not None and v_num < 676)
+                self.send_rej_btn.setText(f"{btn_prefix} Rejected Preview ({rej_count} files)")
+                self.send_rej_btn.setEnabled(not is_blocked)
+            else:
+                self.send_rej_btn.setText("No rejected files to preview")
+                self.send_rej_btn.setEnabled(False)
+
+    def _recheck_preview_pages(self) -> None:
+        """Fast re-query of preview page file counts without re-running candidate collection."""
+        if not self._result or not self.has_any_preview:
+            return
+
+        self.recheck_btn.setEnabled(False)
+        self.recheck_btn.setText("Checking...")
+
+        worker = _PreviewCheckWorker(self.cfg)
+        worker.signals.success.connect(self._on_preview_check_success)
+        worker.signals.error.connect(self._on_preview_check_error)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_preview_check_success(self, cp: Any, rp: Any) -> None:
+        if self._result:
+            self._result.candidate_preview = cp
+            self._result.rejected_preview = rp
+
+            if cp and cp.status == "ready":
+                self._candidate_preview_sent = False
+            if rp and rp.status == "ready":
+                self._rejected_preview_sent = False
+
+            self._update_preview_ui()
+
+        self.recheck_btn.setText("⟳ Re-check")
+        self.recheck_btn.setEnabled(True)
+
+    def _on_preview_check_error(self, err_msg: str) -> None:
+        self.recheck_btn.setText("⟳ Re-check")
+        self.recheck_btn.setEnabled(True)
+        QMessageBox.warning(self, "Preview Check Failed", f"Could not check preview pages:\n\n{err_msg}")
 
     def _on_send_candidate_clicked(self) -> None:
         p = self.cfg.hydrus.preview
         if not p or not p.page_name or not self._result or not self._result.candidate_hashes:
             return
 
+        cand_count = len(self._result.candidate_hashes)
         self.send_cand_btn.setEnabled(False)
         self.send_cand_btn.setText("Sending...")
 
@@ -343,13 +433,15 @@ class LaunchDialog(QDialog):
             hydrus = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
             hydrus.setup_preview_page(p.page_name, self._result.candidate_hashes, p.page_index, focus=True)
             self._candidate_preview_sent = True
-            self.send_cand_btn.setText("✓ Candidate Preview Sent")
             self.cand_status_label.setText(
-                f"<span style='color: #34d399;'>✓ {len(self._result.candidate_hashes)} files sent to '{p.page_name}'.</span>"
+                f"<span style='color: #34d399;'>✓ {cand_count} files sent to '{p.page_name}'.</span>"
             )
+            self.send_cand_btn.setText(f"👁 Re-send Candidate Preview ({cand_count} files)")
+            self.send_cand_btn.setEnabled(True)
         except HydrusError as exc:
             QMessageBox.warning(self, "Candidate Preview Setup Failed", str(exc))
-            self.send_cand_btn.setText("👁 Send Candidate Preview")
+            btn_prefix = "👁 Re-send" if self._candidate_preview_sent else "👁 Send"
+            self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
             self.send_cand_btn.setEnabled(True)
 
     def _on_send_rejected_clicked(self) -> None:
@@ -357,6 +449,7 @@ class LaunchDialog(QDialog):
         if not p or not p.rejected_page_name or not self._result or not self._result.rejected_hashes:
             return
 
+        rej_count = len(self._result.rejected_hashes)
         self.send_rej_btn.setEnabled(False)
         self.send_rej_btn.setText("Sending...")
 
@@ -366,13 +459,15 @@ class LaunchDialog(QDialog):
                 p.rejected_page_name, self._result.rejected_hashes, p.rejected_page_index, focus=True
             )
             self._rejected_preview_sent = True
-            self.send_rej_btn.setText("✓ Rejected Preview Sent")
             self.rej_status_label.setText(
-                f"<span style='color: #34d399;'>✓ {len(self._result.rejected_hashes)} files sent to '{p.rejected_page_name}'.</span>"
+                f"<span style='color: #34d399;'>✓ {rej_count} files sent to '{p.rejected_page_name}'.</span>"
             )
+            self.send_rej_btn.setText(f"👁 Re-send Rejected Preview ({rej_count} files)")
+            self.send_rej_btn.setEnabled(True)
         except HydrusError as exc:
             QMessageBox.warning(self, "Rejected Preview Setup Failed", str(exc))
-            self.send_rej_btn.setText("👁 Send Rejected Preview")
+            btn_prefix = "👁 Re-send" if self._rejected_preview_sent else "👁 Send"
+            self.send_rej_btn.setText(f"{btn_prefix} Rejected Preview ({rej_count} files)")
             self.send_rej_btn.setEnabled(True)
 
     def _build_effective_args(self) -> list[str]:

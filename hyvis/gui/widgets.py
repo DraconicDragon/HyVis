@@ -180,6 +180,7 @@ class SectionCard(QFrame):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
+        self._header_layout = header_layout
 
         self._checkbox = QCheckBox(self)
         self._checkbox.setVisible(False)
@@ -239,6 +240,10 @@ class SectionCard(QFrame):
                 "  background: rgba(255, 255, 255, 0.015);"
                 "}"
             )
+
+    def addHeaderWidget(self, widget: QWidget) -> None:
+        """Add an action widget (e.g. standard button) to the right side of the header row."""
+        self._header_layout.addWidget(widget)
 
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
