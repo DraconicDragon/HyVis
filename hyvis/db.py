@@ -16,11 +16,15 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MIN_CACHE_SCORE = 0.01
+
+FileStatus = Literal["active", "missing_on_disk", "deleted_from_hydrus", "error"]
+PushAction = Literal["add_tags", "delete_tags"]
+
 
 # region Schema Definition
 
@@ -155,7 +159,7 @@ class Database:
         *,
         file_path: str | None = None,
         mime: str | None = None,
-        status: str = "active",
+        status: FileStatus = "active",
     ) -> None:
         """Record or update known file metadata."""
         self.conn.execute(
@@ -172,7 +176,7 @@ class Database:
         )
         self.batch_tick()
 
-    def mark_file_status(self, file_hash: str, status: str) -> None:
+    def mark_file_status(self, file_hash: str, status: FileStatus) -> None:
         """Update file status (e.g. 'missing_on_disk' or 'deleted_from_hydrus')."""
         self.conn.execute(
             "UPDATE known_files SET status = ? WHERE file_hash = ?",
@@ -316,7 +320,7 @@ class Database:
         file_hash: str,
         service_key: str,
         tags: Sequence[str],
-        action: str = "add_tags",
+        action: PushAction = "add_tags",
     ) -> None:
         """
         Enqueue tags to be pushed to or removed from Hydrus.
@@ -365,7 +369,11 @@ class Database:
         row = self.conn.execute("SELECT COUNT(*) FROM push_queue WHERE attempts < 3").fetchone()
         return row[0] if row else 0
 
-    def fetch_push_batch(self, limit: int = 50, max_attempts: int = 3) -> list[tuple[str, str, str, list[str]]]:
+    def fetch_push_batch(
+        self,
+        limit: int = 50,
+        max_attempts: int = 3,
+    ) -> list[tuple[str, str, PushAction, list[str]]]:
         """
         Fetch a batch of pending push tasks that have not exceeded max_attempts.
         Returns: list of (file_hash, service_key, action, list_of_tags)
@@ -380,7 +388,7 @@ class Database:
             (max_attempts, limit),
         ).fetchall()
 
-        results: list[tuple[str, str, str, list[str]]] = []
+        results: list[tuple[str, str, PushAction, list[str]]] = []
         for file_hash, service_key, action, tags_json in rows:
             try:
                 tags = json.loads(tags_json)
