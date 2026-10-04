@@ -192,5 +192,5 @@ batch_size = 4  # higher = more VRAM usage. Not useful if device resolved to CPU
 # Path for the SQLite database.
 # Relative paths are resolved from the directory where you run hyvis.
 path = "data/hyvis.db"
-cache_raw_predictions = true
+cache_raw_predictions = false
 min_cache_score = 0.01 # below 0.01 may increase database size significantly
