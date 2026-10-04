@@ -219,7 +219,7 @@ class LaunchDialog(QDialog):
 
         # 5. Neutral Informational Tip
         tip_label = QLabel(
-            "Tip: Once local file paths are resolved, Hydrus can be closed during inference if you need to free system resources.",
+            "Tip: Once local file paths are resolved after launching, Hydrus can be closed during inference if you need to free system resources.",
             self,
         )
         tip_label.setStyleSheet("color: #8a9ba5;")
