@@ -10,9 +10,10 @@ from typing import Any
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QMouseEvent
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -244,15 +246,22 @@ class MainWindow(QMainWindow):
 
     def _setup_menu_bar(self) -> None:
         menu_bar = self.menuBar()
+        style = self.style()
 
         file_menu = menu_bar.addMenu("&File")
 
         new_action = QAction("&New Config", self)
+        new_action.setIcon(QIcon.fromTheme("document-new", style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)))
+        new_action.setIconVisibleInMenu(True)
         new_action.setShortcut(QKeySequence.StandardKey.New)
         new_action.triggered.connect(self._on_new_config)
         file_menu.addAction(new_action)
 
         open_action = QAction("&Open Config...", self)
+        open_action.setIcon(
+            QIcon.fromTheme("document-open", style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        )
+        open_action.setIconVisibleInMenu(True)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open_config)
         file_menu.addAction(open_action)
@@ -260,11 +269,19 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         save_action = QAction("&Save", self)
+        save_action.setIcon(
+            QIcon.fromTheme("document-save", style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
+        )
+        save_action.setIconVisibleInMenu(True)
         save_action.setShortcut(QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self._on_save_config)
         file_menu.addAction(save_action)
 
         save_as_action = QAction("Save &As...", self)
+        save_as_action.setIcon(
+            QIcon.fromTheme("document-save-as", style.standardIcon(QStyle.StandardPixmap.SP_DriveFDIcon))
+        )
+        save_as_action.setIconVisibleInMenu(True)
         save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
         save_as_action.triggered.connect(self._on_save_as_config)
         file_menu.addAction(save_as_action)
@@ -272,6 +289,10 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
+        exit_action.setIcon(
+            QIcon.fromTheme("application-exit", style.standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton))
+        )
+        exit_action.setIconVisibleInMenu(True)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -798,12 +819,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"HyVis Configurator — {path_str}{dirty_str}")
 
     def _on_new_config(self) -> None:
-        if self._confirm_discard_changes():
-            self.state.new_config()
+        if self.state.is_dirty and not self._prompt_unsaved_changes(allow_discard=True):
+            return
+        self.state.new_config()
 
     def _on_open_config(self) -> None:
-        if not self._confirm_discard_changes():
+        if self.state.is_dirty and not self._prompt_unsaved_changes(allow_discard=True):
             return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open HyVis TOML Configuration", "", "TOML Files (*.toml);;All Files (*)"
         )
@@ -863,17 +886,124 @@ class MainWindow(QMainWindow):
         msg_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         msg_box.exec()
 
-    def _confirm_discard_changes(self) -> bool:
-        if not self.state.is_dirty:
-            return True
-        res = QMessageBox.question(
-            self,
-            "Unsaved Changes",
-            "You have unsaved changes. Do you want to discard them?",
-            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+    def _prompt_unsaved_changes(
+        self,
+        *,
+        allow_discard: bool = True,
+        message: str | None = None,
+    ) -> bool:
+        """
+        Unified dialog prompting the user when unsaved changes exist.
+
+        Layout:
+          [ Discard ] (left)  --- stretch ---  [ Save As... ] [ Save ] [ Cancel ] (right)
+
+        Returns:
+            True  -> Proceed with the action (saved or discarded).
+            False -> Abort the action (cancelled or save failed/aborted).
+        """
+        style = self.style()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Unsaved Changes")
+        dialog.setModal(True)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(16, 16, 16, 14)
+        root.setSpacing(14)
+
+        # Content row: Standard Question Icon + Text
+        content_row = QHBoxLayout()
+        content_row.setSpacing(14)
+
+        icon_lbl = QLabel(dialog)
+        icon_pix = style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion).pixmap(32, 32)
+        icon_lbl.setPixmap(icon_pix)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        content_row.addWidget(icon_lbl)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(4)
+        path_str = f"'{self.state.current_path.name}'" if self.state.current_path else "Untitled Configuration"
+        title_lbl = QLabel(f"The configuration {path_str} has unsaved changes.\n", dialog)
+        text_layout.addWidget(title_lbl)
+
+        info_lbl = QLabel(message or "What would you like to do before proceeding?", dialog)
+        text_layout.addWidget(info_lbl)
+
+        content_row.addLayout(text_layout)
+        root.addLayout(content_row)
+
+        # Buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        choice: str = "cancel"
+
+        # 1. Left: Discard (No custom stylesheet, native button)
+        if allow_discard:
+            discard_btn = QPushButton("Discard", dialog)
+            discard_btn.setIcon(
+                QIcon.fromTheme("edit-delete", style.standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton))
+            )
+
+            def on_discard() -> None:
+                nonlocal choice
+                choice = "discard"
+                dialog.accept()
+
+            discard_btn.clicked.connect(on_discard)
+            btn_row.addWidget(discard_btn)
+
+        # 2. Middle: Space separating Discard from Save/Cancel
+        btn_row.addStretch(1)
+
+        # 3. Right: Save As...
+        save_as_btn = QPushButton("Save As...", dialog)
+        save_as_btn.setIcon(
+            QIcon.fromTheme("document-save-as", style.standardIcon(QStyle.StandardPixmap.SP_DriveFDIcon))
         )
-        return res == QMessageBox.StandardButton.Discard
+
+        def on_save_as() -> None:
+            nonlocal choice
+            choice = "save_as"
+            dialog.accept()
+
+        save_as_btn.clicked.connect(on_save_as)
+        btn_row.addWidget(save_as_btn)
+
+        # 4. Right: Save (Default)
+        save_btn = QPushButton("Save", dialog)
+        save_btn.setIcon(
+            QIcon.fromTheme("document-save", style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
+        )
+        save_btn.setDefault(True)
+
+        def on_save() -> None:
+            nonlocal choice
+            choice = "save"
+            dialog.accept()
+
+        save_btn.clicked.connect(on_save)
+        btn_row.addWidget(save_btn)
+
+        # 5. Far Right: Cancel
+        cancel_btn = QPushButton("Cancel", dialog)
+        cancel_btn.setIcon(
+            QIcon.fromTheme("dialog-cancel", style.standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
+        )
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(cancel_btn)
+
+        root.addLayout(btn_row)
+
+        dialog.exec()
+
+        if choice == "save":
+            return self._on_save_config()
+        if choice == "save_as":
+            return self._on_save_as_config()
+        return choice == "discard"
 
     def _on_copy_command(self) -> None:
         if self.state.current_path is None:
@@ -888,18 +1018,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1800, lambda: self.copy_btn.setText("Copy CLI Command"))
 
     def _on_launch_terminal(self) -> None:
-        if self.state.current_path is None or self.state.is_dirty:
-            res = QMessageBox.question(
-                self,
-                "Save Configuration",
-                "Your configuration has unsaved changes. Save before launching?",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
-            )
-            if res == QMessageBox.StandardButton.Save:
-                if not self._on_save_config():
-                    return
-            else:
-                return
+        # Configuration must be saved to disk before launching external terminal
+        if (self.state.current_path is None or self.state.is_dirty) and not self._prompt_unsaved_changes(
+            allow_discard=False,
+            message="The configuration must be saved to disk before launching.",
+        ):
+            return
 
         assert self.state.current_path is not None
         from hyvis.gui.launch_dialog import LaunchDialog
@@ -908,7 +1032,10 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event) -> None:
-        if self._confirm_discard_changes():
-            event.accept()
+        if self.state.is_dirty:
+            if self._prompt_unsaved_changes(allow_discard=True):
+                event.accept()
+            else:
+                event.ignore()
         else:
-            event.ignore()
+            event.accept()
