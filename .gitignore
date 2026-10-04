@@ -1,5 +1,7 @@
 # repo-specific
 *.db
+*.db-shm
+*.db-wal
 t_*.toml
 md_notes.md
 md_notes.png
