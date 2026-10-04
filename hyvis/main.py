@@ -13,7 +13,7 @@ from pathlib import Path
 from hyvis.bg_imports import start_imports, wait_for_imports
 from hyvis.cli import parse_args
 from hyvis.cli_display import connect_hydrus, print_confirmation, print_run_summary
-from hyvis.hydrus import FileInfo, HydrusConnectionError, HydrusError, validate_service_keys
+from hyvis.hydrus import HydrusConnectionError, HydrusError, validate_service_keys
 from hyvis.logging_utils import (  # noqa: F401
     BOLD,
     CYAN,
@@ -172,101 +172,8 @@ async def main() -> int:
             )
         )
 
-    file_infos = []
-    actionable_count = 0
-    extra_count = 0
-
-    tag_query_counts: list[int] = []
-    page_query_counts: list[int] = []
-
-    # Rejections tracking init
-    mime_rejected = 0
-    rejected_mimes: set[str] = set()
-    all_rejected_hashes: list[str] = []
-
-    # Collect candidate files
-    print(_c("Collecting candidate files...           ", DIM), end="\r", flush=True)
-    raw_hashes = set()
-
-    try:
-        if cfg.hydrus.tag_queries:
-            tq_hashes, tag_query_counts = hydrus.collect_candidate_hashes(cfg.hydrus.tag_queries)
-            raw_hashes |= tq_hashes
-
-        if cfg.hydrus.page_queries:
-            pq_hashes, page_query_counts = hydrus.collect_page_hashes(cfg.hydrus.page_queries)
-            raw_hashes |= pq_hashes
-    except HydrusConnectionError as exc:
-        print(_c(f"\nERROR: Hydrus connection lost while fetching files: {exc}", RED), file=sys.stderr)
-        return 1
-    except HydrusError as exc:
-        print(_c(f"\nERROR: Hydrus query failed: {exc}", RED), file=sys.stderr)
-        return 1
-
-    # Filter by MIME
-    hash_list = sorted(raw_hashes)
-    total_raw = len(hash_list)
-    if total_raw:
-        print(_c(f"Fetching metadata for {total_raw} candidates...  ", DIM), end="\r", flush=True)
-
-    if total_raw:
-        try:
-            # Collect main query rejections
-            file_infos, r_mimes, r_hashes = hydrus.filter_by_mime(
-                hash_list,
-                progress_callback=lambda d, t: inline_progress("Filtering metadata", d, t),
-            )
-            rejected_mimes.update(r_mimes)
-            all_rejected_hashes.extend(r_hashes)
-        except HydrusConnectionError as exc:
-            print(_c(f"\nERROR: Hydrus connection lost during metadata fetch: {exc}", RED), file=sys.stderr)
-            return 1
-
-        clear_line()
-
-        mime_rejected = total_raw - len(file_infos)
-        if mime_rejected:
-            rejected_list = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
-            print(_c(f"  Rejected {mime_rejected} files with unsupported MIME types: {rejected_list}", DIM))
-        if not file_infos and args.extra_hash_file is None:
-            print(_c("\nAll files were filtered by MIME type. Nothing to do.", YELLOW))
-            return 0
-
-        # Smart Path Resolution: Check local SQLite cache first to avoid 50k+ HTTP calls!
-        with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
-            cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
-
-        files_to_resolve_online = []
-        for fi in file_infos:
-            cached_p = cached_paths.get(fi.file_hash)
-            if cached_p and Path(cached_p).is_file():
-                fi.local_path = cached_p
-            else:
-                files_to_resolve_online.append(fi)
-
-        if files_to_resolve_online:
-            try:
-                hydrus.resolve_paths(
-                    files_to_resolve_online,
-                    progress_callback=lambda d, t: inline_progress("Resolving paths online", d, t),
-                )
-                clear_line()
-                with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
-                    for fi in files_to_resolve_online:
-                        if fi.local_path:
-                            db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
-            except HydrusConnectionError as exc:
-                print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", RED), file=sys.stderr)
-                return 1
-
-        no_path_count = sum(1 for fi in file_infos if not fi.local_path)
-        if no_path_count:
-            print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', YELLOW)}")
-
-        actionable_count = sum(1 for fi in file_infos if fi.local_path)
-        touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
-
-    # region Extra hashes file
+    # 1. Ingest extra hashes file if provided
+    extra_hash_values: list[str] = []
     if args.extra_hash_file is not None:
         try:
             extra_hash_values = load_extra_hashes(args.extra_hash_file)
@@ -277,77 +184,74 @@ async def main() -> int:
             print(_c(f"ERROR: Invalid extra hash file: {exc}", RED), file=sys.stderr)
             return 1
 
-        if extra_hash_values:
-            print(_c(f"Fetching metadata for {len(extra_hash_values)} extra hashes...  ", DIM), end="\r", flush=True)
-            try:
-                # Collect extra hash file rejections
-                extra_infos, extra_r_mimes, extra_r_hashes = hydrus.filter_by_mime(extra_hash_values)
-                extra_mime_rejected = len(extra_hash_values) - len(extra_infos)
-                mime_rejected += extra_mime_rejected
-                rejected_mimes.update(extra_r_mimes)
-                all_rejected_hashes.extend(extra_r_hashes)
+    # 2. Run unified preflight collection and MIME filtering
+    from hyvis.preflight import run_preflight
 
-                # Smart Path Resolution for extra hashes
-                with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
-                    extra_cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in extra_infos])
+    try:
+        preflight_data = run_preflight(
+            cfg,
+            hydrus=hydrus,
+            extra_hashes=extra_hash_values,
+            progress_callback=lambda stage, cur, tot: inline_progress(stage, cur or 0, tot or 1) if tot else None,
+        )
+    except HydrusConnectionError as exc:
+        print(_c(f"\nERROR: Hydrus connection lost during preflight: {exc}", RED), file=sys.stderr)
+        return 1
+    except HydrusError as exc:
+        print(_c(f"\nERROR: Hydrus query failed: {exc}", RED), file=sys.stderr)
+        return 1
 
-                extra_online_resolve = []
-                for fi in extra_infos:
-                    cached_p = extra_cached_paths.get(fi.file_hash)
-                    if cached_p and Path(cached_p).is_file():
-                        fi.local_path = cached_p
-                    else:
-                        extra_online_resolve.append(fi)
+    clear_line()
 
-                if extra_online_resolve:
-                    hydrus.resolve_paths(extra_online_resolve)
-                    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
-                        for fi in extra_online_resolve:
-                            if fi.local_path:
-                                db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
+    file_infos = preflight_data.candidate_file_infos
+    rejected_mimes = preflight_data.rejected_mimes
+    all_rejected_hashes = preflight_data.rejected_hashes
+    tag_query_counts = preflight_data.tag_query_counts
+    page_query_counts = preflight_data.page_query_counts
+    mime_rejected = len(all_rejected_hashes)
+    extra_count = len(extra_hash_values)
 
-            except HydrusConnectionError as exc:
-                print(_c(f"\nERROR: Hydrus connection lost while fetching extra hashes: {exc}", RED), file=sys.stderr)
-                return 1
+    if mime_rejected:
+        rejected_list = ", ".join(sorted(rejected_mimes)) if rejected_mimes else "unknown"
+        print(_c(f"  Rejected {mime_rejected} files with unsupported MIME types: {rejected_list}", DIM))
 
-            extra_count = len(extra_infos)
-            if extra_r_mimes:
-                rejected_list = ", ".join(sorted(extra_r_mimes))
-                print(f"\r{_c(f'  Rejected extra hashes with unsupported MIME types: {rejected_list}', DIM)}  ")
-
-            missing_extra = len(extra_hash_values) - extra_count
-            if missing_extra:
-                print(
-                    "\n  "
-                    + _c(
-                        f"Warning: {missing_extra} extra hash(es) were not found or have no usable local path",
-                        YELLOW,
-                    )
-                )
-
-            if extra_infos:
-                file_infos.extend(extra_infos)
-
-                # Deduplicate file_infos by file_hash preserving first-seen order
-                seen_hashes: set[str] = set()
-                unique_file_infos: list[FileInfo] = []
-                for fi in file_infos:
-                    if fi.file_hash not in seen_hashes:
-                        seen_hashes.add(fi.file_hash)
-                        unique_file_infos.append(fi)
-                file_infos = unique_file_infos
-
-                actionable_count = sum(1 for fi in file_infos if fi.local_path)
-                touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
-        else:
-            print(_c("  Warning: extra hash file was empty.", YELLOW))
-
-    if not file_infos:
-        if args.extra_hash_file is not None:
-            print(_c("\nNo files matched the configured queries or extra-hash list. Nothing to do.", YELLOW))
-        else:
-            print(_c("\nNo files matched the configured queries. Nothing to do.", YELLOW))
+    if not file_infos and not extra_count:
+        print(_c("\nNo files matched the configured queries. Nothing to do.", YELLOW))
         return 0
+
+    # 3. Smart Path Resolution: Check local SQLite cache first to avoid redundant HTTP calls
+    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+        cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
+
+    files_to_resolve_online = []
+    for fi in file_infos:
+        cached_p = cached_paths.get(fi.file_hash)
+        if cached_p and Path(cached_p).is_file():
+            fi.local_path = cached_p
+        else:
+            files_to_resolve_online.append(fi)
+
+    if files_to_resolve_online:
+        try:
+            hydrus.resolve_paths(
+                files_to_resolve_online,
+                progress_callback=lambda d, t: inline_progress("Resolving paths online", d, t),
+            )
+            clear_line()
+            with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+                for fi in files_to_resolve_online:
+                    if fi.local_path:
+                        db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
+        except HydrusConnectionError as exc:
+            print(_c(f"\nERROR: Hydrus connection lost during path resolution: {exc}", RED), file=sys.stderr)
+            return 1
+
+    no_path_count = sum(1 for fi in file_infos if not fi.local_path)
+    if no_path_count:
+        print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', YELLOW)}")
+
+    actionable_count = sum(1 for fi in file_infos if fi.local_path)
+    touched_hashes.update(fi.file_hash for fi in file_infos if fi.local_path)
 
     # region Confirmation print
     print_confirmation(
