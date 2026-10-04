@@ -227,6 +227,7 @@ class Database:
         if not enabled:
             json_payload = "{}"
         else:
+            # NOTE: as of writing, only usage of this function already pre-filters to min cache score, so this is just here as fallback, or if its called somewhere else i guess
             pruned_categories: dict[str, dict[str, float]] = {}
             for cat, tag_map in category_scores.items():
                 filtered = {tag: round(score, 4) for tag, score in tag_map.items() if score >= self._min_cache_score}
