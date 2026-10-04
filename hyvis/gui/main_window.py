@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
+from hyvis.gui.about_dialog import AboutDialog
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
@@ -248,6 +249,7 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         style = self.style()
 
+        # --- File Menu ---
         file_menu = menu_bar.addMenu("&File")
 
         new_action = QAction("&New Config", self)
@@ -296,6 +298,19 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # --- Help Menu ---
+        help_menu = menu_bar.addMenu("&Help")
+
+        about_action = QAction("About &HyVis", self)
+        about_action.triggered.connect(self._on_about_hyvis)
+        help_menu.addAction(about_action)
+
+        help_menu.addSeparator()
+
+        about_qt_action = QAction("About &Qt", self)
+        about_qt_action.triggered.connect(self._on_about_qt)
+        help_menu.addAction(about_qt_action)
 
     def _setup_ui(self) -> None:
         app_fields = AppConfig.model_fields
@@ -539,6 +554,14 @@ class MainWindow(QMainWindow):
         # Universal page modification tracking
         for page in self.pages:
             page.changed.connect(self._on_page_modified)
+
+    def _on_about_hyvis(self) -> None:
+        dialog = AboutDialog(self)
+        dialog.exec()
+
+    def _on_about_qt(self) -> None:
+        QMessageBox.aboutQt(self, "About Qt")
+
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         """Reset pages to a clean baseline before populating the incoming configuration."""
