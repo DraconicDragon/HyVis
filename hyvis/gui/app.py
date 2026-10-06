@@ -31,13 +31,14 @@ def run_gui(initial_config: Path | str | None = None) -> int:
     # On Linux/BSD, tell Qt to use the modern native system file chooser via XDG Desktop Portal
     if sys.platform.startswith("linux") or "bsd" in sys.platform:
         os.environ["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal"
-        os.environ["QT_LOGGING_RULES"] = "qt.qpa.services=false" # suppress QPA service warnings about missing portal backends; happens on wayland
+        os.environ["QT_LOGGING_RULES"] = "qt.qpa.services=false"  # suppress QPA service warnings on Wayland
 
     try:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
 
         from hyvis.gui.main_window import MainWindow
+        from hyvis.gui.settings import StartupBehavior, load_gui_settings
         from hyvis.gui.state import ConfigState
     except ImportError:
         print(
@@ -55,10 +56,29 @@ def run_gui(initial_config: Path | str | None = None) -> int:
     app.setOrganizationName("Drac")
 
     state = ConfigState()
-    if initial_config:
-        ok, err = state.load_from_file(initial_config)
+    gui_settings = load_gui_settings()
+
+    # Resolve startup configuration hierarchy:
+    # 1. CLI argument overrides everything
+    # 2. Custom preset path from settings
+    # 3. Last opened session config from settings
+    # 4. Fallback: clean default template (already initialized in ConfigState)
+    target_config = initial_config
+
+    if not target_config:
+        if gui_settings.startup_behavior == StartupBehavior.CUSTOM_PRESET and gui_settings.custom_preset_path:
+            preset_path = Path(gui_settings.custom_preset_path)
+            if preset_path.is_file():
+                target_config = preset_path
+        elif gui_settings.startup_behavior == StartupBehavior.LAST_SESSION and gui_settings.last_opened_config:
+            last_file = Path(gui_settings.last_opened_config)
+            if last_file.is_file():
+                target_config = last_file
+
+    if target_config:
+        ok, err = state.load_from_file(target_config)
         if not ok and err:
-            print(f"Warning: Could not open '{initial_config}': {err}", file=sys.stderr)
+            print(f"Warning: Could not open '{target_config}': {err}", file=sys.stderr)
 
     window = MainWindow(state)
     window.show()

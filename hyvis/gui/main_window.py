@@ -247,6 +247,10 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._on_connection_changed(self.state.connection_status, self.state.connection_info)
 
+        # Record startup file in recent history if launched with a file
+        if self.state.current_path:
+            self._record_recent_file(self.state.current_path)
+
     def _setup_menu_bar(self) -> None:
         menu_bar = self.menuBar()
         style = self.style()
