@@ -38,7 +38,15 @@ from hyvis.config import AppConfig
 from hyvis.gui.about_dialog import AboutDialog
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
-from hyvis.gui.settings import GuiSettings, load_gui_settings, save_gui_settings
+from hyvis.gui.settings import (
+    GuiSettings,
+    delete_session_tmp,
+    get_session_tmp_path,
+    has_session_tmp,
+    load_gui_settings,
+    save_gui_settings,
+    save_session_tmp,
+)
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
 
 
@@ -250,6 +258,16 @@ class MainWindow(QMainWindow):
         # Record startup file in recent history if launched with a file
         if self.state.current_path:
             self._record_recent_file(self.state.current_path)
+
+        # Autosave debouncer (waits 2 seconds after valid typing before saving to .tmp)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(2000)
+        self._autosave_timer.timeout.connect(self._perform_autosave)
+
+        # If launched without an explicit file path, check for an uncommitted session to restore
+        if not self.state.current_path:
+            QTimer.singleShot(50, self._check_session_recovery)
 
     def _setup_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -682,6 +700,21 @@ class MainWindow(QMainWindow):
         issues = self._run_validation()
         self._update_validation_issues(issues)
 
+        # Debounced autosave to session.tmp.toml strictly when valid and dirty
+        if self.state.is_dirty:
+            if len(issues) == 0:
+                self._autosave_timer.start()
+            else:
+                self._autosave_timer.stop()
+        else:
+            self._autosave_timer.stop()
+
+    def _perform_autosave(self) -> None:
+        """Write current valid uncommitted GUI state to the session scratchpad."""
+        if self.state.is_dirty:
+            data = self._gather_config_dict()
+            save_session_tmp(data)
+
     def _run_validation(self) -> list[ValidationIssue]:
         from hyvis.config import construct_lenient
 
@@ -913,6 +946,8 @@ class MainWindow(QMainWindow):
     def _on_new_config(self) -> None:
         if self.state.is_dirty and not self._prompt_unsaved_changes(allow_discard=True):
             return
+        self._autosave_timer.stop()
+        delete_session_tmp()
         self.state.new_config()
 
     def _on_open_config(self) -> None:
@@ -947,8 +982,11 @@ class MainWindow(QMainWindow):
 
         try:
             saved = self.state.save_to_file(raw_data=data)
-            if saved and self.state.current_path:
-                self._record_recent_file(self.state.current_path)
+            if saved:
+                self._autosave_timer.stop()
+                delete_session_tmp()
+                if self.state.current_path:
+                    self._record_recent_file(self.state.current_path)
             return saved
         except Exception as exc:
             self._show_save_error(exc)
@@ -971,6 +1009,8 @@ class MainWindow(QMainWindow):
         try:
             saved = self.state.save_to_file(path=file_path, raw_data=data)
             if saved:
+                self._autosave_timer.stop()
+                delete_session_tmp()
                 self._record_recent_file(file_path)
             return saved
         except Exception as exc:
@@ -1103,7 +1143,46 @@ class MainWindow(QMainWindow):
             return self._on_save_config()
         if choice == "save_as":
             return self._on_save_as_config()
-        return choice == "discard"
+        if choice == "discard":
+            self._autosave_timer.stop()
+            delete_session_tmp()
+            return True
+        return False
+
+    def _check_session_recovery(self) -> None:
+        """Prompt to restore an uncommitted session if session.tmp.toml is found."""
+        if not has_session_tmp():
+            return
+
+        tmp_path = get_session_tmp_path()
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Restore Unsaved Session")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText("HyVis found an unsaved session from a previous run.")
+        msg_box.setInformativeText("Would you like to restore where you left off, or discard those changes?")
+
+        restore_btn = msg_box.addButton("Restore Session", QMessageBox.ButtonRole.AcceptRole)
+        msg_box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.setDefaultButton(restore_btn)
+        msg_box.exec()
+
+        if msg_box.clickedButton() == restore_btn:
+            ok, err = self.state.load_from_file(tmp_path)
+            if ok:
+                # Re-link original file path if known from last session
+                last_file = self.gui_settings.last_opened_config
+                if last_file and Path(last_file).is_file():
+                    self.state._current_path = Path(last_file)
+                else:
+                    self.state._current_path = None
+
+                self.state.set_dirty(True)
+                self._update_title()
+            else:
+                QMessageBox.warning(self, "Recovery Failed", f"Could not restore session: {err}")
+                delete_session_tmp()
+        else:
+            delete_session_tmp()
 
     def _on_copy_command(self) -> None:
         if self.state.current_path is None:
