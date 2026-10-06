@@ -26,10 +26,6 @@
   - Option to restore from this temp config on program start if it wasn't saved
     - if the temp config was saved, then there should be no .tmp file
 
-- Apply similar logic that category ComboBoxes have in output filter to other places where pre-filled options
-  - If the component doesn't allow arbitrary user input, limit the amount of items to the max available (eg destination tag services)
-    - Might come with headaches so, plan out
-
 - Show extra validation error/warning (warning needs to be implemented, separate from errors) when:
   - E: Unkown tag service key is set in a combobox (eg when user loaded old config but the tag service doesnt exist anymore)
   - W: When a user inputted category is present but appears never in relation to any model ID; its an unkown category
