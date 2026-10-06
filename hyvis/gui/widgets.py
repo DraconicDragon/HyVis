@@ -563,6 +563,27 @@ class CategoryTagEditor(QWidget):
 # endregion
 
 
+# region SuggestionComboBox
+
+
+class SuggestionComboBox(QComboBox):
+    """QComboBox that notifies listeners right before showing its dropdown popup and enforces StrongFocus."""
+
+    about_to_show_popup = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Never allow mouse wheel to steal focus
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def showPopup(self) -> None:
+        self.about_to_show_popup.emit()
+        super().showPopup()
+
+
+# endregion
+
+
 # region Tag Service List Editor
 
 
@@ -570,7 +591,7 @@ class TagServiceListEditor(QWidget):
     """
     Stacked row editor for Hydrus tag service keys.
     Displays human-readable service names while strictly preserving underlying 64-char hex keys.
-    Non-editable: values are strictly backed by Hydrus entities with offline/unrecognized preservation.
+    Non-editable entity selector with automatic next-available preselection and duplicate exclusion.
     """
 
     changed = Signal()
@@ -610,15 +631,23 @@ class TagServiceListEditor(QWidget):
         self._root_layout.addLayout(btn_layout)
 
         self._update_empty_state()
+        self._update_add_btn_state()
 
     def set_available_services(self, services: dict[str, str]) -> None:
+        """Update available services from Hydrus and refresh all rows."""
         self._available_services = dict(services)
         for row_widget in self._row_widgets:
             combo: QComboBox | None = row_widget.findChild(QComboBox)
             if not combo:
                 continue
             current_key = combo.currentData()
-            self._repopulate_combo(combo, selected_key=str(current_key) if current_key else None)
+            self._repopulate_combo(
+                combo,
+                selected_key=str(current_key) if current_key else None,
+                exclude_row=row_widget,
+            )
+        self._update_empty_state()
+        self._update_add_btn_state()
 
     def get_items(self) -> list[str]:
         keys: list[str] = []
@@ -636,6 +665,7 @@ class TagServiceListEditor(QWidget):
         for key in keys:
             self._add_row(key)
         self._update_empty_state()
+        self._update_add_btn_state()
         self.blockSignals(False)
 
     def _clear_rows(self) -> None:
@@ -644,7 +674,24 @@ class TagServiceListEditor(QWidget):
             row.deleteLater()
         self._row_widgets.clear()
 
-    def _repopulate_combo(self, combo: QComboBox, selected_key: str | None = None) -> None:
+    def _get_used_keys(self, exclude_row: QWidget | None = None) -> set[str]:
+        used = set()
+        for row_widget in self._row_widgets:
+            if row_widget == exclude_row:
+                continue
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if combo:
+                data = combo.currentData()
+                if data:
+                    used.add(str(data).strip())
+        return used
+
+    def _repopulate_combo(
+        self,
+        combo: QComboBox,
+        selected_key: str | None = None,
+        exclude_row: QWidget | None = None,
+    ) -> None:
         combo.blockSignals(True)
         combo.clear()
 
@@ -665,11 +712,16 @@ class TagServiceListEditor(QWidget):
         # Connected State
         combo.setEnabled(True)
 
-        for key, name in self._available_services.items():
-            short_key = f"{key[:8]}..." if len(key) > 12 else key
-            display = f"{name}  ({short_key})"
-            combo.addItem(display, userData=key)
+        used = self._get_used_keys(exclude_row=exclude_row)
 
+        # Only list services not already selected in other rows (plus this combo's own current selection)
+        for key, name in self._available_services.items():
+            if key not in used or key == selected_key:
+                short_key = f"{key[:8]}..." if len(key) > 12 else key
+                display = f"{name}  ({short_key})"
+                combo.addItem(display, userData=key)
+
+        # Preserve selection or mark unrecognized
         if selected_key:
             idx = combo.findData(selected_key)
             if idx >= 0:
@@ -679,15 +731,7 @@ class TagServiceListEditor(QWidget):
                 combo.addItem(f"❌ Unrecognized Service  ({short_key})", userData=selected_key)
                 combo.setCurrentIndex(combo.count() - 1)
         else:
-            # Pick the first service that isn't already selected in another row
-            existing_keys = set(self.get_items())
-            found_idx = -1
-            for i in range(combo.count()):
-                k = combo.itemData(i)
-                if k and k not in existing_keys:
-                    found_idx = i
-                    break
-            combo.setCurrentIndex(max(found_idx, 0))
+            combo.setCurrentIndex(0)
 
         combo.blockSignals(False)
 
@@ -697,10 +741,21 @@ class TagServiceListEditor(QWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(6)
 
-        combo = QComboBox(row_widget)
+        # Smart preselection: pick the first available service not yet in use
+        if (initial_key is None or initial_key == "") and self._available_services:
+            used = self._get_used_keys()
+            for k in self._available_services:
+                if k not in used:
+                    initial_key = k
+                    break
+
+        combo = SuggestionComboBox(row_widget)
         combo.setEditable(False)  # NON-EDITABLE: Pure entity selector
-        self._repopulate_combo(combo, selected_key=initial_key)
-        combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        self._repopulate_combo(combo, selected_key=initial_key, exclude_row=row_widget)
+        combo.about_to_show_popup.connect(
+            lambda c=combo, r=row_widget: self._repopulate_combo(c, c.currentData(), exclude_row=r)
+        )
+        combo.currentIndexChanged.connect(self._on_combo_changed)
         row_layout.addWidget(combo, stretch=1)
 
         del_btn = QPushButton("✕", row_widget)
@@ -716,7 +771,12 @@ class TagServiceListEditor(QWidget):
         self._stack_layout.addWidget(row_widget)
         self._row_widgets.append(row_widget)
         self._update_empty_state()
+        self._update_add_btn_state()
         return row_widget
+
+    def _on_combo_changed(self) -> None:
+        self._update_add_btn_state()
+        self.changed.emit()
 
     def _on_add_clicked(self) -> None:
         self._add_row()
@@ -728,10 +788,24 @@ class TagServiceListEditor(QWidget):
             self._stack_layout.removeWidget(row_widget)
             row_widget.deleteLater()
             self._update_empty_state()
+            self._update_add_btn_state()
             self.changed.emit()
 
     def _update_empty_state(self) -> None:
         self.empty_label.setVisible(len(self._row_widgets) == 0)
+
+    def _update_add_btn_state(self) -> None:
+        if not self._available_services:
+            self.add_btn.setEnabled(False)
+            self.add_btn.setToolTip("Connect to Hydrus to select tag services")
+            return
+
+        used = self._get_used_keys()
+        available_keys = set(self._available_services.keys())
+        has_unused = bool(available_keys - used)
+
+        self.add_btn.setEnabled(has_unused)
+        self.add_btn.setToolTip("" if has_unused else "All available tag services are already configured")
 
 
 # endregion
@@ -1878,6 +1952,7 @@ class PageQueryListEditor(QWidget):
     """
     Stacked row editor for [[hydrus.page_queries]].
     Displays open media pages with automatic disambiguation indices and file count previews.
+    Features smart next-available preselection and duplicate page exclusion.
     """
 
     changed = Signal()
@@ -1912,15 +1987,31 @@ class PageQueryListEditor(QWidget):
         self._root_layout.addLayout(btn_layout)
 
         self._update_empty_state()
+        self._update_add_btn_state()
+
+    @staticmethod
+    def _page_key(target: Any) -> tuple[str, int | None] | None:
+        if isinstance(target, dict):
+            name = target.get("name")
+            if name:
+                return (str(name), target.get("index"))
+        return None
 
     def set_available_pages(self, pages: list[dict[str, Any]]) -> None:
+        """Update open Hydrus media pages and refresh all row dropdowns."""
         self._available_pages = list(pages)
         for row_widget in self._row_widgets:
             combo: QComboBox | None = row_widget.findChild(QComboBox)
             if not combo:
                 continue
             curr_data = combo.currentData()
-            self._repopulate_combo(combo, selected_target=curr_data if isinstance(curr_data, dict) else None)
+            self._repopulate_combo(
+                combo,
+                selected_target=curr_data if isinstance(curr_data, dict) else None,
+                exclude_row=row_widget,
+            )
+        self._update_empty_state()
+        self._update_add_btn_state()
 
     def get_queries(self) -> list[dict[str, Any]]:
         queries: list[dict[str, Any]] = []
@@ -1946,6 +2037,7 @@ class PageQueryListEditor(QWidget):
             if name:
                 self._add_row({"name": str(name), "index": idx})
         self._update_empty_state()
+        self._update_add_btn_state()
         self.blockSignals(False)
 
     def _clear_rows(self) -> None:
@@ -1954,7 +2046,24 @@ class PageQueryListEditor(QWidget):
             row.deleteLater()
         self._row_widgets.clear()
 
-    def _repopulate_combo(self, combo: QComboBox, selected_target: dict[str, Any] | None = None) -> None:
+    def _get_used_targets(self, exclude_row: QWidget | None = None) -> set[tuple[str, int | None]]:
+        used: set[tuple[str, int | None]] = set()
+        for row_widget in self._row_widgets:
+            if row_widget == exclude_row:
+                continue
+            combo: QComboBox | None = row_widget.findChild(QComboBox)
+            if combo:
+                pkey = self._page_key(combo.currentData())
+                if pkey:
+                    used.add(pkey)
+        return used
+
+    def _repopulate_combo(
+        self,
+        combo: QComboBox,
+        selected_target: dict[str, Any] | None = None,
+        exclude_row: QWidget | None = None,
+    ) -> None:
         combo.blockSignals(True)
         combo.clear()
 
@@ -1976,23 +2085,28 @@ class PageQueryListEditor(QWidget):
 
         combo.setEnabled(True)
 
-        # Populate open media pages
+        used = self._get_used_targets(exclude_row=exclude_row)
+        selected_key = self._page_key(selected_target)
+
+        # Populate open media pages (excluding those selected in other rows)
         for p in self._available_pages:
-            name = p["name"]
-            idx = p["index"]
-            raw_idx = p.get("raw_index", 0)
-            has_dups = p.get("has_duplicates", False)
-            num_files = p.get("num_files")
+            pkey = self._page_key(p)
+            if pkey not in used or pkey == selected_key:
+                name = p["name"]
+                idx = p["index"]
+                raw_idx = p.get("raw_index", 0)
+                has_dups = p.get("has_duplicates", False)
+                num_files = p.get("num_files")
 
-            files_str = f" · {num_files} files" if num_files is not None else ""
-            tab_str = (
-                f" (Tab #{raw_idx + 1}{files_str})"
-                if has_dups
-                else (f" ({num_files} files)" if num_files is not None else "")
-            )
-            display = f"{name}{tab_str}"
+                files_str = f" · {num_files} files" if num_files is not None else ""
+                tab_str = (
+                    f" (Tab #{raw_idx + 1}{files_str})"
+                    if has_dups
+                    else (f" ({num_files} files)" if num_files is not None else "")
+                )
+                display = f"{name}{tab_str}"
 
-            combo.addItem(display, userData={"name": name, "index": idx})
+                combo.addItem(display, userData={"name": name, "index": idx})
 
         # Selection resolution
         if selected_target:
@@ -2027,10 +2141,22 @@ class PageQueryListEditor(QWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(6)
 
-        combo = QComboBox(row_widget)
+        # Smart preselection: pick the first available open page not yet configured
+        if initial_target is None and self._available_pages:
+            used = self._get_used_targets()
+            for p in self._available_pages:
+                pkey = self._page_key(p)
+                if pkey and pkey not in used:
+                    initial_target = {"name": p["name"], "index": p["index"]}
+                    break
+
+        combo = SuggestionComboBox(row_widget)
         combo.setEditable(False)
-        self._repopulate_combo(combo, selected_target=initial_target)
-        combo.currentIndexChanged.connect(lambda _: self.changed.emit())
+        self._repopulate_combo(combo, selected_target=initial_target, exclude_row=row_widget)
+        combo.about_to_show_popup.connect(
+            lambda c=combo, r=row_widget: self._repopulate_combo(c, c.currentData(), exclude_row=r)
+        )
+        combo.currentIndexChanged.connect(self._on_combo_changed)
         row_layout.addWidget(combo, stretch=1)
 
         del_btn = QPushButton("✕", row_widget)
@@ -2046,7 +2172,12 @@ class PageQueryListEditor(QWidget):
         self._stack_layout.addWidget(row_widget)
         self._row_widgets.append(row_widget)
         self._update_empty_state()
+        self._update_add_btn_state()
         return row_widget
+
+    def _on_combo_changed(self) -> None:
+        self._update_add_btn_state()
+        self.changed.emit()
 
     def _on_add_clicked(self) -> None:
         self._add_row()
@@ -2058,31 +2189,24 @@ class PageQueryListEditor(QWidget):
             self._stack_layout.removeWidget(row_widget)
             row_widget.deleteLater()
             self._update_empty_state()
+            self._update_add_btn_state()
             self.changed.emit()
 
     def _update_empty_state(self) -> None:
         self.empty_label.setVisible(len(self._row_widgets) == 0)
 
+    def _update_add_btn_state(self) -> None:
+        if not self._available_pages:
+            self.add_btn.setEnabled(False)
+            self.add_btn.setToolTip("Connect to Hydrus with open media tabs to add page queries")
+            return
 
-# endregion
+        used = self._get_used_targets()
+        all_pkeys = {self._page_key(p) for p in self._available_pages} - {None}
+        has_unused = bool(all_pkeys - used)
 
-
-# region SuggestionComboBox
-
-
-class SuggestionComboBox(QComboBox):
-    """QComboBox that notifies listeners right before showing its dropdown popup and enforces StrongFocus."""
-
-    about_to_show_popup = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        # Never allow mouse wheel to steal focus
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-    def showPopup(self) -> None:
-        self.about_to_show_popup.emit()
-        super().showPopup()
+        self.add_btn.setEnabled(has_unused)
+        self.add_btn.setToolTip("" if has_unused else "All open media tabs are already configured")
 
 
 # endregion
