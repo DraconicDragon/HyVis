@@ -38,6 +38,7 @@ from hyvis.config import AppConfig
 from hyvis.gui.about_dialog import AboutDialog
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
+from hyvis.gui.settings import GuiSettings, load_gui_settings, save_gui_settings
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
 
 
@@ -224,6 +225,7 @@ class MainWindow(QMainWindow):
     def __init__(self, state: ConfigState | None = None) -> None:
         super().__init__()
         self.state = state or ConfigState()
+        self.gui_settings: GuiSettings = load_gui_settings()
         self._highlighted_error_widgets: set[QWidget] = set()
         self._manual_connect_requested: bool = False
 
@@ -267,6 +269,10 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open_config)
         file_menu.addAction(open_action)
+
+        # Dynamic Open Recent submenu
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self._rebuild_recent_menu()
 
         file_menu.addSeparator()
 
@@ -555,13 +561,72 @@ class MainWindow(QMainWindow):
         for page in self.pages:
             page.changed.connect(self._on_page_modified)
 
+    def _rebuild_recent_menu(self) -> None:
+        """Populate the Open Recent submenu from persistent GUI settings."""
+        self.recent_menu.clear()
+        recent_paths = [p for p in self.gui_settings.recent_configs if Path(p).is_file()]
+
+        if not recent_paths:
+            empty_action = self.recent_menu.addAction("(No recent files)")
+            empty_action.setEnabled(False)
+            return
+
+        for p_str in recent_paths:
+            path = Path(p_str)
+            action = self.recent_menu.addAction(f"{path.name}  ({path.parent})")
+            action.setData(p_str)
+            action.triggered.connect(lambda _, p=p_str: self._on_open_recent_path(p))
+
+        self.recent_menu.addSeparator()
+        clear_action = self.recent_menu.addAction("Clear Recent")
+        clear_action.triggered.connect(self._on_clear_recent_configs)
+
+    def _on_open_recent_path(self, path_str: str) -> None:
+        """Open a configuration path selected from the Open Recent submenu."""
+        if self.state.is_dirty and not self._prompt_unsaved_changes(allow_discard=True):
+            return
+
+        file_path = Path(path_str)
+        if not file_path.is_file():
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"The file '{file_path.name}' no longer exists at:\n{file_path}",
+            )
+            self.gui_settings.recent_configs = [p for p in self.gui_settings.recent_configs if p != path_str]
+            save_gui_settings(self.gui_settings)
+            self._rebuild_recent_menu()
+            return
+
+        ok, err = self.state.load_from_file(file_path)
+        if ok:
+            self._record_recent_file(file_path)
+        elif err:
+            QMessageBox.critical(
+                self,
+                "Failed to Open Configuration",
+                f"Could not read or parse '{file_path.name}':\n\n{err}",
+            )
+
+    def _record_recent_file(self, file_path: Path | str) -> None:
+        """Record an opened or saved file in recent history and save settings."""
+        self.gui_settings.add_recent_config(file_path)
+        save_gui_settings(self.gui_settings)
+        self._rebuild_recent_menu()
+
+    def _on_clear_recent_configs(self) -> None:
+        """Clear the MRU history list and persist the change."""
+        self.gui_settings.recent_configs.clear()
+        self.gui_settings.last_opened_config = None
+        save_gui_settings(self.gui_settings)
+        self._rebuild_recent_menu()
+
     def _on_about_hyvis(self) -> None:
         dialog = AboutDialog(self)
         dialog.exec()
 
     def _on_about_qt(self) -> None:
         QMessageBox.aboutQt(self, "About Qt")
-
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         """Reset pages to a clean baseline before populating the incoming configuration."""
@@ -855,7 +920,9 @@ class MainWindow(QMainWindow):
         )
         if file_path:
             ok, err = self.state.load_from_file(file_path)
-            if not ok and err:
+            if ok:
+                self._record_recent_file(file_path)
+            elif err:
                 QMessageBox.critical(
                     self,
                     "Failed to Open Configuration",
@@ -875,7 +942,10 @@ class MainWindow(QMainWindow):
             pass
 
         try:
-            return self.state.save_to_file(raw_data=data)
+            saved = self.state.save_to_file(raw_data=data)
+            if saved and self.state.current_path:
+                self._record_recent_file(self.state.current_path)
+            return saved
         except Exception as exc:
             self._show_save_error(exc)
             return False
@@ -895,7 +965,10 @@ class MainWindow(QMainWindow):
             pass
 
         try:
-            return self.state.save_to_file(path=file_path, raw_data=data)
+            saved = self.state.save_to_file(path=file_path, raw_data=data)
+            if saved:
+                self._record_recent_file(file_path)
+            return saved
         except Exception as exc:
             self._show_save_error(exc)
             return False
