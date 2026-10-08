@@ -6,11 +6,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -22,8 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
+from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.widgets import SectionCard, SmoothScrollArea, add_form_row, bind_field_metadata, setup_field_tooltip
+from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, setup_field_tooltip
 
 
 class AppDbPage(BaseConfigPage):
@@ -86,11 +85,9 @@ class AppDbPage(BaseConfigPage):
         self.cache_raw_chk.toggled.connect(lambda _: self._on_field_changed())
         db_layout.addRow("", self.cache_raw_chk)
 
-        # Min score spinbox
-        self.min_score_spin = QDoubleSpinBox(container)
+        # Min score spinbox (decimals at global decimals + 1)
+        self.min_score_spin = FloatSpinBox(container, extra_decimals=1, step_scale=0.5)
         self.min_score_spin.setRange(0.0, 1.0)
-        self.min_score_spin.setSingleStep(0.005)
-        self.min_score_spin.setDecimals(3)
         self.min_score_spin.setValue(0.010)
         self.min_score_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(db_layout, db_fields, "min_cache_score", self.min_score_spin)

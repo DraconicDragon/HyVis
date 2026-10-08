@@ -14,8 +14,18 @@ from typing import Any
 
 import tomli_w
 from pydantic import BaseModel, ConfigDict, Field
+from PySide6.QtCore import QObject, Signal
 
 logger = logging.getLogger(__name__)
+
+
+class SettingsSignals(QObject):
+    """Global broadcast signals for runtime GUI preferences."""
+
+    spinbox_format_changed = Signal(int, float)  # (decimals, step)
+
+
+settings_signals = SettingsSignals()
 
 
 # region OS Path Resolution
@@ -110,7 +120,7 @@ def load_gui_settings() -> GuiSettings:
 
 
 def save_gui_settings(settings: GuiSettings) -> bool:
-    """Write GUI settings to settings.toml."""
+    """Write GUI settings to settings.toml and broadcast changes to active widgets."""
     try:
         folder = get_user_config_dir()
         folder.mkdir(parents=True, exist_ok=True)
@@ -119,6 +129,9 @@ def save_gui_settings(settings: GuiSettings) -> bool:
         data = settings.model_dump(mode="json", exclude_none=True)
         toml_str = tomli_w.dumps(data)
         path.write_text(toml_str, encoding="utf-8")
+
+        # Broadcast updated precision and stepping to all live inputs
+        settings_signals.spinbox_format_changed.emit(settings.spinbox_decimals, settings.spinbox_step)
         return True
     except Exception as exc:
         logger.error("Failed to save GUI settings: %s", exc)

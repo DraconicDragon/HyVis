@@ -21,13 +21,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.gui.settings import (
     GuiSettings,
     StartupBehavior,
     load_gui_settings,
     save_gui_settings,
 )
-from hyvis.gui.widgets import SectionCard, SmoothScrollArea
+from hyvis.gui.widgets import SectionCard
 
 
 class PreferencesDialog(QDialog):
@@ -95,23 +96,23 @@ class PreferencesDialog(QDialog):
         layout.addWidget(self.startup_card)
 
         # 2. Number Inputs & Precision Card
-        self.spinbox_card = SectionCard("Spinboxes & Decimal Precision", parent=container)
+        self.spinbox_card = SectionCard("Threshold Precision & Increments", parent=container)
         spin_layout = QFormLayout()
         spin_layout.setSpacing(8)
 
         self.decimals_spin = QSpinBox(container)
         self.decimals_spin.setRange(2, 6)
         self.decimals_spin.setValue(2)
-        self.decimals_spin.setToolTip("Minimum number of decimal digits displayed on threshold spinboxes.")
+        self.decimals_spin.setToolTip("Decimal places displayed on threshold inputs (e.g. 2 = 0.00).")
         self.decimals_spin.valueChanged.connect(self._on_decimals_changed)
-        spin_layout.addRow("Decimal Places:", self.decimals_spin)
+        spin_layout.addRow("Decimal Precision:", self.decimals_spin)
 
         self.step_spin = QDoubleSpinBox(container)
         self.step_spin.setRange(0.0001, 0.5)
-        self.step_spin.setDecimals(4)
-        self.step_spin.setSingleStep(0.005)
+        self.step_spin.setDecimals(2)
+        self.step_spin.setSingleStep(0.01)
         self.step_spin.setValue(0.01)
-        self.step_spin.setToolTip("Single step increment when using arrow buttons or keyboard adjustment.")
+        self.step_spin.setToolTip("Step increment when adjusting threshold values with arrow buttons.")
         spin_layout.addRow("Step Increment:", self.step_spin)
 
         self.spinbox_card.setContentLayout(spin_layout)
@@ -168,8 +169,11 @@ class PreferencesDialog(QDialog):
             self.preset_path_edit.setText(path)
 
     def _on_decimals_changed(self, decimals: int) -> None:
-        # Enforce step resolution doesn't exceed decimal precision
+        """Keep step increment decimal resolution and minimum value synchronized without jagged residuals."""
         min_step = 10 ** (-decimals)
+        self.step_spin.setDecimals(decimals)
+        self.step_spin.setMinimum(min_step)
+        self.step_spin.setSingleStep(min_step)
         if self.step_spin.value() < min_step:
             self.step_spin.setValue(min_step)
 

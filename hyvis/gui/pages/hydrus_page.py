@@ -22,12 +22,12 @@ from hyvis.config import (
     HydrusConfig,
     PreviewConfig,
 )
+from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     PageQueryListEditor,
     SectionCard,
-    SmoothScrollArea,
     TagQueryListEditor,
     TagRuleListEditor,
     TagServiceListEditor,

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.gui.widgets import SmoothScrollArea
+from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.system_info import format_system_info_text, get_system_info
 
 

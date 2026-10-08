@@ -10,7 +10,6 @@ from typing import Any
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -23,13 +22,13 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, OutputFilterConfig
+from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
     KeyValueEditor,
     SectionCard,
-    SmoothScrollArea,
     StringListEditor,
     TagSubsetListEditor,
     ThresholdTableEditor,
@@ -137,10 +136,8 @@ class FiltersPage(BaseConfigPage):
         thresh_layout = QFormLayout()
         thresh_layout.setSpacing(8)
 
-        self.default_thresh_spin = QDoubleSpinBox(self)
+        self.default_thresh_spin = FloatSpinBox(self)
         self.default_thresh_spin.setRange(0.0, 1.0)
-        self.default_thresh_spin.setSingleStep(0.05)
-        self.default_thresh_spin.setDecimals(2)
         self.default_thresh_spin.setValue(0.40)
         self.default_thresh_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(thresh_layout, of_fields, "default_threshold", self.default_thresh_spin)
@@ -151,10 +148,8 @@ class FiltersPage(BaseConfigPage):
         self.prefer_tlt_chk.toggled.connect(lambda _: self._on_field_changed())
         thresh_layout.addRow("", self.prefer_tlt_chk)
 
-        self.tlt_offset_spin = QDoubleSpinBox(self)
+        self.tlt_offset_spin = FloatSpinBox(self)
         self.tlt_offset_spin.setRange(-1.0, 1.0)
-        self.tlt_offset_spin.setSingleStep(0.05)
-        self.tlt_offset_spin.setDecimals(2)
         self.tlt_offset_spin.setValue(0.00)
         self.tlt_offset_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(thresh_layout, of_fields, "tag_level_threshold_relative_offset", self.tlt_offset_spin)

@@ -26,10 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
+from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.widgets import (
     SectionCard,
-    SmoothScrollArea,
     TagServiceListEditor,
     add_form_row,
     bind_field_metadata,
