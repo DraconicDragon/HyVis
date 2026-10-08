@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ class StartupBehavior(StrEnum):
 
 class GuiSettings(BaseModel):
     """Persistent desktop interface configuration."""
+
+    model_config = ConfigDict(validate_assignment=True)
 
     # Startup & Loading
     startup_behavior: StartupBehavior = StartupBehavior.TEMPLATE
