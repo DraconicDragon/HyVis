@@ -356,16 +356,6 @@ class ConfigState(QObject):
         self.set_dirty(True)
         self.validate()
 
-    def validate(self) -> list[str]:
-        """Run business validation rules and emit validation status."""
-        if self._config is None:
-            errors = ["No configuration loaded."]
-        else:
-            errors = self._config.hyvis_validate()
-
-        self.validation_changed.emit(errors)
-        return errors
-
     # region Live Hydrus Sourcing
 
     def sync_hydrus_services(
