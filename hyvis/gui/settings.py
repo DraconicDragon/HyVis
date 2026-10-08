@@ -27,6 +27,9 @@ class SettingsSignals(QObject):
 
 settings_signals = SettingsSignals()
 
+# Module-level cached instance
+_CACHED_SETTINGS: GuiSettings | None = None
+
 
 # region OS Path Resolution
 
@@ -119,8 +122,17 @@ def load_gui_settings() -> GuiSettings:
         return GuiSettings()
 
 
+def get_gui_settings() -> GuiSettings:
+    """Return the cached in-memory GuiSettings, loading from disk on first call."""
+    global _CACHED_SETTINGS
+    if _CACHED_SETTINGS is None:
+        _CACHED_SETTINGS = load_gui_settings()
+    return _CACHED_SETTINGS
+
+
 def save_gui_settings(settings: GuiSettings) -> bool:
     """Write GUI settings to settings.toml and broadcast changes to active widgets."""
+    global _CACHED_SETTINGS
     try:
         folder = get_user_config_dir()
         folder.mkdir(parents=True, exist_ok=True)
@@ -129,6 +141,9 @@ def save_gui_settings(settings: GuiSettings) -> bool:
         data = settings.model_dump(mode="json", exclude_none=True)
         toml_str = tomli_w.dumps(data)
         path.write_text(toml_str, encoding="utf-8")
+
+        # Keep in-memory singleton updated
+        _CACHED_SETTINGS = settings
 
         # Broadcast updated precision and stepping to all live inputs
         settings_signals.spinbox_format_changed.emit(settings.spinbox_decimals, settings.spinbox_step)

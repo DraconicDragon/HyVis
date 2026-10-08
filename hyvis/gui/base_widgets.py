@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.gui.settings import load_gui_settings, settings_signals
+from hyvis.gui.settings import get_gui_settings, settings_signals
 
 # region FloatSpinBox
 
@@ -44,7 +44,7 @@ class FloatSpinBox(QDoubleSpinBox):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Initialize from current persistent preferences
-        settings = load_gui_settings()
+        settings = get_gui_settings()
         self._apply_format(settings.spinbox_decimals, settings.spinbox_step)
 
         # Subscribe to live preference broadcasts

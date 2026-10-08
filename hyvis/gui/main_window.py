@@ -42,9 +42,9 @@ from hyvis.gui.preferences_dialog import PreferencesDialog
 from hyvis.gui.settings import (
     GuiSettings,
     delete_session_tmp,
+    get_gui_settings,
     get_session_tmp_path,
     has_session_tmp,
-    load_gui_settings,
     save_gui_settings,
     save_session_tmp,
 )
@@ -234,7 +234,7 @@ class MainWindow(QMainWindow):
     def __init__(self, state: ConfigState | None = None) -> None:
         super().__init__()
         self.state = state or ConfigState()
-        self.gui_settings: GuiSettings = load_gui_settings()
+        self.gui_settings: GuiSettings = get_gui_settings()
         self._highlighted_error_widgets: set[QWidget] = set()
         self._manual_connect_requested: bool = False
 

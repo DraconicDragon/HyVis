@@ -292,9 +292,9 @@ class ConfigState(QObject):
             logger.info("Loaded configuration from %s", file_path)
 
             # Auto-sync services ONLY if enabled in preferences and credentials are present
-            from hyvis.gui.settings import load_gui_settings
+            from hyvis.gui.settings import get_gui_settings
 
-            if load_gui_settings().auto_connect_hydrus and loaded.hydrus.api_url and loaded.hydrus.api_key:
+            if get_gui_settings().auto_connect_hydrus and loaded.hydrus.api_url and loaded.hydrus.api_key:
                 self.sync_hydrus_services(loaded.hydrus.api_url, loaded.hydrus.api_key)
 
             return True, None

@@ -38,7 +38,7 @@ def run_gui(initial_config: Path | str | None = None) -> int:
         from PySide6.QtWidgets import QApplication
 
         from hyvis.gui.main_window import MainWindow
-        from hyvis.gui.settings import StartupBehavior, load_gui_settings
+        from hyvis.gui.settings import StartupBehavior, get_gui_settings
         from hyvis.gui.state import ConfigState
     except ImportError as exc:
         print(
@@ -55,7 +55,7 @@ def run_gui(initial_config: Path | str | None = None) -> int:
     app.setOrganizationName("Drac")
 
     state = ConfigState()
-    gui_settings = load_gui_settings()
+    gui_settings = get_gui_settings()
 
     # Resolve startup configuration hierarchy:
     # 1. CLI argument overrides everything

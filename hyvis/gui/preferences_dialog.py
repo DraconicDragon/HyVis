@@ -25,7 +25,7 @@ from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.gui.settings import (
     GuiSettings,
     StartupBehavior,
-    load_gui_settings,
+    get_gui_settings,
     save_gui_settings,
 )
 from hyvis.gui.widgets import SectionCard
@@ -36,7 +36,7 @@ class PreferencesDialog(QDialog):
 
     def __init__(self, settings: GuiSettings | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.settings: GuiSettings = settings or load_gui_settings()
+        self.settings: GuiSettings = settings or get_gui_settings()
 
         self.setWindowTitle("Preferences")
         self.resize(600, 480)
