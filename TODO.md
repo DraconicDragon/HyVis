@@ -46,6 +46,8 @@
 
 ## lower priority (in order, mostly)
 
+- Aesthetic scoring model support
+
 - (vibe) store param count for each model(-plugin)
   - what is this useful for
   - I'd have to calculate it using numel()/sfts metadata/onnx graph for each model
@@ -58,6 +60,8 @@
   - every nth frame (could do fps percentage based or hard user-set frame intervals)
   - keyframes only (if easily possible) - **LIKELY BEST OPTION**
   - do analysis and find frames with cuts or scene changes
+
+  - !IMPORTANT! If using PyAV - It requires Python 3.12 or higher (for v19+), HyVis currently requires 3.11 or higher
 
 - better progress printing for preflight work (file metadata fetching)
 
