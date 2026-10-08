@@ -38,6 +38,7 @@ from hyvis.config import AppConfig
 from hyvis.gui.about_dialog import AboutDialog
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
+from hyvis.gui.preferences_dialog import PreferencesDialog
 from hyvis.gui.settings import (
     GuiSettings,
     delete_session_tmp,
@@ -326,6 +327,14 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # --- Edit Menu ---
+        edit_menu = menu_bar.addMenu("&Edit")
+
+        pref_action = QAction("&Preferences...", self)
+        pref_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        pref_action.triggered.connect(self._on_preferences)
+        edit_menu.addAction(pref_action)
 
         # --- Help Menu ---
         help_menu = menu_bar.addMenu("&Help")
@@ -642,6 +651,11 @@ class MainWindow(QMainWindow):
         self.gui_settings.last_opened_config = None
         save_gui_settings(self.gui_settings)
         self._rebuild_recent_menu()
+
+    def _on_preferences(self) -> None:
+        dialog = PreferencesDialog(self.gui_settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.gui_settings = dialog.settings
 
     def _on_about_hyvis(self) -> None:
         dialog = AboutDialog(self)
