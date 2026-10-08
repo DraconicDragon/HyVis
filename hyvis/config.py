@@ -574,7 +574,7 @@ class ModelConfig(StrictBaseModel):
     )
     output_tag_services: OutputTagServices | None = Field(
         default=None,
-        title="Model Destination Tag Services",
+        title="Model-Specific Destination Tag Services",
         description="Optional per-model override for destination tag services. Completely replaces global services when set.",
         json_schema_extra=field_meta(source="hydrus:tag_services"),
     )
