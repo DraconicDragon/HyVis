@@ -40,10 +40,9 @@ def run_gui(initial_config: Path | str | None = None) -> int:
         from hyvis.gui.main_window import MainWindow
         from hyvis.gui.settings import StartupBehavior, load_gui_settings
         from hyvis.gui.state import ConfigState
-    except ImportError:
+    except ImportError as exc:
         print(
-            "ERROR: PySide6 is required to run the HyVis desktop interface.\n"
-            "Install it with: pip install 'hyvis[gui]' or pip install PySide6",
+            f"Error importing required modules: {exc}",
             file=sys.stderr,
         )
         return 1
