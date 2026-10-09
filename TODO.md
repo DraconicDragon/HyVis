@@ -15,21 +15,35 @@
 - Save logs to files with rotation so logs don't fill up space too much
   - Logs in terminal fight for space with the progress printing during inference
 
+- Something to do infer-only, but not send to push queue?
+  - DB currently does not save whether something has been successfully pushed and all
+  - Would this even be useful?
+
 ## TODO For User Interface
-
-- Persistent data logic (should be able to just use system-native appdata/.config or whatever folders) for:
-  - settings
-  - last used config file(s)
-
-- Store intermediate in-edit config as .tmp file or something so it's not lost by accident
-  - Think of if discard will delete the temp config or not
-  - Option to restore from this temp config on program start if it wasn't saved
-    - if the temp config was saved, then there should be no .tmp file
 
 - Show extra validation error/warning (warning needs to be implemented, separate from errors) when:
   - E: Unkown tag service key is set in a combobox (eg when user loaded old config but the tag service doesnt exist anymore)
   - W: When a user inputted category is present but appears never in relation to any model ID; its an unkown category
     - Note on reasoning behind this: The metadata that presents which categories a model plugin/ID outputs is not a hard requirement, custom model files can also be used which may be finetunes and simply just work with existing code, but output undocumented categories
+
+- Hash input widget below page queries or so, ie turning --extra-hash-file into a real config.py option
+  - Actually, better would probably be to just open file dialog to the file and save path to file? I kinda don't want having to store a bunch of hashes in toml file (in theory the tag-related options can also fill up to a large amount, but not nearly as easily at least)
+    - Or even less involved: we have cli arg options and such in launch dialog, then it's not tied to the UI and it's not expected to be saved
+      - [ ] For now can just be a normal textbox, that is missing anyway (needs to have --no-preview locked there or something idk, or let user remove it and let them be on their own if they change any of that in the first place)
+
+- A way to show info about model, description, extra notes, etc
+  - Example: PixAI tagger having their funny rating tags be non-'standard'  ('rating:g' instead of 'general')
+  - Info needs to be provided by vibe
+- Model Variant selector widget
+  - mind that there is description for variants too
+- Model availability indicator
+  - Model (variant) Artifact preview module (or widget), what needs to be downloaded still, what is available, how many MB download will it be
+- Model inference tryout/preview module (should be done only after availability and variant stuff is finished)
+  - Show on model page, on launch dialog, or both?
+  - while it is supposed to be a tryout module, it can be used at the same time as just a viewer for the
+  - Since model files are present for this to work, it opens up possibilities for improving UX in relation for user to understand model and it's better
+    - Tag search/inspection module/widget could be useful
+    - Should probably see that all the extra modules/widgets that are independent from the HyVis Configurator are in separate files, maybe make other repo or subfolder for it so I can reuse same thing for different project
 
 - Low priority: Create custom base/primitive widgets like Custom QButtons and use throughout UI to have better control over them
   - Increase size of widgets by a bit so they are easier to hit, default Qt is kinda ass, but definitely not unusable, might introduce other issues so idk
@@ -39,10 +53,7 @@
 
 ### Potential Settings To Implement
 
-- Option for default config to load upon program start
-  - Option to load last recently used / .tmp ("Where you left off")
 - Automatically open preview pages in Hydrus - if possible - on Launch in terminal popup spawn; or after terminal is launched (would remove the no preview cli arg)
-- Configurable float/SpinBox stepping (additive)
 
 ## lower priority (in order, mostly)
 
