@@ -82,6 +82,7 @@ class GuiSettings(BaseModel):
     startup_behavior: StartupBehavior = StartupBehavior.TEMPLATE
     custom_preset_path: str | None = None
     auto_connect_hydrus: bool = True
+    prompt_backup_before_launch: bool = True
 
     # History & Recent Files (MRU, max 10)
     recent_configs: list[str] = Field(default_factory=list)

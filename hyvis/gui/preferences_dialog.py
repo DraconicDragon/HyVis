@@ -92,6 +92,9 @@ class PreferencesDialog(QDialog):
         self.auto_connect_chk = QCheckBox("Automatically connect to Hydrus when credentials exist", container)
         startup_layout.addRow("", self.auto_connect_chk)
 
+        self.backup_reminder_chk = QCheckBox("Remind to backup Hydrus database before launching", container)
+        startup_layout.addRow("", self.backup_reminder_chk)
+
         self.startup_card.setContentLayout(startup_layout)
         layout.addWidget(self.startup_card)
 
@@ -149,6 +152,7 @@ class PreferencesDialog(QDialog):
 
         self.preset_path_edit.setText(self.settings.custom_preset_path or "")
         self.auto_connect_chk.setChecked(self.settings.auto_connect_hydrus)
+        self.backup_reminder_chk.setChecked(self.settings.prompt_backup_before_launch)
         self._on_startup_behavior_changed()
 
         # 2. Spinboxes
@@ -182,6 +186,7 @@ class PreferencesDialog(QDialog):
         self.settings.startup_behavior = behavior
         self.settings.custom_preset_path = self.preset_path_edit.text().strip() or None
         self.settings.auto_connect_hydrus = self.auto_connect_chk.isChecked()
+        self.settings.prompt_backup_before_launch = self.backup_reminder_chk.isChecked()
 
         self.settings.spinbox_decimals = self.decimals_spin.value()
         self.settings.spinbox_step = float(self.step_spin.value())

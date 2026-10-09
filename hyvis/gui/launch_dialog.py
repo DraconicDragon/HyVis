@@ -487,6 +487,30 @@ class LaunchDialog(QDialog):
         QTimer.singleShot(1800, lambda: self.copy_cmd_btn.setText("Copy Command"))
 
     def _on_launch_clicked(self) -> None:
+        from hyvis.gui.settings import get_gui_settings, save_gui_settings
+
+        settings = get_gui_settings()
+        if settings.prompt_backup_before_launch:
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Hydrus Backup Reminder")
+            msg_box.setText(
+                "It is strongly recommended to create or update your Hydrus backup."
+            )
+            msg_box.setInformativeText("Are you ready to proceed with launching?")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+
+            dont_ask_cb = QCheckBox("Don't remind again", msg_box)
+            msg_box.setCheckBox(dont_ask_cb)
+
+            if msg_box.exec() != QMessageBox.StandardButton.Yes:
+                return
+
+            if dont_ask_cb.isChecked():
+                settings.prompt_backup_before_launch = False
+                save_gui_settings(settings)
+
         extra_args = self._build_effective_args()
         ok = launch_in_external_terminal(self.config_path, extra_args)
         if ok:
