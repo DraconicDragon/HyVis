@@ -54,6 +54,12 @@ def run_gui(initial_config: Path | str | None = None) -> int:
     app.setApplicationName("HyVis")
     app.setOrganizationName("Drac")
 
+    from hyvis.gui.theme import CheckBoxCursorFilter, HyVisAppStyle
+
+    app.setStyle(HyVisAppStyle(app.style()))
+    _cursor_filter = CheckBoxCursorFilter(app)
+    app.installEventFilter(_cursor_filter)
+
     state = ConfigState()
     gui_settings = get_gui_settings()
 

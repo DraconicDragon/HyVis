@@ -7,6 +7,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import NamedTuple
 
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtWidgets import QCheckBox, QProxyStyle, QStyle, QStyleOption, QWidget
+
 
 class CardTheme(StrEnum):
     """Semantic purpose themes for stacked cards and rule editors."""
@@ -62,3 +65,26 @@ def get_card_stylesheet(theme: CardTheme, class_name: str = "QFrame") -> str:
     """Generate a clean stylesheet string for a card given its semantic theme."""
     colors = SEMANTIC_CARD_COLORS.get(theme, SEMANTIC_CARD_COLORS[CardTheme.DEFAULT])
     return f"{class_name} {{  border: 1px solid {colors.border};  border-radius: 6px;  background-color: {colors.bg};}}"
+
+
+class HyVisAppStyle(QProxyStyle):
+    """Global proxy style that expands checkbox indicators to 18px application-wide."""
+
+    def pixelMetric(
+        self,
+        metric: QStyle.PixelMetric,
+        option: QStyleOption | None = None,
+        widget: QWidget | None = None,
+    ) -> int:
+        if metric in (QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight):
+            return 17
+        return super().pixelMetric(metric, option, widget)
+
+
+class CheckBoxCursorFilter(QObject):
+    """Global event filter that assigns a pointing hand cursor to all checkboxes on hover."""
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Enter and isinstance(obj, QCheckBox):
+            obj.setCursor(Qt.CursorShape.PointingHandCursor)
+        return super().eventFilter(obj, event)
