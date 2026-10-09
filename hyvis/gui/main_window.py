@@ -35,10 +35,9 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
-from hyvis.gui.about_dialog import AboutDialog
+from hyvis.gui.dialogs import AboutDialog, LaunchDialog, PreferencesDialog, UnsavedChangesAction, prompt_unsaved_changes
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
-from hyvis.gui.preferences_dialog import PreferencesDialog
 from hyvis.gui.settings import (
     GuiSettings,
     delete_session_tmp,
@@ -1047,117 +1046,21 @@ class MainWindow(QMainWindow):
         message: str | None = None,
     ) -> bool:
         """
-        Unified dialog prompting the user when unsaved changes exist.
-
-        Layout:
-          [ Discard ] (left)  --- stretch ---  [ Save As... ] [ Save ] [ Cancel ] (right)
-
-        Returns:
-            True  -> Proceed with the action (saved or discarded).
-            False -> Abort the action (cancelled or save failed/aborted).
+        Unified prompt when unsaved changes exist.
+        Returns True if the caller should proceed, False if cancelled or save aborted.
         """
-        style = self.style()
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Unsaved Changes")
-        dialog.setModal(True)
-        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
-
-        root = QVBoxLayout(dialog)
-        root.setContentsMargins(16, 16, 16, 14)
-        root.setSpacing(14)
-
-        # Content row: Standard Question Icon + Text
-        content_row = QHBoxLayout()
-        content_row.setSpacing(14)
-
-        icon_lbl = QLabel(dialog)
-        icon_pix = style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion).pixmap(32, 32)
-        icon_lbl.setPixmap(icon_pix)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
-        content_row.addWidget(icon_lbl)
-
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(4)
-        path_str = f"'{self.state.current_path.name}'" if self.state.current_path else "Untitled Configuration"
-        title_lbl = QLabel(f"The configuration {path_str} has unsaved changes.\n", dialog)
-        text_layout.addWidget(title_lbl)
-
-        info_lbl = QLabel(message or "What would you like to do before proceeding?", dialog)
-        text_layout.addWidget(info_lbl)
-
-        content_row.addLayout(text_layout)
-        root.addLayout(content_row)
-
-        # Buttons row
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-
-        choice: str = "cancel"
-
-        # 1. Left: Discard (No custom stylesheet, native button)
-        if allow_discard:
-            discard_btn = QPushButton("Discard", dialog)
-            discard_btn.setIcon(
-                QIcon.fromTheme("edit-delete", style.standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton))
-            )
-
-            def on_discard() -> None:
-                nonlocal choice
-                choice = "discard"
-                dialog.accept()
-
-            discard_btn.clicked.connect(on_discard)
-            btn_row.addWidget(discard_btn)
-
-        # 2. Middle: Space separating Discard from Save/Cancel
-        btn_row.addStretch(1)
-
-        # 3. Right: Save As...
-        save_as_btn = QPushButton("Save As...", dialog)
-        save_as_btn.setIcon(
-            QIcon.fromTheme("document-save-as", style.standardIcon(QStyle.StandardPixmap.SP_DriveFDIcon))
+        action = prompt_unsaved_changes(
+            parent=self,
+            current_path=self.state.current_path,
+            allow_discard=allow_discard,
+            message=message,
         )
 
-        def on_save_as() -> None:
-            nonlocal choice
-            choice = "save_as"
-            dialog.accept()
-
-        save_as_btn.clicked.connect(on_save_as)
-        btn_row.addWidget(save_as_btn)
-
-        # 4. Right: Save (Default)
-        save_btn = QPushButton("Save", dialog)
-        save_btn.setIcon(
-            QIcon.fromTheme("document-save", style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
-        )
-        save_btn.setDefault(True)
-
-        def on_save() -> None:
-            nonlocal choice
-            choice = "save"
-            dialog.accept()
-
-        save_btn.clicked.connect(on_save)
-        btn_row.addWidget(save_btn)
-
-        # 5. Far Right: Cancel
-        cancel_btn = QPushButton("Cancel", dialog)
-        cancel_btn.setIcon(
-            QIcon.fromTheme("dialog-cancel", style.standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
-        )
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_row.addWidget(cancel_btn)
-
-        root.addLayout(btn_row)
-
-        dialog.exec()
-
-        if choice == "save":
+        if action == UnsavedChangesAction.SAVE:
             return self._on_save_config()
-        if choice == "save_as":
+        if action == UnsavedChangesAction.SAVE_AS:
             return self._on_save_as_config()
-        if choice == "discard":
+        if action == UnsavedChangesAction.DISCARD:
             self._autosave_timer.stop()
             delete_session_tmp()
             return True
@@ -1219,8 +1122,6 @@ class MainWindow(QMainWindow):
             return
 
         assert self.state.current_path is not None
-        from hyvis.gui.launch_dialog import LaunchDialog
-
         dialog = LaunchDialog(self.state.config, self.state.current_path, self)
         dialog.exec()
 
