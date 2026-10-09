@@ -45,7 +45,7 @@ class AboutDialog(QDialog):
         header_layout.setSpacing(4)
 
         title_desc_lbl = QLabel(
-            "<b>HyVis</b> | Local vision-model autotagging utility for Hydrus Network.",
+            "<b>HyVis</b> | Local autotagging utility for Hydrus Network.",
             self,
         )
         title_desc_lbl.setWordWrap(True)

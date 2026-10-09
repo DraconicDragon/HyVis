@@ -196,7 +196,7 @@ def get_system_info() -> list[DependencyGroup]:
         DependencyInfo(
             "HyVis",
             hyvis_ver,
-            summary="Local vision-model autotagging utility for Hydrus Network",
+            summary="Local autotagging utility for Hydrus Network",
         ),
         DependencyInfo(
             "vibe",
