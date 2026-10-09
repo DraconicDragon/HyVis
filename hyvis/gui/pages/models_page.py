@@ -62,7 +62,7 @@ class ModelsPage(BaseConfigPage):
 
         # 1. Left: Models list (Enforce generous min and max widths)
         left_widget = QWidget(splitter)
-        left_widget.setMinimumWidth(132)
+        left_widget.setMinimumWidth(145)
         left_widget.setMaximumWidth(380)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -75,6 +75,11 @@ class ModelsPage(BaseConfigPage):
         self.model_list = QListWidget(left_widget)
         setup_field_tooltip(self.model_list, inf_fields["models"])
         self.model_list.currentRowChanged.connect(self._on_model_selected)
+        self.model_list.setStyleSheet(
+            "QListWidget::item {"
+            "  padding: 8px;"
+            "}"
+        )
         left_layout.addWidget(self.model_list, stretch=1)
 
         btn_row = QHBoxLayout()
