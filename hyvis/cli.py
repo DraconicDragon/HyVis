@@ -64,6 +64,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--infer-only", action="store_true", help="Run inference only; do not push results to Hydrus.")
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run model inference and tag filtering without saving to the database or pushing to Hydrus.",
+    )
+    parser.add_argument(
         "--push-only", action="store_true", help="Skip inference and only drain the pending push queue to Hydrus."
     )
     parser.add_argument(

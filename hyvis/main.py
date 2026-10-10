@@ -68,13 +68,22 @@ async def main() -> int:
         new_hydrus = cfg.hydrus.model_copy(update=hydrus_updates)
         cfg = cfg.model_copy(update={"hydrus": new_hydrus})
 
+    from hyvis.db import Database
+    from hyvis.dry_run import DryRunDatabase
+    from hyvis.extra_hashes import load_extra_hashes
+
     # Resolve CLI vs. TOML precedence (CLI flag overrides TOML setting)
     effective_infer_only = args.infer_only or cfg.hyvis.infer_only
     effective_no_wait = args.no_wait or cfg.hydrus.no_wait
-    mode = "infer_only" if effective_infer_only else "default"
 
-    from hyvis.db import Database
-    from hyvis.extra_hashes import load_extra_hashes
+    if args.dry_run:
+        mode = "dry_run"
+    elif effective_infer_only:
+        mode = "infer_only"
+    else:
+        mode = "default"
+
+    db_cls = DryRunDatabase if args.dry_run else Database
 
     # Resolve database path upfront
     db_path = Path(cfg.database.path)
@@ -220,7 +229,7 @@ async def main() -> int:
         return 0
 
     # 3. Smart Path Resolution: Check local SQLite cache first to avoid redundant HTTP calls
-    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+    with db_cls(db_path, min_cache_score=cfg.database.min_cache_score) as db:
         cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
 
     files_to_resolve_online = []
@@ -238,7 +247,7 @@ async def main() -> int:
                 progress_callback=lambda d, t: inline_progress("Resolving paths online", d, t),
             )
             clear_line()
-            with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+            with db_cls(db_path, min_cache_score=cfg.database.min_cache_score) as db:
                 for fi in files_to_resolve_online:
                     if fi.local_path:
                         db.upsert_file(fi.file_hash, file_path=fi.local_path, mime=fi.mime)
@@ -336,8 +345,8 @@ async def main() -> int:
     total_skipped = 0
     run_status = "done"
 
-    with Database(db_path, min_cache_score=cfg.database.min_cache_score) as db:
-        if db.has_pending_pushes():
+    with db_cls(db_path, min_cache_score=cfg.database.min_cache_score) as db:
+        if mode != "dry_run" and db.has_pending_pushes():
             print(
                 _c(
                     "  Note: there are files with unpushed inference results. Run with --push-only to push them.",
@@ -359,7 +368,7 @@ async def main() -> int:
 
             # region P1: Inference
             infer_stats: PhaseStats | None = None
-            if mode in ("default", "infer_only"):
+            if mode in ("default", "infer_only", "dry_run"):
                 progress = Progress(total=actionable_count)
                 infer_stats = await infer_files(
                     model_cfg,

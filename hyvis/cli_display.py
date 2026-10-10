@@ -117,6 +117,7 @@ def print_confirmation(
     mode_label = {
         "default": "Infer + Push",
         "infer_only": "Infer only  (Hydrus push skipped)",
+        "dry_run": "Dry Run  (Inference active - no DB writes, Hydrus push skipped)",
     }.get(mode, mode)
 
     print()
@@ -350,7 +351,10 @@ def print_run_summary(
     print(_c("  ══ Run Complete ══════════════════════════════", BOLD))
     print(f"  Status    : {_c(run_status, GREEN if run_status == 'done' else YELLOW)}")
     print(f"  Run ID    : {_c(run_id, DIM)}")
-    if mode in ("default", "infer_only"):
+    if mode == "dry_run":
+        print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped (from cache)")
+        print(_c("  Note      : Dry run completed - 0 database writes, 0 tags pushed to Hydrus.", DIM))
+    elif mode in ("default", "infer_only"):
         print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped")
     if mode == "default":
         print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
