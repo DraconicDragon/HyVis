@@ -129,7 +129,8 @@ class Progress:
             parts.append(f"↷ {self._skipped} cached")
         if self._processed > 0 and self._last_file_hash:
             short_hash = self._last_file_hash[:8]
-            parts.append(f"Last: {short_hash} - {self._last_model_id} - {self._last_tag_count} tags")
+            tag_label = "tag" if self._last_tag_count == 1 else "tags"
+            parts.append(f"Last: {short_hash} - {self._last_model_id} - {self._last_tag_count} {tag_label}")
 
         return " │ ".join(parts)
 
