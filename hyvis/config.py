@@ -540,17 +540,17 @@ class ModelConfig(StrictBaseModel):
         json_schema_extra=field_meta(picker="directory"),
         examples=["local:/path/to/models/swinv2", "SmilingWolf/wd-swinv2-tagger-v3"],
     )
-    device: str = Field(
-        default="auto",
-        title="Hardware Device",
-        description="Hardware device to run inference on (e.g. auto, cuda, cpu, mps, xpu).",
-        examples=["auto", "cuda", "cpu"],
-    )
     backend: str | None = Field(
         default=None,
         title="Execution Backend",
         description="Execution engine backend",
         examples=["pytorch"],
+    )
+    device: str = Field(
+        default="auto",
+        title="Hardware Device",
+        description="Hardware device to run inference on (e.g. auto, cuda, cpu, mps, xpu).",
+        examples=["auto", "cuda", "cpu"],
     )
     precision: str = Field(
         default="auto",

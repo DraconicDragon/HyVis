@@ -75,11 +75,7 @@ class ModelsPage(BaseConfigPage):
         self.model_list = QListWidget(left_widget)
         setup_field_tooltip(self.model_list, inf_fields["models"])
         self.model_list.currentRowChanged.connect(self._on_model_selected)
-        self.model_list.setStyleSheet(
-            "QListWidget::item {"
-            "  padding: 8px;"
-            "}"
-        )
+        self.model_list.setStyleSheet("QListWidget::item {  padding: 8px;}")
         left_layout.addWidget(self.model_list, stretch=1)
 
         btn_row = QHBoxLayout()
@@ -135,24 +131,18 @@ class ModelsPage(BaseConfigPage):
 
         add_form_row(param_layout, m_fields, "source", source_box)
 
-        # Device
-        self.device_combo = QComboBox(self)
-        self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
-        self.device_combo.setEditable(True)
-        self.device_combo.currentTextChanged.connect(self._on_device_changed)
-        add_form_row(param_layout, m_fields, "device", self.device_combo)
-
         # Backend
         self.backend_combo = QComboBox(self)
         self.backend_combo.addItems(["auto", "pytorch", "onnx"])
         self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
         add_form_row(param_layout, m_fields, "backend", self.backend_combo)
 
-        # Precision
-        self.precision_combo = QComboBox(self)
-        self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
-        self.precision_combo.currentTextChanged.connect(self._on_field_changed)
-        add_form_row(param_layout, m_fields, "precision", self.precision_combo)
+        # Device
+        self.device_combo = QComboBox(self)
+        self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
+        self.device_combo.setEditable(True)
+        self.device_combo.currentTextChanged.connect(self._on_device_changed)
+        add_form_row(param_layout, m_fields, "device", self.device_combo)
 
         # Batch Size
         self.batch_spin = QSpinBox(self)
