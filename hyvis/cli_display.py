@@ -346,18 +346,25 @@ def print_run_summary(
     total_skipped: int,
     total_push_ok: int,
     total_push_err: int,
+    total_zero_tags: int = 0,
+    total_files_with_tags: int = 0,
 ) -> None:
+    total_processed = total_infer_ok + total_skipped
     print()
     print(_c("  ══ Run Complete ══════════════════════════════", BOLD))
     print(f"  Status    : {_c(run_status, GREEN if run_status == 'done' else YELLOW)}")
-    print(f"  Run ID    : {_c(run_id, DIM)}")
+    print(f"  Files     : {total_processed} processed ({total_infer_ok} inferred, {total_skipped} from cache)")
+    if total_infer_err > 0:
+        print(f"  Errors    : {_c(str(total_infer_err), RED)}")
+    print(f"  Output    : {total_files_with_tags} with tags, {total_zero_tags} with zero tags")
+
     if mode == "dry_run":
-        print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped (from cache)")
-        print(_c("  Note      : Dry run completed - 0 database writes, 0 tags pushed to Hydrus.", DIM))
-    elif mode in ("default", "infer_only"):
-        print(f"  Inferred  : {total_infer_ok} ok / {total_infer_err} errors / {total_skipped} skipped")
-    if mode == "default":
-        print(f"  Pushed    : {total_push_ok} ok / {total_push_err} errors")
+        print(f"  Push      : {_c('Dry run (0 tags pushed, 0 DB writes)', DIM)}")
+    elif mode == "infer_only":
+        print(f"  Push      : {_c('Skipped (--infer-only, tags queued in DB)', DIM)}")
+    elif mode == "default":
+        err_str = f", {total_push_err} errors" if total_push_err else ""
+        print(f"  Push      : {total_push_ok} files pushed{err_str}")
         if total_push_err:
             print(_c("  Tip: Run 'hyvis <config> --push-only' to retry failed pushes and process cleanups.", DIM))
     print()

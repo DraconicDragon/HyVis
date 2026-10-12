@@ -369,6 +369,7 @@ class PhaseStats:
 
     model_id: str
     ok: int = 0
+    zero_tags: int = 0  # Number of files where inference succeeded, but 0 tags passed filter
     errors: int = 0
     skipped: int = 0
     aborted_early: bool = False
@@ -570,9 +571,12 @@ async def infer_files(
                         tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
-                        # 5. Enqueue tags into push_queue for each configured service (merges tags automatically)
-                        for svc_key in output_services:
-                            db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
+                        # 5. Track zero-tag files or enqueue tags into push_queue for each configured service (merges tags automatically)
+                        if not prefixed_tags:
+                            stats.zero_tags += 1
+                        else:
+                            for svc_key in output_services:
+                                db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
 
                         # 6. Check if all models configured for this file are complete using has_raw_cache
                         all_models_cached = True

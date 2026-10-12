@@ -1,5 +1,5 @@
 """
-dry_run.py — Read-only database shadow for test and dry-run execution.
+dry_run.py - Read-only database shadow for test and dry-run execution.
 Guarantees zero SQLite disk writes while maintaining an in-memory overlay
 so multi-model inference checks and pipeline counters work completely naturally.
 """
@@ -110,6 +110,9 @@ class DryRunDatabase(Database):
         if tags:
             self.simulated_enqueued_tags += len(tags)
             self.simulated_files_with_tags.add(file_hash)
+
+    def get_pending_push_count(self) -> int:
+        return len(self.simulated_files_with_tags)
 
     def record_push_attempt_error(self, file_hash: str, service_key: str, action: str, error_msg: str) -> None:
         del file_hash, service_key, action, error_msg

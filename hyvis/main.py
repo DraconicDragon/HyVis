@@ -343,6 +343,7 @@ async def main() -> int:
     total_infer_ok = total_infer_err = 0
     total_push_ok = total_push_err = 0
     total_skipped = 0
+    total_zero_tags = 0
     run_status = "done"
 
     with db_cls(db_path, min_cache_score=cfg.database.min_cache_score) as db:
@@ -383,13 +384,21 @@ async def main() -> int:
                 total_infer_ok += infer_stats.ok
                 total_infer_err += infer_stats.errors
                 total_skipped += infer_stats.skipped
+                total_zero_tags += infer_stats.zero_tags
+
+                processed_count = infer_stats.ok + infer_stats.skipped
+                files_with_tags = processed_count - infer_stats.zero_tags
+                tag_label = "tag" if infer_stats.total_tags_enqueued == 1 else "tags"
 
                 print(f"\n  {_c('Inference summary:', BOLD)}")
-                print(f"    Cached OK : {infer_stats.ok}")
-                print(f"    Errors    : {infer_stats.errors}")
-                print(f"    Skipped   : {infer_stats.skipped}")
-                print(f"    Raw tags  : {infer_stats.total_tags_cached}")
-                print(f"    Enqueued  : {infer_stats.total_tags_enqueued}")
+                print(
+                    f"    Processed : {processed_count} files ({infer_stats.ok} newly inferred, {infer_stats.skipped} cached)"
+                )
+                print(f"    Enqueued  : {files_with_tags} files ({infer_stats.total_tags_enqueued} {tag_label})")
+                if infer_stats.zero_tags > 0:
+                    print(f"    Zero tags : {infer_stats.zero_tags} files (all predictions below threshold)")
+                if infer_stats.errors > 0:
+                    print(f"    Errors    : {infer_stats.errors}")
 
                 if infer_stats.aborted_early:
                     run_status = "aborted"
@@ -421,6 +430,7 @@ async def main() -> int:
                 push_progress.finish()
 
     # region Run summary
+    total_files_with_tags = (total_infer_ok + total_skipped) - total_zero_tags
     print_run_summary(
         run_status=run_status,
         run_id="(queue)",
@@ -430,6 +440,8 @@ async def main() -> int:
         total_skipped=total_skipped,
         total_push_ok=total_push_ok,
         total_push_err=total_push_err,
+        total_zero_tags=total_zero_tags,
+        total_files_with_tags=total_files_with_tags,
     )
 
     return 0 if run_status == "done" else 1
