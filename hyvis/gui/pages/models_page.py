@@ -321,7 +321,9 @@ class ModelsPage(BaseConfigPage):
             self.backend_combo.addItem(only_backend)
             self.backend_combo.setCurrentText(only_backend)
             self.backend_combo.setEnabled(False)
-            self.backend_combo.setToolTip(f"This model only has variant(s) available for the {only_backend} execution backend.")
+            self.backend_combo.setToolTip(
+                f"This model only has variant(s) available for the {only_backend} execution backend."
+            )
             effective_backend = only_backend
         else:
             # Multi-backend model: Keep 'auto' and available backends enabled
@@ -534,7 +536,14 @@ class ModelsPage(BaseConfigPage):
     def _on_model_id_changed(self, text: str) -> None:
         if self._is_loading_ui:
             return
-        current_backend = self.backend_combo.currentText().strip()
+
+        # If backend was disabled (forcibly locked by a single-backend model),
+        # reset preference to 'auto' so multi-backend models default to auto
+        if not self.backend_combo.isEnabled():
+            current_backend = "auto"
+        else:
+            current_backend = self.backend_combo.currentText().strip()
+
         self._update_backend_and_variants(text.strip(), preferred_backend=current_backend)
         self._update_backend_constraints()
         self._on_field_changed()
@@ -675,8 +684,12 @@ class ModelsPage(BaseConfigPage):
         model_id = self.model_id_combo.currentText().strip()
         m["model_id"] = model_id
 
-        backend_text = self.backend_combo.currentText().strip()
-        m["backend"] = None if backend_text in ("auto", "") else backend_text
+        # If backend is disabled (single-backend model) or set to 'auto', keep m["backend"] as None
+        if not self.backend_combo.isEnabled():
+            m["backend"] = None
+        else:
+            backend_text = self.backend_combo.currentText().strip().lower()
+            m["backend"] = None if backend_text in ("auto", "") else backend_text
 
         m["variant_id"] = self.variant_combo.currentData()
         m["source"] = self.source_edit.text().strip() or None
@@ -697,7 +710,6 @@ class ModelsPage(BaseConfigPage):
         else:
             m["output_tag_services"] = None
 
-        # Update sidebar item label
         item = self.model_list.item(index)
         if item and model_id:
             item.setText(model_id)
