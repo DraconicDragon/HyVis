@@ -243,7 +243,7 @@ def print_confirmation(
     for i, m in enumerate(inf.models, 1):
         print(f"    {i}. {_c(m.model_id, BOLD)}")
         if m.variant_id:
-            print(f"       variant       {_c(m.variant_id, CYAN)}")
+            print(f"       variant          {_c(m.variant_id, CYAN)}")
         print(f"       source           {m.source}")
         print(
             f"                        backend={m.backend or 'auto'}  device={m.device}  precision={m.precision}  batch={m.batch_size}"
