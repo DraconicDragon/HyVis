@@ -561,7 +561,7 @@ class ModelConfig(StrictBaseModel):
     precision: str = Field(
         default="auto",
         title="Precision (⚠)",
-        description="Lower precision reduces memory usage. Ignored if backend is onnx.\n\nCaution: While this setting should generally work, "
+        description="Lower precision reduces memory usage, if the model is not already in a lower precision format. Ignored if backend is onnx.\n\nCaution: While this setting should generally work, "
         + " there may be models that do not play well with explicit precision change.\nPlease report any issues you encounter.",
         examples=["auto", "fp16", "bf16", "fp32"],
     )
