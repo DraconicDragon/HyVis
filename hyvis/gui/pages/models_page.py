@@ -7,7 +7,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -19,8 +19,10 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -60,7 +62,7 @@ class ModelsPage(BaseConfigPage):
         splitter = QSplitter(self)
         splitter.setChildrenCollapsible(False)
 
-        # 1. Left: Models list (Enforce generous min and max widths)
+        # 1. Left: Models list
         left_widget = QWidget(splitter)
         left_widget.setMinimumWidth(145)
         left_widget.setMaximumWidth(380)
@@ -75,7 +77,7 @@ class ModelsPage(BaseConfigPage):
         self.model_list = QListWidget(left_widget)
         setup_field_tooltip(self.model_list, inf_fields["models"])
         self.model_list.currentRowChanged.connect(self._on_model_selected)
-        self.model_list.setStyleSheet("QListWidget::item {  padding: 8px;}")
+        self.model_list.setStyleSheet("QListWidget::item { padding: 8px; }")
         left_layout.addWidget(self.model_list, stretch=1)
 
         btn_row = QHBoxLayout()
@@ -100,19 +102,38 @@ class ModelsPage(BaseConfigPage):
         self.form_layout.setContentsMargins(12, 0, 10, 0)
         self.form_layout.setSpacing(14)
 
-        # Card 1: Model Runtime Parameters
-        self.param_card = SectionCard("Model Runtime Settings", parent=right_container)
-        param_layout = QFormLayout()
-        param_layout.setSpacing(8)
+        # Card 1: Model & Artifacts
+        self.artifacts_card = SectionCard("Model & Artifacts", parent=right_container)
+        artifacts_container_layout = QVBoxLayout()
+        artifacts_container_layout.setContentsMargins(0, 0, 0, 0)
+        artifacts_container_layout.setSpacing(10)
+
+        artifacts_form = QFormLayout()
+        artifacts_form.setSpacing(8)
+
+        # Apply standard padding to the form rows so they match the other cards in the UI
+        pad = self.style().pixelMetric(QStyle.PixelMetric.PM_LayoutLeftMargin)
+        artifacts_form.setContentsMargins(pad, 0, pad, 0)
 
         # Model ID
         self.model_id_combo = QComboBox(self)
         self.model_id_combo.setEditable(True)
         self._populate_available_models()
         self.model_id_combo.currentTextChanged.connect(self._on_model_id_changed)
-        add_form_row(param_layout, m_fields, "model_id", self.model_id_combo)
+        add_form_row(artifacts_form, m_fields, "model_id", self.model_id_combo)
 
-        # Source
+        # Execution Backend
+        self.backend_combo = QComboBox(self)
+        self.backend_combo.addItems(["auto", "pytorch", "onnx"])
+        self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
+        add_form_row(artifacts_form, m_fields, "backend", self.backend_combo)
+
+        # Model Variant (variant_id)
+        self.variant_combo = QComboBox(self)
+        self.variant_combo.currentIndexChanged.connect(self._on_variant_changed)
+        add_form_row(artifacts_form, m_fields, "variant_id", self.variant_combo)
+
+        # Source Path / Repo
         source_box = QWidget(self)
         source_row = QHBoxLayout(source_box)
         source_row.setContentsMargins(0, 0, 0, 0)
@@ -129,32 +150,68 @@ class ModelsPage(BaseConfigPage):
         self.browse_src_btn.clicked.connect(self._on_browse_source)
         source_row.addWidget(self.browse_src_btn)
 
-        add_form_row(param_layout, m_fields, "source", source_box)
+        add_form_row(artifacts_form, m_fields, "source", source_box)
+        artifacts_container_layout.addLayout(artifacts_form)
 
-        # Backend
-        self.backend_combo = QComboBox(self)
-        self.backend_combo.addItems(["auto", "pytorch", "onnx"])
-        self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
-        add_form_row(param_layout, m_fields, "backend", self.backend_combo)
+        # Model Details Nested SectionCard (Clean, un-boxed labels)
+        self.info_card = SectionCard(title="Model Details", parent=self.artifacts_card)
+        self.info_layout = QFormLayout()
+        self.info_layout.setContentsMargins(4, 4, 4, 6)
+        self.info_layout.setHorizontalSpacing(14)
+        self.info_layout.setVerticalSpacing(6)
+
+        self.info_name_lbl = QLabel(self.info_card)
+        self.info_name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.info_layout.addRow(self._make_detail_label("Name:"), self.info_name_lbl)
+
+        self.info_desc_lbl = self._make_wrapping_label()
+        self.info_layout.addRow(self._make_detail_label("Description:"), self.info_desc_lbl)
+
+        self.info_variant_lbl = self._make_wrapping_label()
+        self.info_layout.addRow(self._make_detail_label("Variant:"), self.info_variant_lbl)
+
+        self.info_cats_lbl = self._make_wrapping_label()
+        self.info_layout.addRow(self._make_detail_label("Categories:"), self.info_cats_lbl)
+
+        self.info_repo_lbl = QLabel(self.info_card)
+        self.info_repo_lbl.setOpenExternalLinks(True)
+        self.info_layout.addRow(self._make_detail_label("Repository:"), self.info_repo_lbl)
+
+        self.info_card.setContentLayout(self.info_layout)
+        artifacts_container_layout.addWidget(self.info_card)
+
+        self.artifacts_card.setContentLayout(artifacts_container_layout)
+        self.form_layout.addWidget(self.artifacts_card)
+
+        # Card 2: Hardware & Execution
+        self.runtime_card = SectionCard("Hardware & Execution", parent=right_container)
+        runtime_layout = QFormLayout()
+        runtime_layout.setSpacing(8)
 
         # Device
         self.device_combo = QComboBox(self)
         self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
         self.device_combo.setEditable(True)
         self.device_combo.currentTextChanged.connect(self._on_device_changed)
-        add_form_row(param_layout, m_fields, "device", self.device_combo)
+        add_form_row(runtime_layout, m_fields, "device", self.device_combo)
+
+        # Precision
+        self.precision_combo = QComboBox(self)
+        self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
+        self.precision_combo.currentTextChanged.connect(self._on_field_changed)
+        add_form_row(runtime_layout, m_fields, "precision", self.precision_combo)
 
         # Batch Size
         self.batch_spin = QSpinBox(self)
         self.batch_spin.setRange(1, 128)
         self.batch_spin.setValue(1)
         self.batch_spin.valueChanged.connect(self._on_field_changed)
-        add_form_row(param_layout, m_fields, "batch_size", self.batch_spin)
+        add_form_row(runtime_layout, m_fields, "batch_size", self.batch_spin)
 
-        self.param_card.setContentLayout(param_layout)
-        self.form_layout.addWidget(self.param_card)
+        self.runtime_card.setContentLayout(runtime_layout)
+        self.form_layout.addWidget(self.runtime_card)
 
-        # Card 2: Model Output Services Override (Checkable)
+        # Card 3: Model Output Services Override
         svc_title = m_fields["output_tag_services"].title or "Destination Tag Services"
         self.svc_card = SectionCard(title=svc_title, field_name="output_tag_services", parent=right_container)
         self.svc_card.setCheckable(True)
@@ -169,7 +226,7 @@ class ModelsPage(BaseConfigPage):
         self.svc_card.setContentLayout(svc_layout)
         self.form_layout.addWidget(self.svc_card)
 
-        # Card 3: Model Output Filter Status Card
+        # Card 4: Model Output Filter Status Card
         self.filter_card = SectionCard(
             title="Model Output Filter",
             tooltip="Configure model-specific output filter overrides that take precedence over the global filter.",
@@ -231,37 +288,219 @@ class ModelsPage(BaseConfigPage):
             self.model_id_combo.addItems(["wd-swinv2-v3", "wd-eva02-large-v3", "jtp-3", "taggerine"])
         self.model_id_combo.blockSignals(False)
 
-    def _update_backend_options(self, model_id: str, preferred_backend: str | None = None) -> None:
-        """Query vibe variants for the model and filter the execution backend combobox."""
-        available_backends = ["auto"]
-        if model_id:
-            try:
-                import vibe
+    def _update_backend_and_variants(
+        self,
+        model_id: str,
+        preferred_backend: str | None = None,
+        preferred_variant: str | None = None,
+    ) -> None:
+        """Query vibe variants for the model, update backends and variants, and refresh details."""
+        try:
+            import vibe
 
-                desc = vibe.describe(model_id)
-                found = set()
-                for v in desc.variants:
-                    b_val = v.backend.value if hasattr(v.backend, "value") else str(v.backend)
-                    found.add(b_val.lower())
+            desc = vibe.describe(model_id)
+            variants = desc.variants
+        except Exception:
+            desc = None
+            variants = ()
 
-                for b in ("pytorch", "onnx"):
-                    if b in found:
-                        available_backends.append(b)
-                for b in sorted(found):
-                    if b not in available_backends:
-                        available_backends.append(b)
-            except Exception:
-                available_backends = ["auto", "pytorch", "onnx"]
-        else:
-            available_backends = ["auto", "pytorch", "onnx"]
+        # 1. Inspect supported backends across variants
+        found_backends: list[str] = []
+        for v in variants:
+            b_val = (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
+            if b_val not in found_backends:
+                found_backends.append(b_val)
 
+        # 2. Update Backend ComboBox
         self.backend_combo.blockSignals(True)
         self.backend_combo.clear()
-        self.backend_combo.addItems(available_backends)
 
-        target = preferred_backend if preferred_backend in available_backends else "auto"
-        self.backend_combo.setCurrentText(target)
+        if len(found_backends) <= 1:
+            # Single-backend model: Lock to that backend and disable
+            only_backend = found_backends[0] if found_backends else "pytorch"
+            self.backend_combo.addItem(only_backend)
+            self.backend_combo.setCurrentText(only_backend)
+            self.backend_combo.setEnabled(False)
+            self.backend_combo.setToolTip(f"This model only has variant(s) available for the {only_backend} execution backend.")
+            effective_backend = only_backend
+        else:
+            # Multi-backend model: Keep 'auto' and available backends enabled
+            options = ["auto"] + sorted(found_backends)
+            self.backend_combo.addItems(options)
+            target_b = preferred_backend if preferred_backend in options else "auto"
+            self.backend_combo.setCurrentText(target_b)
+            self.backend_combo.setEnabled(True)
+            setup_field_tooltip(self.backend_combo, ModelConfig.model_fields["backend"])
+            effective_backend = target_b
+
         self.backend_combo.blockSignals(False)
+
+        # 3. Filter variants matching the effective backend
+        if effective_backend == "auto":
+            filtered_variants = list(variants)
+        else:
+            filtered_variants = [
+                v
+                for v in variants
+                if (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
+                == effective_backend.lower()
+            ]
+
+        # 4. Check for named variants (variant_id is not None)
+        has_named_variants = any(bool(v.variant_id) for v in filtered_variants)
+
+        self.variant_combo.blockSignals(True)
+        self.variant_combo.clear()
+
+        if not has_named_variants or len(filtered_variants) <= 1:
+            # No alternative named variants: Lock to 'auto (Default)' and disable
+            self.variant_combo.addItem("auto (Default)", userData=None)
+            self.variant_combo.setCurrentIndex(0)
+            self.variant_combo.setEnabled(False)
+
+            if len(found_backends) > 1 and not has_named_variants:
+                self.variant_combo.setToolTip(
+                    "This model's variants are selected via the Execution Backend setting above."
+                )
+            elif len(filtered_variants) == 1 and filtered_variants[0].variant_id:
+                v_obj = filtered_variants[0]
+                b_str = (v_obj.backend.value if hasattr(v_obj.backend, "value") else str(v_obj.backend)).lower()
+                self.variant_combo.clear()
+                self.variant_combo.addItem(f"{v_obj.variant_id} [{b_str}] (Default)", userData=None)
+                self.variant_combo.setToolTip(f"No alternative variants available for the {effective_backend} backend.")
+            else:
+                self.variant_combo.setToolTip("This model does not define alternative named variants.")
+        else:
+            # Multiple named variants exist: Provide 'auto (Default)' + specific variants
+            self.variant_combo.setEnabled(True)
+            setup_field_tooltip(self.variant_combo, ModelConfig.model_fields["variant_id"])
+
+            # Index 0: Auto (None)
+            self.variant_combo.addItem("auto (Default)", userData=None)
+            self.variant_combo.setItemData(
+                0,
+                "Automatically load the default variant recommended by the model plugin.",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+
+            # Subsequent items: Explicit named variants
+            for v in filtered_variants:
+                if not v.variant_id:
+                    continue
+                b_str = (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
+                disp_text = f"{v.variant_id} [{b_str}]"
+                self.variant_combo.addItem(disp_text, userData=v.variant_id)
+                if v.description:
+                    self.variant_combo.setItemData(
+                        self.variant_combo.count() - 1, v.description, Qt.ItemDataRole.ToolTipRole
+                    )
+
+            # Restore preferred selection
+            match_idx = 0
+            if preferred_variant is not None:
+                for i in range(self.variant_combo.count()):
+                    if self.variant_combo.itemData(i) == preferred_variant:
+                        match_idx = i
+                        break
+            self.variant_combo.setCurrentIndex(match_idx)
+
+        self.variant_combo.blockSignals(False)
+
+        # 5. Refresh Model Details Box
+        self._update_model_details(model_id)
+
+    @staticmethod
+    def _make_detail_label(text: str) -> QLabel:
+        """Create a clean, subtle key label for the details form."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #8a9ba5; font-weight: 500;")
+        return lbl
+
+    def _make_wrapping_label(self) -> QLabel:
+        """Create a selectable text label that expands vertically when wrapped."""
+        lbl = QLabel(self.info_card)
+        lbl.setWordWrap(True)
+        lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        return lbl
+
+    def _update_model_details(self, model_id: str) -> None:
+        """Render model details including selected variant description and clickable HF repo link."""
+        try:
+            from enum import Enum
+
+            import vibe
+
+            desc = vibe.describe(model_id)
+
+            self.info_name_lbl.setText(
+                f"{desc.identity.display_name} <span style='color: #8a9ba5;'>({desc.family_name})</span>"
+            )
+            self.info_desc_lbl.setText(desc.identity.description or "No description available.")
+
+            # Identify currently active variant
+            selected_var_data = self.variant_combo.currentData()
+            effective_backend = self.backend_combo.currentText().strip().lower()
+
+            if effective_backend == "auto":
+                candidate_variants = list(desc.variants)
+            else:
+                candidate_variants = [
+                    v
+                    for v in desc.variants
+                    if (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower() == effective_backend
+                ]
+
+            if selected_var_data is not None:
+                # Explicit variant chosen
+                active_v = next((v for v in candidate_variants if v.variant_id == selected_var_data), None)
+                if active_v:
+                    b_name = (
+                        active_v.backend.value if hasattr(active_v.backend, "value") else str(active_v.backend)
+                    ).lower()
+                    v_desc = f" - {active_v.description}" if active_v.description else ""
+                    self.info_variant_lbl.setText(
+                        f"<b>{active_v.variant_id}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{v_desc}"
+                    )
+                else:
+                    self.info_variant_lbl.setText(f"<b>{selected_var_data}</b>")
+            else:
+                # 'auto' chosen: show what auto resolves to
+                def_v = candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
+                if def_v:
+                    b_name = (def_v.backend.value if hasattr(def_v.backend, "value") else str(def_v.backend)).lower()
+                    def_name = def_v.variant_id or "default"
+                    v_desc = f" - {def_v.description}" if def_v.description else ""
+                    self.info_variant_lbl.setText(
+                        f"<b>auto</b> <span style='color: #8a9ba5;'>[{b_name}]</span> (Default: {def_name}){v_desc}"
+                    )
+                else:
+                    self.info_variant_lbl.setText("<b>auto</b>")
+
+            cats = [c.value if isinstance(c, Enum) else str(c) for c in desc.output.categories]
+            self.info_cats_lbl.setText(", ".join(cats) if cats else "(None)")
+
+            repo = desc.default_repo_id
+            if repo:
+                self.info_repo_lbl.setText(f'<a href="https://huggingface.co/{repo}">{repo}</a>')
+            else:
+                self.info_repo_lbl.setText("<span style='color: #888;'>(None / Custom)</span>")
+
+            self.info_card.setVisible(True)
+        except Exception:
+            self.info_name_lbl.setText(f"{model_id}")
+            self.info_desc_lbl.setText("Custom or uncataloged model ID.")
+            self.info_variant_lbl.setText("(None)")
+            self.info_cats_lbl.setText("(Unknown)")
+            self.info_repo_lbl.setText("<span style='color: #888;'>(Custom)</span>")
+            self.info_card.setVisible(True)
+
+        # Force layout reflow so multi-line wrapped text is never clipped
+        self.info_desc_lbl.updateGeometry()
+        self.info_variant_lbl.updateGeometry()
+        self.info_cats_lbl.updateGeometry()
+        self.info_card.updateGeometry()
+        self.artifacts_card.updateGeometry()
 
     def _update_device_constraints(self) -> None:
         """Enforce batch_size=1 when hardware device is CPU."""
@@ -296,8 +535,30 @@ class ModelsPage(BaseConfigPage):
         if self._is_loading_ui:
             return
         current_backend = self.backend_combo.currentText().strip()
-        self._update_backend_options(text.strip(), current_backend)
+        self._update_backend_and_variants(text.strip(), preferred_backend=current_backend)
         self._update_backend_constraints()
+        self._on_field_changed()
+
+    def _on_backend_changed(self, text: str) -> None:
+        del text
+        if self._is_loading_ui:
+            return
+        model_id = self.model_id_combo.currentText().strip()
+        current_variant = self.variant_combo.currentData()
+        self._update_backend_and_variants(
+            model_id,
+            preferred_backend=self.backend_combo.currentText().strip(),
+            preferred_variant=current_variant,
+        )
+        self._update_backend_constraints()
+        self._on_field_changed()
+
+    def _on_variant_changed(self, idx: int) -> None:
+        del idx
+        if self._is_loading_ui:
+            return
+        model_id = self.model_id_combo.currentText().strip()
+        self._update_model_details(model_id)
         self._on_field_changed()
 
     def _on_device_changed(self, text: str) -> None:
@@ -305,13 +566,6 @@ class ModelsPage(BaseConfigPage):
         if self._is_loading_ui:
             return
         self._update_device_constraints()
-        self._on_field_changed()
-
-    def _on_backend_changed(self, text: str) -> None:
-        del text
-        if self._is_loading_ui:
-            return
-        self._update_backend_constraints()
         self._on_field_changed()
 
     def load_config(self, cfg: AppConfig) -> None:
@@ -379,12 +633,17 @@ class ModelsPage(BaseConfigPage):
 
             model_id = str(m.get("model_id", ""))
             self.model_id_combo.setCurrentText(model_id)
-            self.source_edit.setText(str(m.get("source") or ""))
-            self.device_combo.setCurrentText(str(m.get("device") or "auto"))
 
             backend_val = m.get("backend")
-            self._update_backend_options(model_id, str(backend_val) if backend_val else "auto")
+            variant_val = m.get("variant_id")
+            self._update_backend_and_variants(
+                model_id,
+                preferred_backend=str(backend_val) if backend_val else "auto",
+                preferred_variant=str(variant_val) if variant_val else None,
+            )
 
+            self.source_edit.setText(str(m.get("source") or ""))
+            self.device_combo.setCurrentText(str(m.get("device") or "auto"))
             self.precision_combo.setCurrentText(str(m.get("precision") or "auto"))
             self.batch_spin.setValue(int(m.get("batch_size", 1)))
 
@@ -415,13 +674,15 @@ class ModelsPage(BaseConfigPage):
         m = self._models_data[index]
         model_id = self.model_id_combo.currentText().strip()
         m["model_id"] = model_id
+
+        backend_text = self.backend_combo.currentText().strip()
+        m["backend"] = None if backend_text in ("auto", "") else backend_text
+
+        m["variant_id"] = self.variant_combo.currentData()
         m["source"] = self.source_edit.text().strip() or None
 
         device_val = self.device_combo.currentText().strip()
         m["device"] = device_val
-
-        backend_text = self.backend_combo.currentText().strip()
-        m["backend"] = None if backend_text in ("auto", "") else backend_text
 
         m["precision"] = self.precision_combo.currentText().strip()
 
@@ -448,9 +709,10 @@ class ModelsPage(BaseConfigPage):
 
         new_model = {
             "model_id": "wd-swinv2-v3",
+            "variant_id": None,
             "source": None,
-            "device": "auto",
             "backend": None,
+            "device": "auto",
             "precision": "auto",
             "batch_size": 1,
             "output_tag_services": None,
