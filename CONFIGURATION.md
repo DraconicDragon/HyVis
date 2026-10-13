@@ -451,9 +451,10 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `model_id` | String | **Yes** | The ID or name of the model to use (e.g., `"wd-swinv2-v3"`). You can find all supported and recommended models in the [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md) document. |
+| `variant_id` | String / Null | No | Specific model variant to load. <br>• **Omitted / `null` (default)**: Uses the model's default variant. <br>Defaults to `null`. |
 | `source` | String / Null | No | Model source location. <br>• **Omitted / `null` (default)**: Automatically downloads from the model's default Hugging Face repository into your HF cache. <br>• **`local:/path/to/folder`**: Uses an existing local directory on disk (skips network requests entirely). <br>• **`username/repo_name`**: Pulls files from a custom or forked Hugging Face repository. <br>Defaults to `null`. |
-| `device` | String | No | Hardware device to run inference on (e.g., `"auto"`, `"cuda"`/`"gpu"`, `"cpu"`). <br> Defaults to `"auto"`. |
 | `backend` | String / Null | No | Execution engine backend. Options: `"pytorch"`, `"onnx"`, `"auto"`. <br> Defaults to `null` (auto-detect). |
+| `device` | String | No | Hardware device to run inference on (e.g., `"auto"`, `"cuda"`/`"gpu"`, `"cpu"`). <br> Defaults to `"auto"`. |
 | `precision` | String | No | Numerical precision. Options: `"fp16"`, `"bf16"`, `"fp32"`, `"auto"`. Lower values use less memory. <br> Defaults to `"auto"`. |
 | `batch_size` | Integer | No | Number of files processed in a single batch (must be $\ge 1$). Higher values may speed up processing on GPU by a bit but require more memory. This setting can be ignored if running only on CPU. <br> Defaults to `1`. |
 
@@ -486,6 +487,12 @@ model_id = "wd-eva02-large-v3"
 source = "/path/to/models/eva02"
 device = "cuda"
 batch_size = 2
+
+# Run a specific variant of a model
+[[inference.models]]
+model_id = "taggerine"
+variant_id = "original"
+backend = "pytorch"
 
 # Overrides default_threshold and allowed_categories just for the second model
 [inference.models.output_filter]

@@ -173,6 +173,7 @@ batch_size = 4  # higher = more VRAM usage. Not useful if device resolved to CPU
 ### own output tag service.
 # [[inference.models]]
 # model_id   = "wd-eva02-large-v3"
+# variant_id = "original"      # optional variant ID (omit for default)
 # source     = "/path/to/models/eva02"
 # device     = "cuda"
 # batch_size = 2
