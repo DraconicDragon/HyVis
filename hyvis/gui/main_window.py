@@ -405,7 +405,6 @@ class MainWindow(QMainWindow):
 
         # Left Sidebar
         self.sidebar = QListWidget(body_container)
-        self.sidebar.setFixedWidth(168)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         palette = self.sidebar.palette()
@@ -452,6 +451,9 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(title)
             item.setToolTip(desc)
             self.sidebar.addItem(item)
+
+        # Set width based on longest item size + some extra to make it more distinct
+        self.sidebar.setFixedWidth(self.sidebar.sizeHintForColumn(0) + 2 * self.sidebar.frameWidth())
 
         body_layout.addWidget(self.sidebar)
 
