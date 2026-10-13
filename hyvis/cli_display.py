@@ -242,9 +242,11 @@ def print_confirmation(
     print(_c("  Models", BOLD))
     for i, m in enumerate(inf.models, 1):
         print(f"    {i}. {_c(m.model_id, BOLD)}")
+        if m.variant_id:
+            print(f"       variant       {_c(m.variant_id, CYAN)}")
         print(f"       source           {m.source}")
         print(
-            f"                        device={m.device}  backend={m.backend or 'auto'}  precision={m.precision}  batch={m.batch_size}"
+            f"                        backend={m.backend or 'auto'}  device={m.device}  precision={m.precision}  batch={m.batch_size}"
         )
         # Only show output services if explicitly configured per-model
         if m.output_tag_services is not None:

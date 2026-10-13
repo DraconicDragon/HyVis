@@ -364,7 +364,9 @@ async def main() -> int:
                 display_name = model_info.identity.display_name
             except Exception:
                 display_name = model_cfg.model_id
-            print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id})', DIM)}")
+
+            var_note = f", variant: {model_cfg.variant_id}" if model_cfg.variant_id else ""
+            print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id}{var_note})', DIM)}")
             print()
 
             # region P1: Inference
