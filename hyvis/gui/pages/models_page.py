@@ -362,7 +362,7 @@ class ModelsPage(BaseConfigPage):
 
             if len(found_backends) > 1 and not has_named_variants:
                 self.variant_combo.setToolTip(
-                    "This model's variants are selected via the Execution Backend setting above."
+                    "This model's variants are selected via the Execution Backend setting above because there is only one variant for each backend available."
                 )
             elif len(filtered_variants) == 1 and filtered_variants[0].variant_id:
                 v_obj = filtered_variants[0]
