@@ -349,20 +349,20 @@ class ModelsPage(BaseConfigPage):
             ]
 
         # 4. Check for named variants (variant_id is not None)
-        has_named_variants = any(bool(v.variant_id) for v in filtered_variants)
+        named_variants = [v for v in filtered_variants if v.variant_id]
 
         self.variant_combo.blockSignals(True)
         self.variant_combo.clear()
 
-        if not has_named_variants or len(filtered_variants) <= 1:
-            # No alternative named variants: Lock to 'auto (Default)' and disable
-            self.variant_combo.addItem("auto (Default)", userData=None)
+        if not named_variants or len(filtered_variants) <= 1:
+            # Single variant or no named variants: Lock to (Default) and disable
+            self.variant_combo.addItem("(Default)", userData=None)
             self.variant_combo.setCurrentIndex(0)
             self.variant_combo.setEnabled(False)
 
-            if len(found_backends) > 1 and not has_named_variants:
+            if len(found_backends) > 1 and not named_variants:
                 self.variant_combo.setToolTip(
-                    "This model's variants are selected via the Execution Backend setting above because there is only one variant for each backend available."
+                    "This model's variants are effectively selected via the Execution Backend setting above because there is only one variant for each backend available."
                 )
             elif len(filtered_variants) == 1 and filtered_variants[0].variant_id:
                 v_obj = filtered_variants[0]
@@ -373,35 +373,26 @@ class ModelsPage(BaseConfigPage):
             else:
                 self.variant_combo.setToolTip("This model does not define alternative named variants.")
         else:
-            # Multiple named variants exist: Provide 'auto (Default)' + specific variants
+            # Multiple named variants exist: List each once, marking index 0 as (Default)
             self.variant_combo.setEnabled(True)
             setup_field_tooltip(self.variant_combo, ModelConfig.model_fields["variant_id"])
 
-            # Index 0: Auto (None)
-            self.variant_combo.addItem("auto (Default)", userData=None)
-            self.variant_combo.setItemData(
-                0,
-                "Automatically load the default variant recommended by the model plugin.",
-                Qt.ItemDataRole.ToolTipRole,
-            )
-
-            # Subsequent items: Explicit named variants
-            for v in filtered_variants:
-                if not v.variant_id:
-                    continue
+            for idx, v in enumerate(named_variants):
                 b_str = (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
-                disp_text = f"{v.variant_id} [{b_str}]"
-                self.variant_combo.addItem(disp_text, userData=v.variant_id)
+                disp_text = f"{v.variant_id} [{b_str}] (Default)" if idx == 0 else f"{v.variant_id} [{b_str}]"
+                # Index 0 maps to None so TOML stays minimal unless an explicit non-default is chosen
+                user_val = None if idx == 0 else v.variant_id
+                self.variant_combo.addItem(disp_text, userData=user_val)
                 if v.description:
-                    self.variant_combo.setItemData(
-                        self.variant_combo.count() - 1, v.description, Qt.ItemDataRole.ToolTipRole
-                    )
+                    self.variant_combo.setItemData(idx, v.description, Qt.ItemDataRole.ToolTipRole)
 
             # Restore preferred selection
             match_idx = 0
             if preferred_variant is not None:
                 for i in range(self.variant_combo.count()):
-                    if self.variant_combo.itemData(i) == preferred_variant:
+                    data = self.variant_combo.itemData(i)
+                    # Match explicit userData or the raw variant_id of item 0
+                    if data == preferred_variant or (i == 0 and named_variants[0].variant_id == preferred_variant):
                         match_idx = i
                         break
             self.variant_combo.setCurrentIndex(match_idx)
@@ -454,30 +445,27 @@ class ModelsPage(BaseConfigPage):
                 ]
 
             if selected_var_data is not None:
-                # Explicit variant chosen
+                # Explicit non-default variant chosen
                 active_v = next((v for v in candidate_variants if v.variant_id == selected_var_data), None)
-                if active_v:
-                    b_name = (
-                        active_v.backend.value if hasattr(active_v.backend, "value") else str(active_v.backend)
-                    ).lower()
-                    v_desc = f" - {active_v.description}" if active_v.description else ""
-                    self.info_variant_lbl.setText(
-                        f"<b>{active_v.variant_id}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{v_desc}"
-                    )
-                else:
-                    self.info_variant_lbl.setText(f"<b>{selected_var_data}</b>")
             else:
-                # 'auto' chosen: show what auto resolves to
-                def_v = candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
-                if def_v:
-                    b_name = (def_v.backend.value if hasattr(def_v.backend, "value") else str(def_v.backend)).lower()
-                    def_name = def_v.variant_id or "default"
-                    v_desc = f" - {def_v.description}" if def_v.description else ""
-                    self.info_variant_lbl.setText(
-                        f"<b>auto</b> <span style='color: #8a9ba5;'>[{b_name}]</span> (Default: {def_name}){v_desc}"
-                    )
-                else:
-                    self.info_variant_lbl.setText("<b>auto</b>")
+                # Default (index 0) chosen
+                active_v = (
+                    candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
+                )
+
+            if active_v:
+                v_name = active_v.variant_id or "(default)"
+                b_name = (
+                    active_v.backend.value if hasattr(active_v.backend, "value") else str(active_v.backend)
+                ).lower()
+                is_default_v = bool(candidate_variants and active_v == candidate_variants[0])
+                default_tag = " (Default)" if is_default_v else ""
+                v_desc = f" - {active_v.description}" if active_v.description else ""
+                self.info_variant_lbl.setText(
+                    f"<b>{v_name}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{default_tag}{v_desc}"
+                )
+            else:
+                self.info_variant_lbl.setText("(None)")
 
             cats = [c.value if isinstance(c, Enum) else str(c) for c in desc.output.categories]
             self.info_cats_lbl.setText(", ".join(cats) if cats else "(None)")
