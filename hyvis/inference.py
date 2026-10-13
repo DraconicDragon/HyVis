@@ -470,6 +470,8 @@ async def infer_files(
     }
     if model_cfg.backend is not None:
         load_kwargs["backend"] = model_cfg.backend
+    if model_cfg.variant_id is not None:
+        load_kwargs["variant"] = model_cfg.variant_id
 
     consecutive_errors = 0
     listener = None

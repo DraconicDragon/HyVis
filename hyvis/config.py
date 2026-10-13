@@ -532,6 +532,12 @@ class ModelConfig(StrictBaseModel):
         json_schema_extra=field_meta(source="vibe:models"),
         examples=["wd-swinv2-v3"],
     )
+    variant_id: str | None = Field(
+        default=None,
+        title="Model Variant",
+        description="Specific model variant to load. Leave empty for default.",
+        examples=["bf16-mixed", "original", "onnx"],
+    )
     source: str | None = Field(
         default=None,
         title="Source Path / Repo",
