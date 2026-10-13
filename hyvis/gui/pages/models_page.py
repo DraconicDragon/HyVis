@@ -431,41 +431,53 @@ class ModelsPage(BaseConfigPage):
             )
             self.info_desc_lbl.setText(desc.identity.description or "No description available.")
 
-            # Identify currently active variant
-            selected_var_data = self.variant_combo.currentData()
-            effective_backend = self.backend_combo.currentText().strip().lower()
+            # Check if this model defines explicit named variants (e.g. Taggerine)
+            has_named_variants = any(bool(v.variant_id) for v in desc.variants)
 
-            if effective_backend == "auto":
-                candidate_variants = list(desc.variants)
+            if not has_named_variants:
+                # Models without named variants (e.g. WD taggers, PixAI)
+                desc_text = ""
+                for v in desc.variants:
+                    if v.description:
+                        desc_text = f" - {v.description}"
+                        break
+                self.info_variant_lbl.setText(f"(Default){desc_text}")
             else:
-                candidate_variants = [
-                    v
-                    for v in desc.variants
-                    if (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower() == effective_backend
-                ]
+                # Models with distinct named variants
+                selected_var_data = self.variant_combo.currentData()
+                effective_backend = self.backend_combo.currentText().strip().lower()
 
-            if selected_var_data is not None:
-                # Explicit non-default variant chosen
-                active_v = next((v for v in candidate_variants if v.variant_id == selected_var_data), None)
-            else:
-                # Default (index 0) chosen
-                active_v = (
-                    candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
-                )
+                if effective_backend == "auto":
+                    candidate_variants = list(desc.variants)
+                else:
+                    candidate_variants = [
+                        v
+                        for v in desc.variants
+                        if (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
+                        == effective_backend
+                    ]
 
-            if active_v:
-                v_name = active_v.variant_id or "(default)"
-                b_name = (
-                    active_v.backend.value if hasattr(active_v.backend, "value") else str(active_v.backend)
-                ).lower()
-                is_default_v = bool(candidate_variants and active_v == candidate_variants[0])
-                default_tag = " (Default)" if is_default_v else ""
-                v_desc = f" - {active_v.description}" if active_v.description else ""
-                self.info_variant_lbl.setText(
-                    f"<b>{v_name}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{default_tag}{v_desc}"
-                )
-            else:
-                self.info_variant_lbl.setText("(None)")
+                if selected_var_data is not None:
+                    active_v = next((v for v in candidate_variants if v.variant_id == selected_var_data), None)
+                    is_default = False
+                else:
+                    active_v = (
+                        candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
+                    )
+                    is_default = True
+
+                if active_v and active_v.variant_id:
+                    v_name = active_v.variant_id
+                    b_name = (
+                        active_v.backend.value if hasattr(active_v.backend, "value") else str(active_v.backend)
+                    ).lower()
+                    default_tag = " (Default)" if is_default else ""
+                    v_desc = f" - {active_v.description}" if active_v.description else ""
+                    self.info_variant_lbl.setText(
+                        f"<b>{v_name}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{default_tag}{v_desc}"
+                    )
+                else:
+                    self.info_variant_lbl.setText("(Default)")
 
             cats = [c.value if isinstance(c, Enum) else str(c) for c in desc.output.categories]
             self.info_cats_lbl.setText(", ".join(cats) if cats else "(None)")
