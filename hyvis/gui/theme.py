@@ -12,13 +12,14 @@ from PySide6.QtWidgets import QCheckBox, QProxyStyle, QStyle, QStyleOption, QWid
 
 
 class CardTheme(StrEnum):
-    """Semantic purpose themes for stacked cards and rule editors."""
+    """Semantic purpose themes for stacked cards, banners, and rule editors."""
 
-    QUERY = "query"  # Search / Ingestion (Cyan)
-    PAGE = "page"  # Client Pages / Navigation (Purple)
-    ADD = "add"  # Post-Run Additions (Emerald)
-    REMOVE = "remove"  # Post-Run Cleanups (Rose)
-    DEFAULT = "default"  # Neutral Slate
+    INFO = "info"  # Sky Blue / Cyan (Search queries, notices, info)
+    SUCCESS = "success"  # Emerald (Add tags, connected indicators)
+    WARNING = "warning"  # Amber / Yellow (Warnings, caveats, offline)
+    DANGER = "danger"  # Rose / Red (Remove tags, errors)
+    PURPLE = "purple"  # Violet (Page queries, joint subsets)
+    DEFAULT = "default"  # Neutral Slate (Standard root cards)
 
 
 class ThemeColors(NamedTuple):
@@ -29,25 +30,30 @@ class ThemeColors(NamedTuple):
 
 # Semantic color palettes for cards (subtle 3.5% wash + 18% border)
 SEMANTIC_CARD_COLORS: dict[CardTheme, ThemeColors] = {
-    CardTheme.QUERY: ThemeColors(
+    CardTheme.INFO: ThemeColors(
         bg="rgba(56, 189, 248, 0.035)",
         border="rgba(56, 189, 248, 0.18)",
         accent="#38bdf8",  # Sky Blue
     ),
-    CardTheme.PAGE: ThemeColors(
-        bg="rgba(168, 85, 247, 0.035)",
-        border="rgba(168, 85, 247, 0.18)",
-        accent="#a855f7",  # Purple
-    ),
-    CardTheme.ADD: ThemeColors(
+    CardTheme.SUCCESS: ThemeColors(
         bg="rgba(52, 211, 153, 0.035)",
         border="rgba(52, 211, 153, 0.18)",
         accent="#34d399",  # Emerald
     ),
-    CardTheme.REMOVE: ThemeColors(
+    CardTheme.WARNING: ThemeColors(
+        bg="rgba(251, 191, 36, 0.035)",
+        border="rgba(251, 191, 36, 0.18)",
+        accent="#fbbf24",  # Amber
+    ),
+    CardTheme.DANGER: ThemeColors(
         bg="rgba(244, 63, 94, 0.035)",
         border="rgba(244, 63, 94, 0.18)",
         accent="#f43f5e",  # Rose
+    ),
+    CardTheme.PURPLE: ThemeColors(
+        bg="rgba(168, 85, 247, 0.035)",
+        border="rgba(168, 85, 247, 0.18)",
+        accent="#a855f7",  # Purple
     ),
     CardTheme.DEFAULT: ThemeColors(
         bg="rgba(255, 255, 255, 0.015)",

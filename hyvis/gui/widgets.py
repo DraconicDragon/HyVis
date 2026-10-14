@@ -144,6 +144,7 @@ class SectionCard(QFrame):
     A structured card with an inline header:
     [ Optional CheckBox ] [ Title Label (with tooltip) ] [ Stretch ] [ Status Badge ]
     Clicking the title label toggles the checkbox when checkable.
+    Supports semantic themes (INFO, WARNING, SUCCESS, DANGER, PURPLE, DEFAULT).
     """
 
     toggled = Signal(bool)
@@ -153,40 +154,37 @@ class SectionCard(QFrame):
         title: str = "",
         tooltip: str = "",
         field_name: str | None = None,
+        theme: CardTheme = CardTheme.DEFAULT,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._title = title
         self._is_checkable = False
+        self._theme = theme
 
         if field_name:
             self.setObjectName(field_name)
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(
-            "SectionCard {"
-            "  border: 1px solid rgba(255, 255, 255, 0.10);"
-            "  border-radius: 6px;"
-            "  background: rgba(255, 255, 255, 0.015);"
-            "}"
-        )
+        self._apply_base_stylesheet()
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
         card_layout.setSpacing(8)
 
-        # Header row
-        header_layout = QHBoxLayout()
+        # Header container (hides automatically if no title and not checkable)
+        self._header_widget = QWidget(self)
+        header_layout = QHBoxLayout(self._header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
         self._header_layout = header_layout
 
-        self._checkbox = QCheckBox(self)
+        self._checkbox = QCheckBox(self._header_widget)
         self._checkbox.setVisible(False)
         self._checkbox.toggled.connect(self._on_check_toggled)
         header_layout.addWidget(self._checkbox)
 
-        self._title_label = QLabel(title, self)
+        self._title_label = QLabel(title, self._header_widget)
         self._title_label.setStyleSheet("font-weight: 650;")
         if tooltip:
             self._title_label.setToolTip(tooltip)
@@ -195,12 +193,13 @@ class SectionCard(QFrame):
 
         header_layout.addStretch(1)
 
-        self._badge_label = QLabel(self)
+        self._badge_label = QLabel(self._header_widget)
         self._badge_label.setStyleSheet("font-size: 12px; font-weight: 500;")
         self._badge_label.setVisible(False)
         header_layout.addWidget(self._badge_label)
 
-        card_layout.addLayout(header_layout)
+        card_layout.addWidget(self._header_widget)
+        self._update_header_visibility()
 
         # Content container
         self._content_widget = QWidget(self)
@@ -213,8 +212,16 @@ class SectionCard(QFrame):
     def content_layout(self) -> QVBoxLayout:
         return self._content_layout
 
+    def _apply_base_stylesheet(self) -> None:
+        self.setStyleSheet(get_card_stylesheet(self._theme, "SectionCard"))
+
+    def setTheme(self, theme: CardTheme) -> None:
+        """Update the card's semantic theme."""
+        self._theme = theme
+        self._apply_base_stylesheet()
+
     def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
-        """Apply error or override border highlight without destroying card geometry."""
+        """Apply error or override border highlight, restoring the card's base theme on clear."""
         if is_error:
             self.setStyleSheet(
                 "SectionCard {"
@@ -232,17 +239,17 @@ class SectionCard(QFrame):
                 "}"
             )
         else:
-            self.setStyleSheet(
-                "SectionCard {"
-                "  border: 1px solid rgba(255, 255, 255, 0.10);"
-                "  border-radius: 6px;"
-                "  background: rgba(255, 255, 255, 0.015);"
-                "}"
-            )
+            self._apply_base_stylesheet()
+
+    def _update_header_visibility(self) -> None:
+        # Hide header container if no title is present and card isn't checkable
+        has_content = bool(self._title or self._is_checkable or self._badge_label.isVisible())
+        self._header_widget.setVisible(has_content)
 
     def addHeaderWidget(self, widget: QWidget) -> None:
-        """Add an action widget (e.g. standard button) to the right side of the header row."""
+        """Add an action widget to the right side of the header row."""
         self._header_layout.addWidget(widget)
+        self._header_widget.setVisible(True)
 
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
@@ -254,6 +261,7 @@ class SectionCard(QFrame):
         self._is_checkable = checkable
         self._checkbox.setVisible(checkable)
         self._title_label.setCursor(Qt.CursorShape.PointingHandCursor if checkable else Qt.CursorShape.ArrowCursor)
+        self._update_header_visibility()
         if not checkable:
             self._content_widget.setEnabled(True)
 
@@ -269,6 +277,7 @@ class SectionCard(QFrame):
     def setTitle(self, title: str) -> None:
         self._title = title
         self._title_label.setText(title)
+        self._update_header_visibility()
 
     def setBadge(self, text: str, color: str = "#38bdf8") -> None:
         if text:
@@ -277,6 +286,7 @@ class SectionCard(QFrame):
         else:
             self._badge_label.clear()
             self._badge_label.setVisible(False)
+        self._update_header_visibility()
 
     def set_info_tooltip(self, tooltip: str) -> None:
         """Set the tooltip directly on the title label."""
@@ -1624,7 +1634,7 @@ class TagSubsetCard(QFrame):
         self._index = index
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(get_card_stylesheet(CardTheme.PAGE, "TagSubsetCard"))
+        self.setStyleSheet(get_card_stylesheet(CardTheme.PURPLE, "TagSubsetCard"))
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
@@ -1805,9 +1815,9 @@ class TagRuleCard(QFrame):
     """
     A single card mapping tags to a specific Hydrus service key.
     Used for:
-      - [[hydrus.tag_queries]] (allow_search_all=True, theme=CardTheme.QUERY)
-      - [[hydrus.add_tags]] (allow_search_all=False, theme=CardTheme.ADD)
-      - [[hydrus.remove_tags]] (allow_search_all=False, theme=CardTheme.REMOVE)
+      - [[hydrus.tag_queries]] (allow_search_all=True, theme=CardTheme.INFO)
+      - [[hydrus.add_tags]] (allow_search_all=False, theme=CardTheme.SUCCESS)
+      - [[hydrus.remove_tags]] (allow_search_all=False, theme=CardTheme.DANGER)
     """
 
     changed = Signal()
@@ -2109,7 +2119,7 @@ class TagRuleListEditor(QWidget):
 
 
 class TagQueryListEditor(TagRuleListEditor):
-    """Convenience subclass for [[hydrus.tag_queries]] with CardTheme.QUERY (Cyan)."""
+    """Convenience subclass for [[hydrus.tag_queries]] with CardTheme.INFO (Cyan)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -2117,7 +2127,7 @@ class TagQueryListEditor(TagRuleListEditor):
             tags_label="Search Tags:",
             placeholder="Enter search tag and press Enter or Add...",
             allow_search_all=True,
-            theme=CardTheme.QUERY,
+            theme=CardTheme.INFO,
             add_btn_text="+ Add Tag Query",
             empty_text="(No tag queries configured — click '+ Add Tag Query' below)",
             parent=parent,
