@@ -14,12 +14,19 @@ from PySide6.QtWidgets import QCheckBox, QProxyStyle, QStyle, QStyleOption, QWid
 class CardTheme(StrEnum):
     """Semantic purpose themes for stacked cards, banners, and rule editors."""
 
-    INFO = "info"  # Sky Blue / Cyan (Search queries, notices, info)
-    SUCCESS = "success"  # Emerald (Add tags, connected indicators)
-    WARNING = "warning"  # Amber / Yellow (Warnings, caveats, offline)
-    DANGER = "danger"  # Rose / Red (Remove tags, errors)
-    PURPLE = "purple"  # Violet (Page queries, joint subsets)
+    # 1. Subtle content cards (3.5% wash, 18% border)
     DEFAULT = "default"  # Neutral Slate (Standard root cards)
+    INFO = "info"  # Soft Material Blue
+    CYAN = "cyan"  # Sky Blue / Cyan (Search query cards)
+    PURPLE = "purple"  # Violet (Page queries, joint subsets)
+    SUCCESS = "success"  # Emerald (Add tags, connected indicators)
+    DANGER = "danger"  # Rose (Remove tags, errors)
+    WARNING = "warning"  # Amber (Warnings, caveats, offline)
+
+    # 2. Punchy / Vivid cards & banners (8% wash, 30% border)
+    INFO_VIVID = "info_vivid"  # Saturated Material Blue (Override notice banner)
+    WARNING_VIVID = "warning_vivid"  # Saturated Amber
+    DANGER_VIVID = "danger_vivid"  # Saturated Rose
 
 
 class ThemeColors(NamedTuple):
@@ -28,37 +35,59 @@ class ThemeColors(NamedTuple):
     accent: str
 
 
-# Semantic color palettes for cards (subtle 3.5% wash + 18% border)
+# Semantic color palettes for cards and banners
 SEMANTIC_CARD_COLORS: dict[CardTheme, ThemeColors] = {
+    # Subtle content cards
+    CardTheme.DEFAULT: ThemeColors(
+        bg="rgba(255, 255, 255, 0.015)",
+        border="rgba(255, 255, 255, 0.08)",
+        accent="#90a4ae",  # Neutral Slate
+    ),
     CardTheme.INFO: ThemeColors(
+        bg="rgba(33, 150, 243, 0.035)",
+        border="rgba(33, 150, 243, 0.18)",
+        accent="#2196f3",  # Material Blue
+    ),
+    CardTheme.CYAN: ThemeColors(
         bg="rgba(56, 189, 248, 0.035)",
         border="rgba(56, 189, 248, 0.18)",
         accent="#38bdf8",  # Sky Blue
-    ),
-    CardTheme.SUCCESS: ThemeColors(
-        bg="rgba(52, 211, 153, 0.035)",
-        border="rgba(52, 211, 153, 0.18)",
-        accent="#34d399",  # Emerald
-    ),
-    CardTheme.WARNING: ThemeColors(
-        bg="rgba(251, 191, 36, 0.035)",
-        border="rgba(251, 191, 36, 0.18)",
-        accent="#fbbf24",  # Amber
-    ),
-    CardTheme.DANGER: ThemeColors(
-        bg="rgba(244, 63, 94, 0.035)",
-        border="rgba(244, 63, 94, 0.18)",
-        accent="#f43f5e",  # Rose
     ),
     CardTheme.PURPLE: ThemeColors(
         bg="rgba(168, 85, 247, 0.035)",
         border="rgba(168, 85, 247, 0.18)",
         accent="#a855f7",  # Purple
     ),
-    CardTheme.DEFAULT: ThemeColors(
-        bg="rgba(255, 255, 255, 0.015)",
-        border="rgba(255, 255, 255, 0.08)",
-        accent="#90a4ae",  # Neutral Slate
+    CardTheme.SUCCESS: ThemeColors(
+        bg="rgba(52, 211, 153, 0.035)",
+        border="rgba(52, 211, 153, 0.18)",
+        accent="#34d399",  # Emerald
+    ),
+    CardTheme.DANGER: ThemeColors(
+        bg="rgba(244, 63, 94, 0.035)",
+        border="rgba(244, 63, 94, 0.18)",
+        accent="#f43f5e",  # Rose
+    ),
+    CardTheme.WARNING: ThemeColors(
+        bg="rgba(251, 191, 36, 0.035)",
+        border="rgba(251, 191, 36, 0.18)",
+        accent="#fbbf24",  # Amber
+    ),
+    # Vivid / Punchy
+    CardTheme.INFO_VIVID: ThemeColors(
+        bg="rgba(33, 150, 243, 0.08)",
+        border="rgba(33, 150, 243, 0.30)",
+        accent="#2196f3",  # Saturated Material Blue
+    ),
+    CardTheme.WARNING_VIVID: ThemeColors(
+        bg="rgba(251, 191, 36, 0.08)",
+        border="rgba(251, 191, 36, 0.30)",
+        accent="#fbbf24",  # Saturated Amber
+    ),
+    CardTheme.DANGER_VIVID: ThemeColors(
+        bg="rgba(244, 63, 94, 0.08)",
+        border="rgba(244, 63, 94, 0.30)",
+        accent="#f43f5e",  # Saturated Rose
     ),
 }
 

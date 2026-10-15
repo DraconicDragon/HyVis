@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
@@ -95,26 +96,24 @@ class FiltersPage(BaseConfigPage):
         root.addLayout(scope_layout)
 
         # 2. Model Override Notice Banner (Hidden in Global Scope)
-        self.banner_frame = QFrame(self)
-        self.banner_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.banner_frame.setStyleSheet(
-            "QFrame { background-color: rgba(33, 150, 243, 0.08); "
-            "border: 1px solid rgba(33, 150, 243, 0.3); border-radius: 4px; padding: 6px; }"
-        )
-        banner_layout = QHBoxLayout(self.banner_frame)
-        banner_layout.setContentsMargins(6, 4, 6, 4)
+        self.banner_card = SectionCard(theme=CardTheme.INFO_VIVID, parent=self)
 
-        self.banner_label = QLabel(self.banner_frame)
+        banner_layout = QHBoxLayout()
+        banner_layout.setContentsMargins(6, 6, 6, 4)
+        banner_layout.setSpacing(10)
+
+        self.banner_label = QLabel(self.banner_card)
         self.banner_label.setStyleSheet("border: none; background: transparent;")
         banner_layout.addWidget(self.banner_label, stretch=1)
 
-        self.reset_overrides_btn = QPushButton("↺ Reset All Overrides to Global", self.banner_frame)
+        self.reset_overrides_btn = QPushButton("↺ Reset All Overrides to Global", self.banner_card)
         self.reset_overrides_btn.setToolTip("Discard all model-specific overrides and revert to Global Filter")
         self.reset_overrides_btn.clicked.connect(self._on_reset_overrides_clicked)
         banner_layout.addWidget(self.reset_overrides_btn)
 
-        self.banner_frame.setVisible(False)
-        root.addWidget(self.banner_frame)
+        self.banner_card.setContentLayout(banner_layout)
+        self.banner_card.setVisible(False)
+        root.addWidget(self.banner_card)
 
         # 3. Main Scroll Area for Filter Cards
         scroll = SmoothScrollArea(self)
@@ -445,7 +444,7 @@ class FiltersPage(BaseConfigPage):
         self._is_loading_ui = True
         try:
             is_global = self._current_scope == 0
-            self.banner_frame.setVisible(not is_global)
+            self.banner_card.setVisible(not is_global)
 
             if is_global:
                 for card, (base_title, _) in self._card_meta.items():
