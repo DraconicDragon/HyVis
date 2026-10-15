@@ -121,6 +121,21 @@ class PreferencesDialog(QDialog):
         self.spinbox_card.setContentLayout(spin_layout)
         layout.addWidget(self.spinbox_card)
 
+        # 3. Developer Options Card
+        self.dev_card = SectionCard("Developer", parent=container)
+        dev_layout = QFormLayout()
+        dev_layout.setSpacing(8)
+
+        self.dev_discard_chk = QCheckBox("Automatically discard unsaved changes (never prompt)", container)
+        self.dev_discard_chk.setToolTip(
+            "When enabled, closing the application, opening another file, or creating a new config "
+            "will immediately discard uncommitted edits without showing the confirmation dialog."
+        )
+        dev_layout.addRow("", self.dev_discard_chk)
+
+        self.dev_card.setContentLayout(dev_layout)
+        layout.addWidget(self.dev_card)
+
         layout.addStretch(1)
         scroll.setWidget(container)
         root.addWidget(scroll, stretch=1)
@@ -159,6 +174,9 @@ class PreferencesDialog(QDialog):
         self.decimals_spin.setValue(self.settings.spinbox_decimals)
         self.step_spin.setValue(self.settings.spinbox_step)
 
+        # 3. Developer
+        self.dev_discard_chk.setChecked(self.settings.dev_auto_discard_unsaved)
+
     def _on_startup_behavior_changed(self) -> None:
         behavior = self.startup_combo.currentData()
         is_custom = behavior == StartupBehavior.CUSTOM_PRESET
@@ -190,6 +208,8 @@ class PreferencesDialog(QDialog):
 
         self.settings.spinbox_decimals = self.decimals_spin.value()
         self.settings.spinbox_step = float(self.step_spin.value())
+
+        self.settings.dev_auto_discard_unsaved = self.dev_discard_chk.isChecked()
 
         save_gui_settings(self.settings)
         self.accept()

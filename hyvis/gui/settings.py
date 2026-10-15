@@ -92,6 +92,9 @@ class GuiSettings(BaseModel):
     spinbox_decimals: int = 2
     spinbox_step: float = 0.01
 
+    # Developer Settings
+    dev_auto_discard_unsaved: bool = False
+
     def add_recent_config(self, path: Path | str) -> None:
         """Add or bubble up a configuration file path in the MRU history list."""
         resolved = str(Path(path).resolve())

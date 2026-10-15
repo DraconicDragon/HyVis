@@ -1079,6 +1079,12 @@ class MainWindow(QMainWindow):
         Unified prompt when unsaved changes exist.
         Returns True if the caller should proceed, False if cancelled or save aborted.
         """
+        # Dev: immediately discard and proceed without prompting
+        if self.gui_settings.dev_auto_discard_unsaved and allow_discard:
+            self._autosave_timer.stop()
+            delete_session_tmp()
+            return True
+
         action = prompt_unsaved_changes(
             parent=self,
             current_path=self.state.current_path,
