@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-def parse_gui_args() -> argparse.Namespace:
+def parse_gui_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hyvis-gui",
         description="Desktop graphical configuration tool for HyVis.",
@@ -22,10 +22,15 @@ def parse_gui_args() -> argparse.Namespace:
         type=Path,
         help="Optional path to an existing TOML configuration file to open.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="For development: Hot-Reload changed GUI modules without restarting the app.",
+    )
+    return parser.parse_args(argv)
 
 
-def run_gui(initial_config: Path | str | None = None) -> int:
+def run_gui(initial_config: Path | str | None = None, *, reload_on_change: bool = False) -> int:
     """Initialize and run the desktop PySide6 application."""
 
     # On Linux/BSD, tell Qt to use the modern native system file chooser via XDG Desktop Portal
@@ -87,13 +92,17 @@ def run_gui(initial_config: Path | str | None = None) -> int:
 
     window = MainWindow(state)
     window.show()
+    if reload_on_change:
+        from hyvis.gui.hot_reload import HotReloadManager
+
+        HotReloadManager(app, window.rebuild_config_pages).start()
 
     return app.exec()
 
 
 def cli() -> None:
     args = parse_gui_args()
-    sys.exit(run_gui(args.config))
+    sys.exit(run_gui(args.config, reload_on_change=args.reload))
 
 
 if __name__ == "__main__":

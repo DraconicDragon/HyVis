@@ -582,7 +582,35 @@ class MainWindow(QMainWindow):
         self.state.pages_updated.connect(self._on_pages_updated)
         self.state.connection_changed.connect(self._on_connection_changed)
 
-        # Cross-page synchronization for per-model filters
+        self._setup_page_signals()
+
+    def rebuild_config_pages(self) -> None:
+        """Replace all page widgets while preserving the active configuration."""
+        config = AppConfig.model_validate(self._gather_config_dict())
+        current_index = self.sidebar.currentRow()
+        old_pages = self.pages
+
+        self.hydrus_page = HydrusPage(self)
+        self.models_page = ModelsPage(self)
+        self.filters_page = FiltersPage(self)
+        self.app_db_page = AppDbPage(self)
+        self.pages = [self.hydrus_page, self.models_page, self.filters_page, self.app_db_page]
+
+        for old_page in old_pages:
+            self.page_stack.removeWidget(old_page)
+            old_page.deleteLater()
+        for page in self.pages:
+            self.page_stack.addWidget(page)
+
+        self._setup_page_signals()
+        for page in self.pages:
+            page.load_config(config)
+        self.filters_page.sync_models(self.models_page._models_data)
+        self.sidebar.setCurrentRow(current_index)
+        self._run_validation()
+
+    def _setup_page_signals(self) -> None:
+        """Connect cross-page and modification signals for the current page set."""
         self.models_page.request_filter_scope.connect(self._on_request_filter_scope)
         self.models_page.changed.connect(lambda: self.filters_page.sync_models(self.models_page._models_data))
         self.filters_page.changed.connect(
