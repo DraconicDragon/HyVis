@@ -39,13 +39,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSpinBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from hyvis.gui.base_widgets import FloatSpinBox, SuggestionComboBox
+from hyvis.gui.base_widgets import AutoResizingTableWidget, FloatSpinBox, SuggestionComboBox
 from hyvis.gui.theme import STYLE_ERROR, STYLE_OVERRIDDEN, CardTheme, get_card_stylesheet
 
 HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
@@ -1042,15 +1041,13 @@ class KeyValueEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self.table = QTableWidget(0, 2, self)
+        self.table = AutoResizingTableWidget(0, 2, parent=self)
         self.table.setHorizontalHeaderLabels([self._key_header, self._val_header])
-        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 160)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_item_changed)
-        self._adjust_height()
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -1064,11 +1061,6 @@ class KeyValueEditor(QWidget):
         btn_layout.addWidget(self.remove_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-
-    def _adjust_height(self) -> None:
-        rows = self.table.rowCount()
-        target = max(86, min(32 + max(rows, 1) * 30, 210))
-        self.table.setFixedHeight(target)
 
     def _get_used_keys(self, exclude_row: int = -1) -> set[str]:
         used = set()
@@ -1156,7 +1148,6 @@ class KeyValueEditor(QWidget):
 
             self.table.setItem(row, 1, QTableWidgetItem(str(v)))
 
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
 
@@ -1182,7 +1173,6 @@ class KeyValueEditor(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(""))
 
         self.table.setItem(row, 1, QTableWidgetItem(""))
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
 
@@ -1200,7 +1190,6 @@ class KeyValueEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
         self.changed.emit()
@@ -1241,9 +1230,8 @@ class ThresholdTableEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self.table = QTableWidget(0, 3, self)
+        self.table = AutoResizingTableWidget(0, 3, parent=self)
         self.table.setHorizontalHeaderLabels([self._target_header, "Threshold", "Override TLT"])
-        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
@@ -1251,7 +1239,6 @@ class ThresholdTableEditor(QWidget):
         self.table.setColumnWidth(2, 110)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_table_item_changed)
-        self._adjust_height()
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -1265,11 +1252,6 @@ class ThresholdTableEditor(QWidget):
         btn_layout.addWidget(self.remove_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-
-    def _adjust_height(self) -> None:
-        rows = self.table.rowCount()
-        target = max(86, min(32 + max(rows, 1) * 30, 210))
-        self.table.setFixedHeight(target)
 
     def _get_used_targets(self, exclude_row: int = -1) -> set[str]:
         used = set()
@@ -1388,7 +1370,6 @@ class ThresholdTableEditor(QWidget):
             chk_layout.addWidget(chk)
             self.table.setCellWidget(row, 2, chk_container)
 
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
 
@@ -1430,7 +1411,6 @@ class ThresholdTableEditor(QWidget):
         chk_layout.addWidget(chk)
 
         self.table.setCellWidget(row, 2, chk_container)
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
 
@@ -1448,7 +1428,6 @@ class ThresholdTableEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
         self.changed.emit()
@@ -1481,14 +1460,12 @@ class CategoryLimitEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self.table = QTableWidget(0, 2, self)
+        self.table = AutoResizingTableWidget(0, 2, parent=self)
         self.table.setHorizontalHeaderLabels(["Category", "Max Tags"])
-        self.table.horizontalHeader().setStyleSheet("QHeaderView::section { padding: 4px 10px; }")
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(1, 100)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._adjust_height()
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -1501,11 +1478,6 @@ class CategoryLimitEditor(QWidget):
         btn_layout.addWidget(self.remove_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-
-    def _adjust_height(self) -> None:
-        rows = self.table.rowCount()
-        target = max(86, min(32 + max(rows, 1) * 30, 210))
-        self.table.setFixedHeight(target)
 
     def _get_used_categories(self, exclude_row: int = -1) -> set[str]:
         used = set()
@@ -1566,7 +1538,6 @@ class CategoryLimitEditor(QWidget):
         self.table.setRowCount(0)
         for row, (cat, val) in enumerate(limits.items()):
             self._insert_row(row, cat, int(val))
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
 
@@ -1596,7 +1567,6 @@ class CategoryLimitEditor(QWidget):
         used = self._get_used_categories()
         next_cat = next((c for c in self._suggestions if c not in used), "")
         self._insert_row(row, next_cat, 10)
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
         self.changed.emit()
@@ -1608,7 +1578,6 @@ class CategoryLimitEditor(QWidget):
         self.table.blockSignals(True)
         for row in selected_rows:
             self.table.removeRow(row)
-        self._adjust_height()
         self.table.blockSignals(False)
         self._refresh_all_combos()
         self.changed.emit()

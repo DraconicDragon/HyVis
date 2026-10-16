@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QScrollArea,
+    QTableWidget,
     QWidget,
 )
 
@@ -56,6 +57,55 @@ class FloatSpinBox(QDoubleSpinBox):
         eff_step = round(step * self._step_scale, eff_decimals)
         self.setSingleStep(max(10 ** (-eff_decimals), eff_step))
 
+
+# endregion
+
+
+# region AutoResizingTableWidget
+
+
+class AutoResizingTableWidget(QTableWidget):
+    """
+    QTableWidget with clean header styling that automatically recalculates
+    its height as rows are inserted, removed, or populated.
+    """
+
+    def __init__(
+        self,
+        rows: int = 0,
+        columns: int = 0,
+        min_height: int = 86,
+        max_height: int = 210,
+        row_height: int = 28,
+        header_height: int = 30,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(rows, columns, parent)
+        self._min_height = min_height
+        self._max_height = max_height
+        self._row_height = row_height
+        self._header_height = header_height
+
+        self.verticalHeader().setDefaultSectionSize(self._row_height)
+        self.adjust_table_height()
+
+    def adjust_table_height(self) -> None:
+        rows = self.rowCount()
+        needed = self._header_height + max(rows, 1) * self._row_height
+        target = max(self._min_height, min(needed, self._max_height))
+        self.setFixedHeight(target)
+
+    def setRowCount(self, rows: int) -> None:
+        super().setRowCount(rows)
+        self.adjust_table_height()
+
+    def insertRow(self, row: int) -> None:
+        super().insertRow(row)
+        self.adjust_table_height()
+
+    def removeRow(self, row: int) -> None:
+        super().removeRow(row)
+        self.adjust_table_height()
 
 # endregion
 
