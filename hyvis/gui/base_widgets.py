@@ -64,6 +64,7 @@ class FloatSpinBox(QDoubleSpinBox):
 # region AutoResizingTableWidget
 
 
+# todo behaviour of height size stuff is weird
 class AutoResizingTableWidget(QTableWidget):
     """
     QTableWidget with clean header styling that automatically recalculates
@@ -76,7 +77,7 @@ class AutoResizingTableWidget(QTableWidget):
         columns: int = 0,
         min_height: int = 86,
         max_height: int = 210,
-        row_height: int = 28,
+        row_height: int = 27,
         header_height: int = 30,
         parent: QWidget | None = None,
     ) -> None:
@@ -106,6 +107,7 @@ class AutoResizingTableWidget(QTableWidget):
     def removeRow(self, row: int) -> None:
         super().removeRow(row)
         self.adjust_table_height()
+
 
 # endregion
 
