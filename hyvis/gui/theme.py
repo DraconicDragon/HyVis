@@ -91,6 +91,12 @@ SEMANTIC_CARD_COLORS: dict[CardTheme, ThemeColors] = {
     ),
 }
 
+# Centralized semantic status text colors
+COLOR_STATUS_READY = "#34d399"    # Emerald (Cached / Valid / Connected)
+COLOR_STATUS_WARNING = "#fbbf24"  # Amber (Needs download / Caveats / Connecting)
+COLOR_STATUS_ERROR = "#f85149"    # Red (Missing / Errors / Failed)
+COLOR_STATUS_MUTED = "#8a9ba5"    # Muted Slate
+
 # Centralized status and override highlights
 STYLE_OVERRIDDEN = "border: 1.5px solid #38bdf8; background-color: rgba(56, 189, 248, 0.08);"
 STYLE_ERROR = "border: 1.5px solid #f85149; background-color: rgba(248, 81, 73, 0.08);"
