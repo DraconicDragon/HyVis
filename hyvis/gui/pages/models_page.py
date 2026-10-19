@@ -5,14 +5,17 @@ models_page.py — Model session management with dynamic discovery from vibe.
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -23,13 +26,16 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStyle,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
-from hyvis.gui.base_widgets import SmoothScrollArea
+from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING
 from hyvis.gui.widgets import (
     SectionCard,
     TagServiceListEditor,
@@ -37,6 +43,43 @@ from hyvis.gui.widgets import (
     bind_field_metadata,
     setup_field_tooltip,
 )
+
+
+def _format_bytes(num_bytes: float) -> str:
+    """Format byte counts into clean human-readable strings."""
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    elif num_bytes < 1024**2:
+        return f"{num_bytes / 1024:.1f} KB"
+    elif num_bytes < 1024**3:
+        return f"{num_bytes / (1024**2):.1f} MB"
+    else:
+        return f"{num_bytes / (1024**3):.2f} GB"
+
+
+class _HfSizeWorkerSignals(QObject):
+    success = Signal(dict)  # {filename: size_in_bytes}
+    error = Signal(str)
+
+
+class _HfSizeWorker(QRunnable):
+    """Background worker querying Hugging Face API for file sizes without downloading."""
+
+    def __init__(self, repo_id: str) -> None:
+        super().__init__()
+        self.repo_id = repo_id
+        self.signals = _HfSizeWorkerSignals()
+
+    def run(self) -> None:
+        try:
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+            info = api.model_info(self.repo_id, files_metadata=True)
+            sizes = {s.rfilename: s.size for s in (info.siblings or []) if s.rfilename and s.size is not None}
+            self.signals.success.emit(sizes)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
 
 
 class ModelsPage(BaseConfigPage):
@@ -49,6 +92,8 @@ class ModelsPage(BaseConfigPage):
         self._models_data: list[dict[str, Any]] = []
         self._current_index: int = -1
         self._writable_tag_services: dict[str, str] = {}
+        self._remote_sizes_cache: dict[str, dict[str, int]] = {}
+        self._active_size_worker: _HfSizeWorker | None = None
         self._is_loading_ui: bool = False
         self._setup_ui()
 
@@ -104,9 +149,7 @@ class ModelsPage(BaseConfigPage):
 
         # Card 1: Model & Artifacts
         self.artifacts_card = SectionCard("Model & Artifacts", parent=right_container)
-        artifacts_container_layout = QVBoxLayout()
-        artifacts_container_layout.setContentsMargins(0, 0, 0, 0)
-        artifacts_container_layout.setSpacing(10)
+        self.form_layout.addWidget(self.artifacts_card)
 
         artifacts_form = QFormLayout()
         artifacts_form.setSpacing(8)
@@ -116,25 +159,25 @@ class ModelsPage(BaseConfigPage):
         artifacts_form.setContentsMargins(pad, 0, pad, 0)
 
         # Model ID
-        self.model_id_combo = QComboBox(self)
+        self.model_id_combo = QComboBox()
         self.model_id_combo.setEditable(True)
         self._populate_available_models()
         self.model_id_combo.currentTextChanged.connect(self._on_model_id_changed)
         add_form_row(artifacts_form, m_fields, "model_id", self.model_id_combo)
 
         # Execution Backend
-        self.backend_combo = QComboBox(self)
+        self.backend_combo = QComboBox()
         self.backend_combo.addItems(["auto", "pytorch", "onnx"])
         self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
         add_form_row(artifacts_form, m_fields, "backend", self.backend_combo)
 
         # Model Variant (variant_id)
-        self.variant_combo = QComboBox(self)
+        self.variant_combo = QComboBox()
         self.variant_combo.currentIndexChanged.connect(self._on_variant_changed)
         add_form_row(artifacts_form, m_fields, "variant_id", self.variant_combo)
 
         # Source Path / Repo
-        source_box = QWidget(self)
+        source_box = QWidget()
         source_row = QHBoxLayout(source_box)
         source_row.setContentsMargins(0, 0, 0, 0)
         source_row.setSpacing(6)
@@ -151,16 +194,16 @@ class ModelsPage(BaseConfigPage):
         source_row.addWidget(self.browse_src_btn)
 
         add_form_row(artifacts_form, m_fields, "source", source_box)
-        artifacts_container_layout.addLayout(artifacts_form)
+        self.artifacts_card.content_layout.addLayout(artifacts_form)
 
-        # Model Details Nested SectionCard (Clean, un-boxed labels)
-        self.info_card = SectionCard(title="Model Details", parent=self.artifacts_card)
+        # Model Details Nested SectionCard
+        self.info_card = SectionCard(title="Model Details")
         self.info_layout = QFormLayout()
         self.info_layout.setContentsMargins(4, 4, 4, 6)
         self.info_layout.setHorizontalSpacing(14)
         self.info_layout.setVerticalSpacing(6)
 
-        self.info_name_lbl = QLabel(self.info_card)
+        self.info_name_lbl = QLabel()
         self.info_name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.info_layout.addRow(self._make_detail_label("Name:"), self.info_name_lbl)
 
@@ -173,15 +216,64 @@ class ModelsPage(BaseConfigPage):
         self.info_cats_lbl = self._make_wrapping_label()
         self.info_layout.addRow(self._make_detail_label("Categories:"), self.info_cats_lbl)
 
-        self.info_repo_lbl = QLabel(self.info_card)
+        self.info_repo_lbl = QLabel()
         self.info_repo_lbl.setOpenExternalLinks(True)
         self.info_layout.addRow(self._make_detail_label("Repository:"), self.info_repo_lbl)
 
-        self.info_card.setContentLayout(self.info_layout)
-        artifacts_container_layout.addWidget(self.info_card)
+        # Availability row: Status on left, Show/Hide Files toggle on right
+        avail_box = QWidget()
+        avail_layout = QHBoxLayout(avail_box)
+        avail_layout.setContentsMargins(0, 0, 0, 0)
+        avail_layout.setSpacing(8)
 
-        self.artifacts_card.setContentLayout(artifacts_container_layout)
-        self.form_layout.addWidget(self.artifacts_card)
+        self.info_avail_lbl = QLabel(avail_box)
+        self.info_avail_lbl.setText("<span style='color: #888;'>Checking local files...</span>")
+        avail_layout.addWidget(self.info_avail_lbl, stretch=1)
+
+        self.toggle_files_btn = QPushButton("Show Files", avail_box)
+        self.toggle_files_btn.setFixedHeight(24)
+        self.toggle_files_btn.clicked.connect(self._on_toggle_files)
+        avail_layout.addWidget(self.toggle_files_btn)
+
+        self.info_layout.addRow(self._make_detail_label("Availability:"), avail_box)
+        self.info_card.content_layout.addLayout(self.info_layout)
+
+        # Collapsible Artifact Files Container
+        self.files_container = QWidget()
+        files_vbox = QVBoxLayout(self.files_container)
+        files_vbox.setContentsMargins(0, 4, 0, 0)
+        files_vbox.setSpacing(6)
+
+        # 3-Column Table: File | Status | Size
+        self.files_table = AutoResizingTableWidget(0, 3, parent=self.files_container)
+        self.files_table.setHorizontalHeaderLabels(["File", "Status", "Size"])
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.files_table.setColumnWidth(1, 95)
+        self.files_table.setColumnWidth(2, 90)
+        self.files_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.files_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        files_vbox.addWidget(self.files_table)
+
+        # Bottom summary & Right-aligned check download size button
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(8)
+
+        self.download_summary_lbl = QLabel(self.files_container)
+        self.download_summary_lbl.setStyleSheet("color: #8a9ba5;")
+        action_row.addWidget(self.download_summary_lbl, stretch=1)
+
+        self.check_size_btn = QPushButton("Check Download Size", self.files_container)
+        self.check_size_btn.clicked.connect(self._on_check_download_size)
+        action_row.addWidget(self.check_size_btn)
+
+        files_vbox.addLayout(action_row)
+        self.files_container.setVisible(False)
+        self.info_card.content_layout.addWidget(self.files_container)
+
+        self.artifacts_card.content_layout.addWidget(self.info_card)
 
         # Card 2: Hardware & Execution
         self.runtime_card = SectionCard("Hardware & Execution", parent=right_container)
@@ -189,20 +281,20 @@ class ModelsPage(BaseConfigPage):
         runtime_layout.setSpacing(8)
 
         # Device
-        self.device_combo = QComboBox(self)
+        self.device_combo = QComboBox()
         self.device_combo.addItems(["auto", "cuda", "cpu", "mps", "xpu"])
         self.device_combo.setEditable(True)
         self.device_combo.currentTextChanged.connect(self._on_device_changed)
         add_form_row(runtime_layout, m_fields, "device", self.device_combo)
 
         # Precision
-        self.precision_combo = QComboBox(self)
+        self.precision_combo = QComboBox()
         self.precision_combo.addItems(["auto", "fp16", "bf16", "fp32"])
         self.precision_combo.currentTextChanged.connect(self._on_field_changed)
         add_form_row(runtime_layout, m_fields, "precision", self.precision_combo)
 
         # Batch Size
-        self.batch_spin = QSpinBox(self)
+        self.batch_spin = QSpinBox()
         self.batch_spin.setRange(1, 128)
         self.batch_spin.setValue(1)
         self.batch_spin.valueChanged.connect(self._on_field_changed)
@@ -504,6 +596,194 @@ class ModelsPage(BaseConfigPage):
         self.info_card.updateGeometry()
         self.artifacts_card.updateGeometry()
 
+        # Refresh local availability and artifact table
+        self._update_availability(model_id)
+
+    def _on_toggle_files(self) -> None:
+        """Toggle the collapsible artifact file inspection table."""
+        is_visible = not self.files_container.isVisible()
+        self.files_container.setVisible(is_visible)
+        self.toggle_files_btn.setText("Hide Files" if is_visible else "Show Files")
+
+    def _update_availability(self, model_id: str) -> None:
+        """Inspect local availability offline and populate the artifact table."""
+        if not model_id:
+            self.info_avail_lbl.setText("<span style='color: #888;'>No model selected</span>")
+            self.files_table.setRowCount(0)
+            return
+
+        source = self.source_edit.text().strip() or None
+        variant_id = self.variant_combo.currentData()
+        backend_val = self.backend_combo.currentText().strip()
+        device_val = self.device_combo.currentText().strip()
+
+        try:
+            import vibe
+
+            avail = vibe.check_availability(
+                model_id,
+                backend=backend_val if backend_val != "auto" else None,
+                device=device_val,
+                source=source,
+                variant=str(variant_id) if variant_id else None,
+            )
+        except Exception:
+            avail = None
+
+        if not avail or not avail.variants:
+            self.info_avail_lbl.setText("<span style='color: #888;'>Unknown model or custom plugin</span>")
+            self.files_table.setRowCount(0)
+            self.download_summary_lbl.setText("")
+            self.check_size_btn.setEnabled(False)
+            return
+
+        target_var = avail.variants[0]
+        artifacts = target_var.artifacts
+
+        total_req = sum(1 for a in artifacts if getattr(a, "required", True))
+        cached_req = sum(1 for a in artifacts if getattr(a, "required", True) and a.is_available)
+        is_fully_cached = cached_req == total_req
+
+        # 1. Update 1-Line Status Label
+        is_local_source = bool(source and source.startswith("local:"))
+        if is_fully_cached:
+            self.info_avail_lbl.setText(
+                f"<span style='color: #34d399;'>● Ready locally</span> ({cached_req} file{'s' if cached_req != 1 else ''} cached)"
+            )
+            self.info_avail_lbl.setToolTip("All required model files are present on disk.")
+        else:
+            missing_count = total_req - cached_req
+            self.info_avail_lbl.setText(
+                f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count} file{'s' if missing_count != 1 else ''} missing)"
+            )
+            if is_local_source:
+                self.info_avail_lbl.setToolTip(
+                    f"Files are missing from the specified local folder:\n{source[6:]}\n"
+                    "Note: Hugging Face auto-download is disabled when using 'local:' source."
+                )
+            else:
+                self.info_avail_lbl.setToolTip(
+                    "Missing files will be downloaded automatically to your Hugging Face cache on first inference run."
+                )
+
+        # 2. Populate 3-Column Table: File | Status | Size
+        self.files_table.blockSignals(True)
+        self.files_table.setRowCount(len(artifacts))
+
+        repo_id = self._get_effective_repo_id(model_id, target_var.variant_id)
+        remote_sizes = self._remote_sizes_cache.get(repo_id, {})
+        total_missing_bytes = 0
+        has_remote_estimates = False
+
+        for row, art in enumerate(artifacts):
+            # Column 0: File Name
+            f_item = QTableWidgetItem(art.name)
+            if art.is_available and art.path:
+                f_item.setToolTip(f"Cached locally at:\n{art.path}")
+            elif is_local_source:
+                f_item.setToolTip(f"Missing from local directory: {source[6:]}")
+            else:
+                f_item.setToolTip(f"Missing from local cache.\nWill be downloaded from HF: {repo_id}")
+            self.files_table.setItem(row, 0, f_item)
+
+            # Column 1: Status
+            if art.is_available:
+                status_item = QTableWidgetItem("● Cached")
+                status_item.setForeground(QColor(COLOR_STATUS_READY))
+                if art.path:
+                    status_item.setToolTip(f"Cached locally at:\n{art.path}")
+            else:
+                status_item = QTableWidgetItem("○ Missing")
+                status_item.setForeground(QColor(COLOR_STATUS_WARNING))
+                status_item.setToolTip("Not found in local cache or storage.")
+            self.files_table.setItem(row, 1, status_item)
+
+            # Column 2: Size
+            if art.is_available and art.path and Path(art.path).is_file():
+                size_str = _format_bytes(Path(art.path).stat().st_size)
+            elif art.name in remote_sizes:
+                sz = remote_sizes[art.name]
+                size_str = f"~{_format_bytes(sz)}"
+                total_missing_bytes += sz
+                has_remote_estimates = True
+            else:
+                size_str = "—"
+            size_item = QTableWidgetItem(size_str)
+            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.files_table.setItem(row, 2, size_item)
+
+        # Auto-adjust table height dynamically to match row count
+        target_h = max(68, min(28 + max(len(artifacts), 1) * 26, 160))
+        self.files_table.setFixedHeight(target_h)
+        self.files_table.blockSignals(False)
+
+        # 3. Configure Action Button & Summary
+        if is_fully_cached:
+            self.check_size_btn.setEnabled(False)
+            self.check_size_btn.setToolTip("All files are already present locally.")
+            self.download_summary_lbl.setText("All files cached.")
+        elif is_local_source:
+            self.check_size_btn.setEnabled(False)
+            self.check_size_btn.setToolTip("Local source path active; Hugging Face auto-download is disabled.")
+            self.download_summary_lbl.setText("Local source active.")
+        else:
+            self.check_size_btn.setEnabled(True)
+            self.check_size_btn.setToolTip(f"Query Hugging Face API to check download sizes from '{repo_id}'.")
+            if has_remote_estimates:
+                self.download_summary_lbl.setText(f"Total download required: ~{_format_bytes(total_missing_bytes)}")
+            else:
+                missing_cnt = total_req - cached_req
+                self.download_summary_lbl.setText(f"{missing_cnt} file(s) missing.")
+
+    def _get_effective_repo_id(self, model_id: str, variant_id: str | None) -> str:
+        """Resolve effective Hugging Face repo ID for size checking."""
+        src = self.source_edit.text().strip()
+        if src and not src.startswith("local:"):
+            return src
+        try:
+            import vibe
+
+            desc = vibe.describe(model_id)
+            if variant_id:
+                for v in desc.variants:
+                    if v.variant_id == variant_id and v.repo_id:
+                        return v.repo_id
+            return desc.default_repo_id or ""
+        except Exception:
+            return ""
+
+    def _on_check_download_size(self) -> None:
+        """Trigger background query to Hugging Face API for missing file sizes."""
+        model_id = self.model_id_combo.currentText().strip()
+        variant_id = self.variant_combo.currentData()
+        repo_id = self._get_effective_repo_id(model_id, variant_id)
+
+        if not repo_id or repo_id.startswith("local:"):
+            return
+
+        self.check_size_btn.setEnabled(False)
+        self.check_size_btn.setText("Checking...")
+
+        # Store on self to prevent Python GC from deallocating the worker/signals mid-execution (SIGSEGV fix)
+        self._active_size_worker = _HfSizeWorker(repo_id)
+        self._active_size_worker.signals.success.connect(lambda sizes: self._on_hf_sizes_loaded(repo_id, sizes))
+        self._active_size_worker.signals.error.connect(self._on_hf_sizes_error)
+        QThreadPool.globalInstance().start(self._active_size_worker)
+
+    def _on_hf_sizes_loaded(self, repo_id: str, sizes: dict[str, int]) -> None:
+        self._active_size_worker = None
+        self._remote_sizes_cache[repo_id] = sizes
+        self.check_size_btn.setText("Check Download Size")
+        self.check_size_btn.setEnabled(True)
+        model_id = self.model_id_combo.currentText().strip()
+        self._update_availability(model_id)
+
+    def _on_hf_sizes_error(self, err_msg: str) -> None:
+        self._active_size_worker = None
+        self.check_size_btn.setText("Check Download Size")
+        self.check_size_btn.setEnabled(True)
+        self.download_summary_lbl.setText(f"<span style='color: #f85149;'>Failed to check size: {err_msg[:60]}</span>")
+
     def _update_device_constraints(self) -> None:
         """Enforce batch_size=1 when hardware device is CPU."""
         dev = self.device_combo.currentText().strip().lower()
@@ -673,6 +953,9 @@ class ModelsPage(BaseConfigPage):
                 self.model_services_editor.set_available_services(self._writable_tag_services)
 
             self._update_filter_status_card(m)
+
+            # Evaluate availability AFTER source_edit and variant_combo are loaded
+            self._update_availability(model_id)
         finally:
             self._is_loading_ui = was_loading
 
@@ -779,6 +1062,8 @@ class ModelsPage(BaseConfigPage):
         if self._is_loading_ui:
             return
         self._save_form_to_model(self._current_index)
+        model_id = self.model_id_combo.currentText().strip()
+        self._update_availability(model_id)
         self.changed.emit()
 
     def _on_browse_source(self) -> None:
