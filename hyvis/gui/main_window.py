@@ -411,8 +411,14 @@ class MainWindow(QMainWindow):
         highlight_col = palette.color(palette.ColorRole.Highlight)
         r, g, b = highlight_col.red(), highlight_col.green(), highlight_col.blue()
         hover_rgba = f"rgba({r}, {g}, {b}, 30)"
-        selected_rgba = f"rgba({r}, {g}, {b}, 65)"
+        selected_rgba = f"rgba({r}, {g}, {b}, 60)"
         accent_hex = highlight_col.name()
+
+        # Derive text colors dynamically from system palette (works for both light and dark mode)
+        text_col = palette.color(palette.ColorRole.Text)
+        tr, tg, tb = text_col.red(), text_col.green(), text_col.blue()
+        normal_text_rgba = f"rgba({tr}, {tg}, {tb}, 230)"
+        hover_text_rgba = f"rgba({tr}, {tg}, {tb}, 255)"
 
         self.sidebar.setStyleSheet(
             "QListWidget {"
@@ -425,11 +431,11 @@ class MainWindow(QMainWindow):
             "  padding: 10px 14px;"
             "  margin: 4px 4px 4px 0px;"
             "  border-radius: 6px;"
-            "  color: #b0bec5;"
+            f"  color: {normal_text_rgba};"
             "}"
             f"QListWidget::item:hover {{"
             f"  background: {hover_rgba};"
-            f"  color: #eceff1;"
+            f"  color: {hover_text_rgba};"
             f"}}"
             f"QListWidget::item:selected {{"
             f"  background: {selected_rgba};"
