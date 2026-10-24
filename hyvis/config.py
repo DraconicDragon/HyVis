@@ -541,8 +541,17 @@ class ModelConfig(StrictBaseModel):
     source: str | None = Field(
         default=None,
         title="Source Path / Repo",
-        description="Model location. Leave empty to auto-download from the default Hugging Face repository. "
-        "Use 'local:/path/to/folder' to load from local disk, or provide a Hugging Face repo ID ('username/repo') to load a custom fork.",
+        description=(
+            "Where to load model files from.\n\n"
+            "• Leave empty (Default): Automatically downloads missing files from the official "
+            "HuggingFace repository linked to the model ID if not already in cache.\n\n"
+            "• Local Folder ('local:/path' or '/path' or 'C:\\path'): Loads files directly from a "
+            "folder on your computer. When using a local folder, downloading is completely disabled - all "
+            "required files must already be present inside that folder. HyVis will never fetch missing files "
+            "from the internet if you attempt to have it load from a local folder.\n\n"
+            "• Custom Repo ('username/repo'): Automatically downloads from a community or forked "
+            "HuggingFace repository instead of the official one."
+        ),
         json_schema_extra=field_meta(picker="directory"),
         examples=["local:/path/to/models/swinv2", "SmilingWolf/wd-swinv2-tagger-v3"],
     )
