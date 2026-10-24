@@ -638,11 +638,12 @@ class ModelsPage(BaseConfigPage):
             return
 
         target_var = avail.variants[0]
-        artifacts = target_var.artifacts
+        # Strictly show and count required artifacts; ignore optional files
+        artifacts = [a for a in target_var.artifacts if getattr(a, "required", True)]
 
-        total_req = sum(1 for a in artifacts if getattr(a, "required", True))
-        cached_req = sum(1 for a in artifacts if getattr(a, "required", True) and a.is_available)
-        is_fully_cached = cached_req == total_req
+        total_req = len(artifacts)
+        cached_req = sum(1 for a in artifacts if a.is_available)
+        is_fully_cached = (cached_req == total_req)
 
         # 1. Update 1-Line Status Label
         is_local_source = bool(source and source.startswith("local:"))
@@ -658,7 +659,7 @@ class ModelsPage(BaseConfigPage):
             )
             if is_local_source:
                 self.info_avail_lbl.setToolTip(
-                    f"Files are missing from the specified local folder:\n{source[6:]}\n"
+                    f"Required files are missing from the specified local folder:\n{source[6:]}\n"
                     "Note: Hugging Face auto-download is disabled when using 'local:' source."
                 )
             else:
