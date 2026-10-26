@@ -515,15 +515,30 @@ class ModelsPage(BaseConfigPage):
             from enum import Enum
 
             import vibe
+            from vibe.registry import model_registry
 
-            desc = vibe.describe(model_id)
+            model_registry.ensure_discovered()
+            plugin_cls = model_registry.get(model_id)
+            desc = plugin_cls.describe()
 
             self.info_name_lbl.setText(
                 f"{desc.identity.display_name} <span style='color: #8a9ba5;'>({desc.family_name})</span>"
             )
             self.info_desc_lbl.setText(desc.identity.description or "No description available.")
 
-            # Check if this model defines explicit named variants (e.g. Taggerine)
+            # Resolve active variant for this model
+            selected_var_data = self.variant_combo.currentData()
+            backend_val = self.backend_combo.currentText().strip()
+            device_val = self.device_combo.currentText().strip()
+
+            active_v = vibe.resolve_variant(
+                plugin_cls,
+                backend=backend_val if backend_val != "auto" else None,
+                variant=selected_var_data,
+                device=device_val,
+            )
+
+            # Check if this model defines explicit named variants
             has_named_variants = any(bool(v.variant_id) for v in desc.variants)
 
             if not has_named_variants:
@@ -535,29 +550,7 @@ class ModelsPage(BaseConfigPage):
                         break
                 self.info_variant_lbl.setText(f"(Default){desc_text}")
             else:
-                # Models with distinct named variants
-                selected_var_data = self.variant_combo.currentData()
-                effective_backend = self.backend_combo.currentText().strip().lower()
-
-                if effective_backend == "auto":
-                    candidate_variants = list(desc.variants)
-                else:
-                    candidate_variants = [
-                        v
-                        for v in desc.variants
-                        if (v.backend.value if hasattr(v.backend, "value") else str(v.backend)).lower()
-                        == effective_backend
-                    ]
-
-                if selected_var_data is not None:
-                    active_v = next((v for v in candidate_variants if v.variant_id == selected_var_data), None)
-                    is_default = False
-                else:
-                    active_v = (
-                        candidate_variants[0] if candidate_variants else (desc.variants[0] if desc.variants else None)
-                    )
-                    is_default = True
-
+                is_default = selected_var_data is None
                 if active_v and active_v.variant_id:
                     v_name = active_v.variant_id
                     b_name = (
@@ -574,7 +567,8 @@ class ModelsPage(BaseConfigPage):
             cats = [c.value if isinstance(c, Enum) else str(c) for c in desc.output.categories]
             self.info_cats_lbl.setText(", ".join(cats) if cats else "(None)")
 
-            repo = desc.default_repo_id
+            # Resolve effective repository without extra text or fluff
+            repo = self._get_effective_repo_id(model_id, selected_var_data)
             if repo:
                 self.info_repo_lbl.setText(f'<a href="https://huggingface.co/{repo}">{repo}</a>')
             else:
@@ -643,7 +637,7 @@ class ModelsPage(BaseConfigPage):
 
         total_req = len(artifacts)
         cached_req = sum(1 for a in artifacts if a.is_available)
-        is_fully_cached = (cached_req == total_req)
+        is_fully_cached = cached_req == total_req
 
         # 1. Update 1-Line Status Label
         is_local_source = bool(source and source.startswith("local:"))
@@ -736,20 +730,29 @@ class ModelsPage(BaseConfigPage):
                 missing_cnt = total_req - cached_req
                 self.download_summary_lbl.setText(f"{missing_cnt} file(s) missing.")
 
-    def _get_effective_repo_id(self, model_id: str, variant_id: str | None) -> str:
-        """Resolve effective Hugging Face repo ID for size checking."""
+    def _get_effective_repo_id(self, model_id: str, variant_id: str | None = None) -> str:
+        """Resolve effective Hugging Face repo ID for size checking and metadata display."""
         src = self.source_edit.text().strip()
         if src and not src.startswith("local:"):
             return src
         try:
             import vibe
+            from vibe.registry import model_registry
 
-            desc = vibe.describe(model_id)
-            if variant_id:
-                for v in desc.variants:
-                    if v.variant_id == variant_id and v.repo_id:
-                        return v.repo_id
-            return desc.default_repo_id or ""
+            model_registry.ensure_discovered()
+            plugin_cls = model_registry.get(model_id)
+            desc = plugin_cls.describe()
+
+            backend_val = self.backend_combo.currentText().strip()
+            device_val = self.device_combo.currentText().strip()
+
+            active_v = vibe.resolve_variant(
+                plugin_cls,
+                backend=backend_val if backend_val != "auto" else None,
+                variant=variant_id,
+                device=device_val,
+            )
+            return active_v.repo_id or desc.default_repo_id or ""
         except Exception:
             return ""
 
