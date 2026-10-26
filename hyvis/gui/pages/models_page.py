@@ -266,6 +266,7 @@ class ModelsPage(BaseConfigPage):
         action_row.addWidget(self.download_summary_lbl, stretch=1)
 
         self.check_size_btn = QPushButton("Check Download Size", self.files_container)
+        self.check_size_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.check_size_btn.clicked.connect(self._on_check_download_size)
         action_row.addWidget(self.check_size_btn)
 
@@ -765,6 +766,8 @@ class ModelsPage(BaseConfigPage):
         if not repo_id or repo_id.startswith("local:"):
             return
 
+        # Clear focus before disabling so Qt doesn't jump focus or trigger scrolls
+        self.check_size_btn.clearFocus()
         self.check_size_btn.setEnabled(False)
         self.check_size_btn.setText("Checking...")
 
