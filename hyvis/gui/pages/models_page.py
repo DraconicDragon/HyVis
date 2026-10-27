@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING
+from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING, CardTheme
 from hyvis.gui.widgets import (
     SectionCard,
     TagServiceListEditor,
@@ -244,17 +244,34 @@ class ModelsPage(BaseConfigPage):
         files_vbox.setContentsMargins(0, 4, 0, 0)
         files_vbox.setSpacing(6)
 
-        # 3-Column Table: File | Status | Size
-        self.files_table = AutoResizingTableWidget(0, 3, parent=self.files_container)
-        self.files_table.setHorizontalHeaderLabels(["File", "Status", "Size"])
+        # 4-Column Table: File | Status | Local Size | Remote Size
+        self.files_table = AutoResizingTableWidget(
+            0, 4, parent=self.files_container
+        )
+        self.files_table.setHorizontalHeaderLabels(["File", "Status", "Local Size", "Remote Size"])
         self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.files_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self.files_table.setColumnWidth(1, 95)
         self.files_table.setColumnWidth(2, 90)
+        self.files_table.setColumnWidth(3, 95)
         self.files_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.files_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         files_vbox.addWidget(self.files_table)
+
+        # File Size Mismatch Warning Card (Hidden by default)
+        self.mismatch_card = SectionCard(theme=CardTheme.WARNING_VIVID, parent=self.files_container)
+        mismatch_layout = QVBoxLayout()
+        mismatch_layout.setContentsMargins(6, 4, 6, 4)
+        mismatch_layout.setSpacing(4)
+        self.mismatch_lbl = QLabel(self.mismatch_card)
+        self.mismatch_lbl.setWordWrap(True)
+        self.mismatch_lbl.setStyleSheet("border: none; background: transparent;")
+        mismatch_layout.addWidget(self.mismatch_lbl)
+        self.mismatch_card.setContentLayout(mismatch_layout)
+        self.mismatch_card.setVisible(False)
+        files_vbox.addWidget(self.mismatch_card)
 
         # Bottom summary & Right-aligned check download size button
         action_row = QHBoxLayout()
@@ -265,7 +282,7 @@ class ModelsPage(BaseConfigPage):
         self.download_summary_lbl.setStyleSheet("color: #8a9ba5;")
         action_row.addWidget(self.download_summary_lbl, stretch=1)
 
-        self.check_size_btn = QPushButton("Check Download Size", self.files_container)
+        self.check_size_btn = QPushButton("Check Remote Sizes", self.files_container)
         self.check_size_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.check_size_btn.clicked.connect(self._on_check_download_size)
         action_row.addWidget(self.check_size_btn)
@@ -601,10 +618,11 @@ class ModelsPage(BaseConfigPage):
         self.toggle_files_btn.setText("Hide Files" if is_visible else "Show Files")
 
     def _update_availability(self, model_id: str) -> None:
-        """Inspect local availability offline and populate the artifact table."""
+        """Inspect local availability offline and populate the 4-column artifact table."""
         if not model_id:
             self.info_avail_lbl.setText("<span style='color: #888;'>No model selected</span>")
             self.files_table.setRowCount(0)
+            self.mismatch_card.setVisible(False)
             return
 
         source = self.source_edit.text().strip() or None
@@ -630,6 +648,7 @@ class ModelsPage(BaseConfigPage):
             self.files_table.setRowCount(0)
             self.download_summary_lbl.setText("")
             self.check_size_btn.setEnabled(False)
+            self.mismatch_card.setVisible(False)
             return
 
         target_var = avail.variants[0]
@@ -640,29 +659,39 @@ class ModelsPage(BaseConfigPage):
         cached_req = sum(1 for a in artifacts if a.is_available)
         is_fully_cached = cached_req == total_req
 
-        # 1. Update 1-Line Status Label
+        # 1. Update 1-Line Status Label and Local Source Notice
         is_local_source = bool(source and source.startswith("local:"))
+
         if is_fully_cached:
-            self.info_avail_lbl.setText(
-                f"<span style='color: #34d399;'>● Ready locally</span> ({cached_req} file{'s' if cached_req != 1 else ''} cached)"
-            )
-            self.info_avail_lbl.setToolTip("All required model files are present on disk.")
+            if is_local_source:
+                self.info_avail_lbl.setText(
+                    f"<span style='color: #34d399;'>● Ready in local folder</span> (All {cached_req} files present)"
+                )
+                self.info_avail_lbl.setToolTip("All required model files are present in your local folder.")
+            else:
+                self.info_avail_lbl.setText(
+                    f"<span style='color: #34d399;'>● Ready locally</span> (All {cached_req} files cached)"
+                )
+                self.info_avail_lbl.setToolTip("All required model files are present on disk.")
         else:
             missing_count = total_req - cached_req
-            self.info_avail_lbl.setText(
-                f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count} file{'s' if missing_count != 1 else ''} missing)"
-            )
             if is_local_source:
+                self.info_avail_lbl.setText(
+                    f"<span style='color: #fbbf24;'>○ Incomplete local folder</span> ({missing_count} required file{'s' if missing_count != 1 else ''} missing)"
+                )
                 self.info_avail_lbl.setToolTip(
-                    f"Required files are missing from the specified local folder:\n{source[6:]}\n"
-                    "Note: Hugging Face auto-download is disabled when using 'local:' source."
+                    f"Files are missing from your local folder:\n{source[6:]}\n"
+                    "Because you are using a local folder, HyVis will not download missing files from the internet."
                 )
             else:
+                self.info_avail_lbl.setText(
+                    f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count} file{'s' if missing_count != 1 else ''} will be downloaded)"
+                )
                 self.info_avail_lbl.setToolTip(
-                    "Missing files will be downloaded automatically to your Hugging Face cache on first inference run."
+                    "Missing files will be downloaded automatically from Hugging Face on first inference run."
                 )
 
-        # 2. Populate 3-Column Table: File | Status | Size
+        # 2. Populate 4-Column Table: File | Status | Local Size | Remote Size
         self.files_table.blockSignals(True)
         self.files_table.setRowCount(len(artifacts))
 
@@ -670,72 +699,108 @@ class ModelsPage(BaseConfigPage):
         remote_sizes = self._remote_sizes_cache.get(repo_id, {})
         total_missing_bytes = 0
         has_remote_estimates = False
+        mismatched_files: list[tuple[str, int, int]] = []
 
         for row, art in enumerate(artifacts):
-            # Column 0: File Name
+            # Col 0: File Name
             f_item = QTableWidgetItem(art.name)
             if art.is_available and art.path:
-                f_item.setToolTip(f"Cached locally at:\n{art.path}")
+                f_item.setToolTip(f"Located at:\n{art.path}")
             elif is_local_source:
                 f_item.setToolTip(f"Missing from local directory: {source[6:]}")
             else:
                 f_item.setToolTip(f"Missing from local cache.\nWill be downloaded from HF: {repo_id}")
             self.files_table.setItem(row, 0, f_item)
 
-            # Column 1: Status
+            # Col 1: Status
             if art.is_available:
                 status_item = QTableWidgetItem("● Cached")
                 status_item.setForeground(QColor(COLOR_STATUS_READY))
                 if art.path:
-                    status_item.setToolTip(f"Cached locally at:\n{art.path}")
+                    status_item.setToolTip(f"Located at:\n{art.path}")
             else:
                 status_item = QTableWidgetItem("○ Missing")
                 status_item.setForeground(QColor(COLOR_STATUS_WARNING))
-                status_item.setToolTip("Not found in local cache or storage.")
+                status_item.setToolTip("Not found in local cache or folder.")
             self.files_table.setItem(row, 1, status_item)
 
-            # Column 2: Size
+            # Col 2: Local Size
+            local_bytes: int | None = None
             if art.is_available and art.path and Path(art.path).is_file():
-                size_str = _format_bytes(Path(art.path).stat().st_size)
-            elif art.name in remote_sizes:
-                sz = remote_sizes[art.name]
-                size_str = f"~{_format_bytes(sz)}"
-                total_missing_bytes += sz
-                has_remote_estimates = True
+                local_bytes = Path(art.path).stat().st_size
+                local_str = _format_bytes(local_bytes)
             else:
-                size_str = "—"
-            size_item = QTableWidgetItem(size_str)
-            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.files_table.setItem(row, 2, size_item)
+                local_str = "—"
+            local_item = QTableWidgetItem(local_str)
+            local_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        # Auto-adjust table height dynamically to match row count
-        target_h = max(68, min(28 + max(len(artifacts), 1) * 26, 160))
-        self.files_table.setFixedHeight(target_h)
+            # Col 3: Remote Size
+            if art.name in remote_sizes:
+                rem_bytes = remote_sizes[art.name]
+                rem_str = _format_bytes(rem_bytes)
+                has_remote_estimates = True
+                if not art.is_available:
+                    total_missing_bytes += rem_bytes
+
+                # Compare local bytes against expected remote bytes (tolerate minor header diffs <= 1KB)
+                if local_bytes is not None and abs(local_bytes - rem_bytes) > 1024:
+                    mismatched_files.append((art.name, local_bytes, rem_bytes))
+                    local_item.setText(f"{local_str} ⚠")
+                    local_item.setForeground(QColor(COLOR_STATUS_WARNING))
+                    local_item.setToolTip(f"Size differs from expected repository ({rem_str})")
+            else:
+                rem_str = "—"
+
+            remote_item = QTableWidgetItem(rem_str)
+            remote_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.files_table.setItem(row, 2, local_item)
+            self.files_table.setItem(row, 3, remote_item)
+
         self.files_table.blockSignals(False)
 
-        # 3. Configure Action Button & Summary
-        if is_fully_cached:
+        # 3. File Size Mismatch Warning Card
+        if mismatched_files:
+            lines = [
+                "<b>File size mismatch detected</b><br>The following files differ in size from the expected repository:"
+            ]
+            for fname, loc_sz, rem_sz in mismatched_files:
+                lines.append(f"• <b>{fname}</b>: {_format_bytes(loc_sz)} local vs {_format_bytes(rem_sz)} expected")
+            lines.append(
+                "<span style='color: #aaa;'>This may indicate that the file in your source path is a different version, precision format, or checkpoint. If this is intentional, you can safely ignore this.</span>"
+            )
+            self.mismatch_lbl.setText("<br>".join(lines))
+            self.mismatch_card.setVisible(True)
+        else:
+            self.mismatch_card.setVisible(False)
+
+        # 4. Action Button & Summary
+        if not repo_id:
             self.check_size_btn.setEnabled(False)
-            self.check_size_btn.setToolTip("All files are already present locally.")
-            self.download_summary_lbl.setText("All files cached.")
-        elif is_local_source:
-            self.check_size_btn.setEnabled(False)
-            self.check_size_btn.setToolTip("Local source path active; Hugging Face auto-download is disabled.")
-            self.download_summary_lbl.setText("Local source active.")
+            self.check_size_btn.setToolTip("No Hugging Face repository defined for this model.")
+            self.download_summary_lbl.setText("No remote repository.")
         else:
             self.check_size_btn.setEnabled(True)
-            self.check_size_btn.setToolTip(f"Query Hugging Face API to check download sizes from '{repo_id}'.")
-            if has_remote_estimates:
-                self.download_summary_lbl.setText(f"Total download required: ~{_format_bytes(total_missing_bytes)}")
+            self.check_size_btn.setToolTip(f"Query Hugging Face API to check sizes from '{repo_id}'.")
+            if is_fully_cached:
+                if has_remote_estimates:
+                    self.download_summary_lbl.setText("All files cached (sizes verified).")
+                else:
+                    self.download_summary_lbl.setText("All files cached.")
             else:
-                missing_cnt = total_req - cached_req
-                self.download_summary_lbl.setText(f"{missing_cnt} file(s) missing.")
+                if has_remote_estimates:
+                    self.download_summary_lbl.setText(f"Total to download: ~{_format_bytes(total_missing_bytes)}")
+                else:
+                    missing_cnt = total_req - cached_req
+                    self.download_summary_lbl.setText(f"{missing_cnt} file(s) missing.")
 
     def _get_effective_repo_id(self, model_id: str, variant_id: str | None = None) -> str:
         """Resolve effective Hugging Face repo ID for size checking and metadata display."""
         src = self.source_edit.text().strip()
-        if src and not src.startswith("local:"):
+        # If user entered an online custom repo (e.g. username/repo), query that custom repo
+        if src and not src.startswith("local:") and not any(src.startswith(p) for p in ("/", "./", "../", "~", "\\")):
             return src
+
+        # Otherwise (empty or local: folder), return the expected variant repo from vibe
         try:
             import vibe
             from vibe.registry import model_registry
@@ -758,12 +823,12 @@ class ModelsPage(BaseConfigPage):
             return ""
 
     def _on_check_download_size(self) -> None:
-        """Trigger background query to Hugging Face API for missing file sizes."""
+        """Trigger background query to Hugging Face API for file sizes."""
         model_id = self.model_id_combo.currentText().strip()
         variant_id = self.variant_combo.currentData()
         repo_id = self._get_effective_repo_id(model_id, variant_id)
 
-        if not repo_id or repo_id.startswith("local:"):
+        if not repo_id:
             return
 
         # Clear focus before disabling so Qt doesn't jump focus or trigger scrolls
@@ -777,17 +842,35 @@ class ModelsPage(BaseConfigPage):
         self._active_size_worker.signals.error.connect(self._on_hf_sizes_error)
         QThreadPool.globalInstance().start(self._active_size_worker)
 
+    def _on_check_download_size(self) -> None:
+        """Trigger background query to Hugging Face API for file sizes."""
+        model_id = self.model_id_combo.currentText().strip()
+        variant_id = self.variant_combo.currentData()
+        repo_id = self._get_effective_repo_id(model_id, variant_id)
+
+        if not repo_id:
+            return
+
+        self.check_size_btn.clearFocus()
+        self.check_size_btn.setEnabled(False)
+        self.check_size_btn.setText("Checking...")
+
+        self._active_size_worker = _HfSizeWorker(repo_id)
+        self._active_size_worker.signals.success.connect(lambda sizes: self._on_hf_sizes_loaded(repo_id, sizes))
+        self._active_size_worker.signals.error.connect(self._on_hf_sizes_error)
+        QThreadPool.globalInstance().start(self._active_size_worker)
+
     def _on_hf_sizes_loaded(self, repo_id: str, sizes: dict[str, int]) -> None:
         self._active_size_worker = None
         self._remote_sizes_cache[repo_id] = sizes
-        self.check_size_btn.setText("Check Download Size")
+        self.check_size_btn.setText("Check Remote Sizes")
         self.check_size_btn.setEnabled(True)
         model_id = self.model_id_combo.currentText().strip()
         self._update_availability(model_id)
 
     def _on_hf_sizes_error(self, err_msg: str) -> None:
         self._active_size_worker = None
-        self.check_size_btn.setText("Check Download Size")
+        self.check_size_btn.setText("Check Remote Sizes")
         self.check_size_btn.setEnabled(True)
         self.download_summary_lbl.setText(f"<span style='color: #f85149;'>Failed to check size: {err_msg[:60]}</span>")
 
