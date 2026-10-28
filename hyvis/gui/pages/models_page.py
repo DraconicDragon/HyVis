@@ -220,25 +220,13 @@ class ModelsPage(BaseConfigPage):
         self.info_repo_lbl.setOpenExternalLinks(True)
         self.info_layout.addRow(self._make_detail_label("Repository:"), self.info_repo_lbl)
 
-        # Availability row: Status on left, Show/Hide Files toggle on right
-        avail_box = QWidget()
-        avail_layout = QHBoxLayout(avail_box)
-        avail_layout.setContentsMargins(0, 0, 0, 0)
-        avail_layout.setSpacing(8)
-
-        self.info_avail_lbl = QLabel(avail_box)
+        # Availability row
+        self.info_avail_lbl = QLabel()
         self.info_avail_lbl.setText("<span style='color: #888;'>Checking local files...</span>")
-        avail_layout.addWidget(self.info_avail_lbl, stretch=1)
-
-        self.toggle_files_btn = QPushButton("Show Files", avail_box)
-        self.toggle_files_btn.setFixedHeight(24)
-        self.toggle_files_btn.clicked.connect(self._on_toggle_files)
-        avail_layout.addWidget(self.toggle_files_btn)
-
-        self.info_layout.addRow(self._make_detail_label("Availability:"), avail_box)
+        self.info_layout.addRow(self._make_detail_label("Availability:"), self.info_avail_lbl)
         self.info_card.content_layout.addLayout(self.info_layout)
 
-        # Collapsible Artifact Files Container
+        # Artifact Files Container
         self.files_container = QWidget()
         files_vbox = QVBoxLayout(self.files_container)
         files_vbox.setContentsMargins(0, 4, 0, 0)
@@ -258,7 +246,7 @@ class ModelsPage(BaseConfigPage):
         self.files_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         files_vbox.addWidget(self.files_table)
 
-        # File Size Mismatch Warning Card (Hidden by default)
+        # File Size Mismatch Warning Card
         self.mismatch_card = SectionCard(theme=CardTheme.WARNING_VIVID, parent=self.files_container)
         mismatch_layout = QVBoxLayout()
         mismatch_layout.setContentsMargins(6, 4, 6, 4)
@@ -286,7 +274,6 @@ class ModelsPage(BaseConfigPage):
         action_row.addWidget(self.check_size_btn)
 
         files_vbox.addLayout(action_row)
-        self.files_container.setVisible(False)
         self.info_card.content_layout.addWidget(self.files_container)
 
         self.artifacts_card.content_layout.addWidget(self.info_card)
@@ -608,12 +595,6 @@ class ModelsPage(BaseConfigPage):
 
         # Refresh local availability and artifact table
         self._update_availability(model_id)
-
-    def _on_toggle_files(self) -> None:
-        """Toggle the collapsible artifact file inspection table."""
-        is_visible = not self.files_container.isVisible()
-        self.files_container.setVisible(is_visible)
-        self.toggle_files_btn.setText("Hide Files" if is_visible else "Show Files")
 
     def _update_availability(self, model_id: str) -> None:
         """Inspect local availability offline and populate the 4-column artifact table."""
