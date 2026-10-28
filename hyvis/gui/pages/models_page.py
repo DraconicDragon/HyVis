@@ -972,7 +972,11 @@ class ModelsPage(BaseConfigPage):
             m = self._models_data[index]
 
             model_id = str(m.get("model_id", ""))
-            self.model_id_combo.setCurrentText(model_id)
+            mid_idx = self.model_id_combo.findText(model_id)
+            if mid_idx >= 0:
+                self.model_id_combo.setCurrentIndex(mid_idx)
+            else: # todo: maybe make a base widget so this behaviour is reused and consistent
+                self.model_id_combo.setCurrentText(model_id)
 
             backend_val = m.get("backend")
             variant_val = m.get("variant_id")
@@ -983,7 +987,15 @@ class ModelsPage(BaseConfigPage):
             )
 
             self.source_edit.setText(str(m.get("source") or ""))
-            self.device_combo.setCurrentText(str(m.get("device") or "auto"))
+
+            # Device: use setCurrentIndex if present
+            device_val = str(m.get("device") or "auto")
+            dev_idx = self.device_combo.findText(device_val)
+            if dev_idx >= 0:
+                self.device_combo.setCurrentIndex(dev_idx)
+            else:
+                self.device_combo.setCurrentText(device_val)
+
             self.precision_combo.setCurrentText(str(m.get("precision") or "auto"))
             self.batch_spin.setValue(int(m.get("batch_size", 1)))
 
