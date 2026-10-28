@@ -245,9 +245,7 @@ class ModelsPage(BaseConfigPage):
         files_vbox.setSpacing(6)
 
         # 4-Column Table: File | Status | Local Size | Remote Size
-        self.files_table = AutoResizingTableWidget(
-            0, 4, parent=self.files_container
-        )
+        self.files_table = AutoResizingTableWidget(0, 4, parent=self.files_container)
         self.files_table.setHorizontalHeaderLabels(["File", "Status", "Local Size", "Remote Size"])
         self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
@@ -837,24 +835,6 @@ class ModelsPage(BaseConfigPage):
         self.check_size_btn.setText("Checking...")
 
         # Store on self to prevent Python GC from deallocating the worker/signals mid-execution (SIGSEGV fix)
-        self._active_size_worker = _HfSizeWorker(repo_id)
-        self._active_size_worker.signals.success.connect(lambda sizes: self._on_hf_sizes_loaded(repo_id, sizes))
-        self._active_size_worker.signals.error.connect(self._on_hf_sizes_error)
-        QThreadPool.globalInstance().start(self._active_size_worker)
-
-    def _on_check_download_size(self) -> None:
-        """Trigger background query to Hugging Face API for file sizes."""
-        model_id = self.model_id_combo.currentText().strip()
-        variant_id = self.variant_combo.currentData()
-        repo_id = self._get_effective_repo_id(model_id, variant_id)
-
-        if not repo_id:
-            return
-
-        self.check_size_btn.clearFocus()
-        self.check_size_btn.setEnabled(False)
-        self.check_size_btn.setText("Checking...")
-
         self._active_size_worker = _HfSizeWorker(repo_id)
         self._active_size_worker.signals.success.connect(lambda sizes: self._on_hf_sizes_loaded(repo_id, sizes))
         self._active_size_worker.signals.error.connect(self._on_hf_sizes_error)
