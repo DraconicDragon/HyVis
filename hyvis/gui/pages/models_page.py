@@ -11,6 +11,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -242,8 +243,7 @@ class ModelsPage(BaseConfigPage):
         self.files_table.setColumnWidth(1, 95)
         self.files_table.setColumnWidth(2, 90)
         self.files_table.setColumnWidth(3, 95)
-        self.files_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self.files_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.files_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # Read-only
         files_vbox.addWidget(self.files_table)
 
         # File Size Mismatch Warning Card
@@ -975,7 +975,7 @@ class ModelsPage(BaseConfigPage):
             mid_idx = self.model_id_combo.findText(model_id)
             if mid_idx >= 0:
                 self.model_id_combo.setCurrentIndex(mid_idx)
-            else: # todo: maybe make a base widget so this behaviour is reused and consistent
+            else:  # todo: maybe make a base widget so this behaviour is reused and consistent
                 self.model_id_combo.setCurrentText(model_id)
 
             backend_val = m.get("backend")
