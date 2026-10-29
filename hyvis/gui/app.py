@@ -58,7 +58,8 @@ def run_gui(initial_config: Path | str | None = None, *, reload_on_change: bool 
     app = QApplication(sys.argv)
     app.setApplicationName("HyVis")
     app.setOrganizationName("Drac")
-
+    app.setDesktopFileName("hyvis-gui")
+    
     from hyvis.gui.theme import CheckBoxCursorFilter, HyVisAppStyle
 
     app.setStyle(HyVisAppStyle(app.style()))
