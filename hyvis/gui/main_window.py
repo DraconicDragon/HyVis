@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("HyVis Configurator")
         self.setMinimumSize(540, 374)
-        self.resize(1020, 750)
+        self.resize(1170, 800)
 
         self._setup_menu_bar()
         self._setup_ui()
