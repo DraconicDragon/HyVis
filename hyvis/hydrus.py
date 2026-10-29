@@ -4,6 +4,7 @@ import functools
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from http import HTTPStatus
 from typing import Any, TypeVar, cast
 
 import hydrus_api
@@ -185,6 +186,8 @@ class FileInfo:
 
 _METADATA_BATCH = 256
 _PATH_LOG_INTERVAL = 500
+_PAGE_HASH_BATCH = 500
+_PATH_RESOLUTION_MAX_WORKERS = 8
 
 
 class HydrusClient:
@@ -320,10 +323,15 @@ class HydrusClient:
         # Attempt to create page (Hydrus v676+)
         try:
             client: Any = self._client
-            resp = client.new_page(page_type=6, page_name=name, hashes=hashes, focus_page=focus)
+            resp = client.new_page(
+                page_type=hydrus_api.PageType.FILE_SEARCH,
+                page_name=name,
+                hashes=hashes,
+                focus_page=focus,
+            )
             return resp["page_key"]
         except hydrus_api.APIError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == HTTPStatus.NOT_FOUND:
                 raise HydrusError(
                     f"No media page found with name '{name}' and page creation failed (HTTP Error 404). "
                     "Hydrus v676+ is required for automatic page creation. "
@@ -409,8 +417,8 @@ class HydrusClient:
         import concurrent.futures
         import threading
 
-        # Use up to 8 concurrent threads for fast local parallel queries
-        max_workers = min(8, len(file_infos))
+        # Use multiple concurrent threads for fast local parallel queries
+        max_workers = min(_PATH_RESOLUTION_MAX_WORKERS, len(file_infos))
         if max_workers <= 1:
             for idx, info in enumerate(file_infos):
                 self._resolve_single_path(info)
@@ -489,9 +497,9 @@ class HydrusClient:
         if not hashes:
             return
 
-        # Chunk hashes in batches of 500 to keep request sizes manageable
-        for i in range(0, len(hashes), 500):
-            batch = hashes[i : i + 500]
+        # Chunk hashes in batches to keep request sizes manageable
+        for i in range(0, len(hashes), _PAGE_HASH_BATCH):
+            batch = hashes[i : i + _PAGE_HASH_BATCH]
             self._client.add_files_to_page(page_key=page_key, hashes=batch)
 
     @_handle_hydrus_errors
