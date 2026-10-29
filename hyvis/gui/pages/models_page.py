@@ -640,31 +640,34 @@ class ModelsPage(BaseConfigPage):
 
         # 1. Update 1-Line Status Label and Local Source Notice
         is_local_source = bool(source and source.startswith("local:"))
+        missing_count = total_req - cached_req
+        file_word = "file" if missing_count == 1 else "files"
+        total_file_word = "file" if total_req == 1 else "files"
 
         if is_fully_cached:
             if is_local_source:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #34d399;'>● Ready in local folder</span> (All {cached_req} files present)"
+                    f"<span style='color: #34d399;'>● Ready in local folder</span> (All {total_req} {total_file_word} present)"
                 )
                 self.info_avail_lbl.setToolTip("All required model files are present in your local folder.")
             else:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #34d399;'>● Ready locally</span> (All {cached_req} files cached)"
+                    f"<span style='color: #34d399;'>● Ready locally</span> (All {total_req} {total_file_word} cached)"
                 )
                 self.info_avail_lbl.setToolTip("All required model files are present on disk.")
         else:
-            missing_count = total_req - cached_req
             if is_local_source:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #fbbf24;'>○ Incomplete local folder</span> ({missing_count} required file{'s' if missing_count != 1 else ''} missing)"
+                    f"<span style='color: #fbbf24;'>○ Incomplete local folder</span> ({missing_count}/{total_req} {file_word} missing)"
                 )
+                folder_disp = source.removeprefix("local:") if source else ""
                 self.info_avail_lbl.setToolTip(
-                    f"Files are missing from your local folder:\n{source[6:]}\n"
-                    "Because you are using a local folder, HyVis will not download missing files from the internet."
+                    f"Required files are missing from this folder:\n{folder_disp}\n\n"
+                    "Because you are loading from a local folder, HyVis will not download missing files from the internet."
                 )
             else:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count} file{'s' if missing_count != 1 else ''} will be downloaded)"
+                    f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count}/{total_req} {file_word} missing)"
                 )
                 self.info_avail_lbl.setToolTip(
                     "Missing files will be downloaded automatically from Hugging Face on first inference run."
@@ -681,25 +684,26 @@ class ModelsPage(BaseConfigPage):
         mismatched_files: list[tuple[str, int, int]] = []
 
         for row, art in enumerate(artifacts):
+            item_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+
             # Col 0: File Name
             f_item = QTableWidgetItem(art.name)
+            f_item.setFlags(item_flags)
             if art.is_available and art.path:
                 f_item.setToolTip(f"Located at:\n{art.path}")
-            elif is_local_source:
-                f_item.setToolTip(f"Missing from local directory: {source[6:]}")
+            elif is_local_source and source:
+                f_item.setToolTip(f"Missing from local directory:\n{source.removeprefix('local:')}")
             else:
                 f_item.setToolTip(f"Missing from local cache.\nWill be downloaded from HF: {repo_id}")
             self.files_table.setItem(row, 0, f_item)
 
             # Col 1: Status
-            if art.is_available:
-                status_item = QTableWidgetItem("● Cached")
-                status_item.setForeground(QColor(COLOR_STATUS_READY))
-                if art.path:
-                    status_item.setToolTip(f"Located at:\n{art.path}")
+            status_item = QTableWidgetItem("● Cached" if art.is_available else "○ Missing")
+            status_item.setFlags(item_flags)
+            status_item.setForeground(QColor(COLOR_STATUS_READY if art.is_available else COLOR_STATUS_WARNING))
+            if art.is_available and art.path:
+                status_item.setToolTip(f"Located at:\n{art.path}")
             else:
-                status_item = QTableWidgetItem("○ Missing")
-                status_item.setForeground(QColor(COLOR_STATUS_WARNING))
                 status_item.setToolTip("Not found in local cache or folder.")
             self.files_table.setItem(row, 1, status_item)
 
@@ -711,6 +715,7 @@ class ModelsPage(BaseConfigPage):
             else:
                 local_str = "—"
             local_item = QTableWidgetItem(local_str)
+            local_item.setFlags(item_flags)
             local_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             # Col 3: Remote Size
@@ -731,6 +736,7 @@ class ModelsPage(BaseConfigPage):
                 rem_str = "—"
 
             remote_item = QTableWidgetItem(rem_str)
+            remote_item.setFlags(item_flags)
             remote_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.files_table.setItem(row, 2, local_item)
             self.files_table.setItem(row, 3, remote_item)
@@ -762,15 +768,16 @@ class ModelsPage(BaseConfigPage):
             self.check_size_btn.setToolTip(f"Query Hugging Face API to check sizes from '{repo_id}'.")
             if is_fully_cached:
                 if has_remote_estimates:
-                    self.download_summary_lbl.setText("All files cached (sizes verified).")
+                    self.download_summary_lbl.setText("All file sizes verified against repository.")
                 else:
-                    self.download_summary_lbl.setText("All files cached.")
+                    self.download_summary_lbl.setText("All required files present on disk.")
             else:
                 if has_remote_estimates:
                     self.download_summary_lbl.setText(f"Total to download: ~{_format_bytes(total_missing_bytes)}")
+                elif is_local_source:
+                    self.download_summary_lbl.setText("Local folder mode (downloads disabled).")
                 else:
-                    missing_cnt = total_req - cached_req
-                    self.download_summary_lbl.setText(f"{missing_cnt} file(s) missing.")
+                    self.download_summary_lbl.setText("Download size unknown. Click 'Check Remote Sizes' to calculate.")
 
     def _get_effective_repo_id(self, model_id: str, variant_id: str | None = None) -> str:
         """Resolve effective Hugging Face repo ID for size checking and metadata display."""
