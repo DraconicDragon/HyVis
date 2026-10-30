@@ -31,23 +31,20 @@
     - Or even less involved: we have cli arg options and such in launch dialog, then it's not tied to the UI and it's not expected to be saved
       - [ ] For now can just be a normal textbox, that is missing anyway (needs to have --no-preview locked there or something idk, or let user remove it and let them be on their own if they change any of that in the first place)
 
-- A way to show info about model, description, extra notes, etc
-  - Example: PixAI tagger having their funny rating tags be non-'standard'  ('rating:g' instead of 'general')
-  - Info needs to be provided by vibe
-- Model Variant selector widget
-  - mind that there is description for variants too
-- Model availability indicator
-  - Model (variant) Artifact preview module (or widget), what needs to be downloaded still, what is available, how many MB download will it be
-- Model inference tryout/preview module (should be done only after availability and variant stuff is finished)
-  - Show on model page, on launch dialog, or both?
-  - while it is supposed to be a tryout module, it can be used at the same time as just a viewer for the
-  - Since model files are present for this to work, it opens up possibilities for improving UX in relation for user to understand model and it's better
-    - Tag search/inspection module/widget could be useful
-    - Should probably see that all the extra modules/widgets that are independent from the HyVis Configurator are in separate files, maybe make other repo or subfolder for it so I can reuse same thing for different project
+- [ ] A way to show info about model, description, extra notes, etc
+  - [ ] Example: PixAI tagger having their funny rating tags be non-'standard'  ('rating:g' instead of 'general')
+  - [ ] Info needs to be provided by vibe
+- [ ] Model inference tryout/preview module (should be done only after availability and variant stuff is finished)
+  - [ ] Show on model page, on launch dialog, or both?
+  - [ ] while it is supposed to be a tryout module, it can be used at the same time as just a viewer for the
+  - [ ] Since model files are present for this to work, it opens up possibilities for improving UX in relation for user to understand model and it's better
+    - [ ] Tag search/inspection module/widget could be useful
+    - [ ] Should probably see that all the extra modules/widgets that are independent from the HyVis Configurator are in separate files, maybe make other repo or subfolder for it so I can reuse same thing for different project
 
 - Low priority: Create custom base/primitive widgets like Custom QButtons and use throughout UI to have better control over them
   - Increase size of widgets by a bit so they are easier to hit, default Qt is kinda ass, but definitely not unusable, might introduce other issues so idk
     - Change of UI layout to be in 2 columns (like add/remove tags) may be beneficial for efficient space usage
+  - replace tables with custom compound of widgets, tables too much styling and extra functionality when i only kinda need rows of widgets together and table cells dont seem to be a nice place to put widgets into
 
 - Least priority: polish widget styling so it works with light mode better (the custom style for the page switcher list view on the left is too bright for light mode, text mainly)
 
@@ -55,7 +52,7 @@
 
 - Automatically open preview pages in Hydrus - if possible - on Launch in terminal popup spawn; or after terminal is launched (would remove the no preview cli arg)
 
-## lower priority (in order, mostly)
+## lower priority (in order, somewhat, maybe)
 
 - Aesthetic scoring model support
 
@@ -67,10 +64,14 @@
   - could use jupyter notebook + google colab i guess to download each model and calc count and save
 
 - its gonna be weird but: video/animation support, could support multiple modes
-  - every frame (too heavy but an option, maybe for gifs/very short vids)
-  - every nth frame (could do fps percentage based or hard user-set frame intervals)
-  - keyframes only (if easily possible) - **LIKELY BEST OPTION**
-  - do analysis and find frames with cuts or scene changes
+  - Best may be to have basic thing, every nth frame, optionally include keyframes, if keyframe close to nth frame, put keyframe inplace of nth frame so its not gonna process "duplicate" frames (potentially)
+    - maybe have percentage of frames to extract so it automatically gets the frames, is also video length agnostic
+      - this works nicely for longer videos but not so much for shorter/low frame ones kinda, but maybe theres some fancy math formula that automatically knows which and how many frames to get with a user-set target/average number of frames
+  - Other possible options i guess, though multiple options would probably be nicest:
+    - every frame (too heavy but an option, maybe for gifs/very short vids)
+    - every nth frame (could do fps percentage based or hard user-set frame intervals)
+    - keyframes only (if easily possible)
+    - do analysis and find frames with cuts or scene changes
 
   - !IMPORTANT! If using PyAV - It requires Python 3.12 or higher (for v19+), HyVis currently requires 3.11 or higher
 
@@ -85,14 +86,8 @@
 
 - more utilities for db like clear-cache? model_id specific stuff maybe?
 
-- option to set auto download (huggingface download) off since vibe has it too
-  - or just tell people to prefix source option with `local:`
-
 - [x] Support for pulling files from an open page in hydrus
   - [ ] Could also work with tag queries - in the scope of pages, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
-
-- [x] Preview for tag queries using an open page in Hydrus
-  - [ ] mark experimental since i think API says that these endpoints are experimental
 
 - Hydrus file download to memory for remote clients/file locations
   - BTW: Hydrus has option to compress files on host before serving over API, may be useful?
