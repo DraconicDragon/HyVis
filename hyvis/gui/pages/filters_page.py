@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,

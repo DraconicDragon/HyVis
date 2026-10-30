@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStyle,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
