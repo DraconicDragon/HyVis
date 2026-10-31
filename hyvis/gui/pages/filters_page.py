@@ -77,8 +77,8 @@ class FiltersPage(BaseConfigPage):
         of_fields = OutputFilterConfig.model_fields
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(4, 10, 0, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(12, 8, 0, 8)
+        root.setSpacing(12)
 
         # 1. Top Scope Selector Bar
         scope_layout = QHBoxLayout()
@@ -115,13 +115,13 @@ class FiltersPage(BaseConfigPage):
         root.addWidget(self.banner_card)
 
         # 3. Main Scroll Area for Filter Cards
-        scroll = SmoothScrollArea(self)
+        scroll = SmoothScrollArea(self, scroll_margin=12)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 8, 10, 10)
+        layout.setContentsMargins(0, 8, 0, 8)
         layout.setSpacing(12)
 
         # Card 1: Thresholds & TLT
@@ -171,7 +171,7 @@ class FiltersPage(BaseConfigPage):
 
         # Side-by-Side Row: Inclusions & Exclusions
         inc_exc_row = QHBoxLayout()
-        inc_exc_row.setSpacing(10)
+        inc_exc_row.setSpacing(12)
 
         # Card 3: Include Tags
         inc_title = of_fields["include_tags"].title or "Include Tags"

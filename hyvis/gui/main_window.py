@@ -354,13 +354,13 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(12, 0, 12, 12)
-        root_layout.setSpacing(8)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
         # 1. Top Global Bar (Header & Hydrus Status)
         self.top_bar_widget = QWidget(self)
         top_bar = QHBoxLayout(self.top_bar_widget)
-        top_bar.setContentsMargins(0, 10, 0, 2)
+        top_bar.setContentsMargins(12, 10, 12, 10)
         top_bar.setSpacing(10)
 
         app_title = QLabel(
@@ -389,7 +389,6 @@ class MainWindow(QMainWindow):
         # Divider line
         divider = QFrame(self)
         divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setFrameShadow(QFrame.Shadow.Sunken)
         divider.setStyleSheet("color: #333;")
         root_layout.addWidget(divider)
 
@@ -400,12 +399,13 @@ class MainWindow(QMainWindow):
         # Body container (Sidebar + Divider + Page Stack)
         body_container = QWidget(self.main_splitter)
         body_layout = QHBoxLayout(body_container)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(8)
+        body_layout.setContentsMargins(12, 0, 12, 0)
+        body_layout.setSpacing(0)
 
         # Left Sidebar
         self.sidebar = QListWidget(body_container)
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         palette = self.sidebar.palette()
         highlight_col = palette.color(palette.ColorRole.Highlight)
@@ -425,11 +425,11 @@ class MainWindow(QMainWindow):
             "  background: transparent;"
             "  border: none;"
             "  outline: none;"
-            "  padding-top: 6px;"
+            "  padding-top: 8px;"
             "}"
             "QListWidget::item {"
             "  padding: 10px 14px;"
-            "  margin: 4px 4px 4px 0px;"
+            "  margin: 4px 12px 8px 0px;"
             "  border-radius: 6px;"
             f"  color: {normal_text_rgba};"
             "}"
@@ -466,7 +466,6 @@ class MainWindow(QMainWindow):
         # Vertical Divider between sidebar and page stack
         v_divider = QFrame(body_container)
         v_divider.setFrameShape(QFrame.Shape.VLine)
-        v_divider.setFrameShadow(QFrame.Shadow.Sunken)
         v_divider.setStyleSheet("color: #333;")
         body_layout.addWidget(v_divider)
 
@@ -499,7 +498,7 @@ class MainWindow(QMainWindow):
             "QFrame {  background: rgba(255, 255, 255, 0.015);  border-top: 1px solid rgba(255, 255, 255, 0.08);}"
         )
         issues_layout = QVBoxLayout(self.issues_panel)
-        issues_layout.setContentsMargins(8, 6, 8, 8)
+        issues_layout.setContentsMargins(12, 6, 12, 8)
         issues_layout.setSpacing(6)
 
         issues_header = QHBoxLayout()
@@ -556,7 +555,13 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.main_splitter, stretch=1)
 
         # 4. Bottom Action & Status Bar
+        bottom_bar_divider = QFrame(self)
+        bottom_bar_divider.setFrameShape(QFrame.Shape.HLine)
+        bottom_bar_divider.setStyleSheet("color: #333;")
+        root_layout.addWidget(bottom_bar_divider)
+
         bottom_bar = QHBoxLayout()
+        bottom_bar.setContentsMargins(12, 12, 12, 12)
         bottom_bar.setSpacing(10)
 
         # Native-text button for issues toggle

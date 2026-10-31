@@ -102,7 +102,7 @@ class ModelsPage(BaseConfigPage):
         inf_fields = InferenceConfig.model_fields
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 10, 0, 10)
+        layout.setContentsMargins(12, 8, 0, 8)
 
         splitter = QSplitter(self)
         splitter.setChildrenCollapsible(False)
@@ -138,14 +138,14 @@ class ModelsPage(BaseConfigPage):
         splitter.addWidget(left_widget)
 
         # 2. Right: Active Model Settings (Scrollable Container)
-        right_scroll = SmoothScrollArea(splitter)
+        right_scroll = SmoothScrollArea(splitter, scroll_margin=12)
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         right_container = QWidget()
         self.form_layout = QVBoxLayout(right_container)
-        self.form_layout.setContentsMargins(12, 0, 10, 0)
-        self.form_layout.setSpacing(14)
+        self.form_layout.setContentsMargins(12, 0, 0, 0)
+        self.form_layout.setSpacing(12)
 
         # Card 1: Model & Artifacts
         self.artifacts_card = SectionCard("Model & Artifacts", parent=right_container)

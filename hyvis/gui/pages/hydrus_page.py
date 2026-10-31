@@ -50,14 +50,14 @@ class HydrusPage(BaseConfigPage):
         h_fields = HydrusConfig.model_fields
         prev_fields = PreviewConfig.model_fields
 
-        scroll = SmoothScrollArea(self)
+        scroll = SmoothScrollArea(self, scroll_margin=12)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(4, 10, 10, 10)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 8, 0, 8)
+        layout.setSpacing(12)
 
         # 1. API Connection Card
         self.conn_card = SectionCard(
