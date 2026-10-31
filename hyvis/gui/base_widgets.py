@@ -282,9 +282,9 @@ class SmoothScrollArea(QScrollArea):
                     else:
                         return False
 
-                # Cursor is over cards, labels, or empty background: scroll immediately
-                self.wheelEvent(event)
-                return True
+                if self._anim.state() == QPropertyAnimation.State.Running:
+                    self.wheelEvent(event)
+                    return True
 
         return super().eventFilter(obj, event)
 
