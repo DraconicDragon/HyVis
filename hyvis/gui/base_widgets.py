@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QScrollArea,
     QTableWidget,
+    QTextEdit,
     QWidget,
 )
 
@@ -133,6 +134,41 @@ class SuggestionComboBox(QComboBox):
 # endregion
 
 
+# region AutoResizingTextEdit
+
+
+class AutoResizingTextEdit(QTextEdit):
+    """
+    QTextEdit with automatic word-wrapping that dynamically resizes
+    its height to fit all content without showing vertical scrollbars.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.document().documentLayout().documentSizeChanged.connect(self._adjust_height)
+        self.textChanged.connect(self._adjust_height)
+
+    def _adjust_height(self) -> None:
+        vp = self.viewport()
+        if vp and vp.width() > 0:
+            self.document().setTextWidth(vp.width())
+        doc_h = int(self.document().documentLayout().documentSize().height())
+        m = self.contentsMargins()
+        total_h = doc_h + m.top() + m.bottom()
+        self.setFixedHeight(max(total_h, 36))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._adjust_height()
+
+
+# endregion
+
+
 # region SmoothScrollArea
 
 
@@ -141,21 +177,32 @@ class SmoothScrollArea(QScrollArea):
     Momentum-based smooth scrolling area with proactive Safe-Scroll filtering.
 
     Safe-Scroll Rules:
-      1. Proactively strips WheelFocus from all child spinboxes and comboboxes,
-         preventing the mouse wheel from auto-focusing them on first touch.
+      1. Proactively strips WheelFocus from child spinboxes and comboboxes.
       2. Non-editable QComboBox: Wheel never cycles options; smoothly scrolls the page.
-      3. Spinboxes & Editable ComboBoxes: Wheel only changes value if explicitly clicked/focused;
+      3. Spinboxes & Editable ComboBoxes: Wheel only changes value if explicitly focused;
          otherwise smoothly scrolls the page.
+      4. General Hover: Rolling the wheel over any card, label, or background immediately scrolls.
+      5. Dynamic Margin: If scroll_margin is specified, dynamically sets container layout's
+         right margin to 0 when hidden, and scroll_margin when the scrollbar is visible.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        scroll_margin: int | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._scroll_margin = scroll_margin
+        self._target_value = 0
+
         self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anim.setDuration(300)
-        self._target_value = 0.0
 
         self.verticalScrollBar().installEventFilter(self)
+        if self._scroll_margin is not None:
+            self.verticalScrollBar().rangeChanged.connect(self._on_scrollbar_range_changed)
 
         app = QApplication.instance()
         if app:
@@ -164,12 +211,33 @@ class SmoothScrollArea(QScrollArea):
     def setWidget(self, widget: QWidget) -> None:
         super().setWidget(widget)
         self._neutralize_child_wheel_focus(widget)
+        self._update_dynamic_margin()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         w = self.widget()
         if w:
             self._neutralize_child_wheel_focus(w)
+            self._update_dynamic_margin()
+
+    def _on_scrollbar_range_changed(self, min_val: int, max_val: int) -> None:
+        del min_val, max_val
+        self._update_dynamic_margin()
+
+    def _update_dynamic_margin(self) -> None:
+        if self._scroll_margin is None:
+            return
+        w = self.widget()
+        if not w or not w.layout():
+            return
+
+        vbar = self.verticalScrollBar()
+        has_scrollbar = vbar.maximum() > vbar.minimum()
+        target_right = self._scroll_margin if has_scrollbar else 0
+
+        m = w.layout().contentsMargins()
+        if m.right() != target_right:
+            w.layout().setContentsMargins(m.left(), m.top(), target_right, m.bottom())
 
     def _neutralize_child_wheel_focus(self, container: QWidget) -> None:
         for spin in container.findChildren(QAbstractSpinBox):
@@ -214,9 +282,9 @@ class SmoothScrollArea(QScrollArea):
                     else:
                         return False
 
-                if self._anim.state() == QPropertyAnimation.State.Running:
-                    self.wheelEvent(event)
-                    return True
+                # Cursor is over cards, labels, or empty background: scroll immediately
+                self.wheelEvent(event)
+                return True
 
         return super().eventFilter(obj, event)
 
@@ -227,15 +295,20 @@ class SmoothScrollArea(QScrollArea):
             return
 
         vbar = self.verticalScrollBar()
+        if vbar.maximum() <= vbar.minimum():
+            event.accept()
+            return
+
+        current = vbar.value()
         if self._anim.state() != QPropertyAnimation.State.Running:
-            self._target_value = vbar.value()
+            self._target_value = current
 
         step = vbar.singleStep() * 5.25 * (delta / 120.0)
         self._target_value -= step
         self._target_value = max(vbar.minimum(), min(self._target_value, vbar.maximum()))
 
         self._anim.stop()
-        self._anim.setStartValue(vbar.value())
+        self._anim.setStartValue(current)
         self._anim.setEndValue(self._target_value)
         self._anim.start()
 
