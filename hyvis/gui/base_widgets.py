@@ -304,49 +304,62 @@ class SmoothScrollArea(QScrollArea):
                 combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        # Re-entrancy guard against nested event dispatching
+        if getattr(self, "_in_filter", False):
+            return False
+
         if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
-            # Ignore horizontal wheel events entirely
+            # Ignore horizontal-only wheel/touchpad events
             if event.angleDelta().y() == 0:
-                return super().eventFilter(obj, event)
+                return False
 
-            if obj == self.verticalScrollBar():
-                self.wheelEvent(event)
-                return True
-
-            if isinstance(obj, QWidget) and self.isAncestorOf(obj):
-                target_input: QWidget | None = None
-                curr: QObject | None = obj
-                while curr is not None and isinstance(curr, QWidget) and self.isAncestorOf(curr):
-                    if isinstance(curr, (QAbstractSpinBox, QComboBox)):
-                        target_input = curr
-                        break
-                    curr = curr.parent()
-
-                if target_input is not None:
-                    if target_input.focusPolicy() == Qt.FocusPolicy.WheelFocus:
-                        target_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-                    if isinstance(target_input, QComboBox) and not target_input.isEditable():
-                        self.wheelEvent(event)
-                        return True
-
-                    active_focus = QApplication.focusWidget()
-                    is_focused = active_focus is not None and (
-                        active_focus == target_input or target_input.isAncestorOf(active_focus)
-                    )
-
-                    if not is_focused:
-                        self.wheelEvent(event)
-                        return True
-                    else:
-                        return False
-
-                # Restored: only intercept in-flight animations; otherwise let Qt dispatch naturally
-                if self._driver.is_running():
+            self._in_filter = True
+            try:
+                if obj == self.verticalScrollBar():
                     self.wheelEvent(event)
                     return True
 
-        return super().eventFilter(obj, event)
+                if isinstance(obj, QWidget) and self.isAncestorOf(obj):
+                    target_input: QWidget | None = None
+                    curr: QObject | None = obj
+                    while curr is not None and isinstance(curr, QWidget) and self.isAncestorOf(curr):
+                        if isinstance(curr, (QAbstractSpinBox, QComboBox)):
+                            target_input = curr
+                            break
+                        curr = curr.parent()
+
+                    if target_input is not None:
+                        if target_input.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+                            target_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+                        if isinstance(target_input, QComboBox) and not target_input.isEditable():
+                            self.wheelEvent(event)
+                            return True
+
+                        active_focus = QApplication.focusWidget()
+                        is_focused = active_focus is not None and (
+                            active_focus == target_input or target_input.isAncestorOf(active_focus)
+                        )
+
+                        if not is_focused:
+                            self.wheelEvent(event)
+                            return True
+                        else:
+                            return False
+
+                    # Only intercept in-flight animations; otherwise let Qt dispatch naturally
+                    if self._driver.is_running():
+                        self.wheelEvent(event)
+                        return True
+            finally:
+                self._in_filter = False
+
+        # Only pass to QScrollArea if the event belongs to its internal viewport
+        if obj == self.viewport():
+            return super().eventFilter(obj, event)
+
+        # For all other widgets and non-wheel events, return False to let Qt dispatch normally
+        return False
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y()
