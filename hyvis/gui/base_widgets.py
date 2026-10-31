@@ -12,11 +12,13 @@ from __future__ import annotations
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt, Signal
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QAbstractSpinBox,
     QApplication,
     QComboBox,
     QDoubleSpinBox,
     QScrollArea,
+    QScrollBar,
     QTableWidget,
     QTextEdit,
     QWidget,
@@ -169,21 +171,78 @@ class AutoResizingTextEdit(QTextEdit):
 # endregion
 
 
+# region SmoothScroll Driver
+
+
+class SmoothScrollDriver(QObject):
+    """
+    Single source of truth for smooth scroll momentum physics and animations.
+    Controls a target QScrollBar using cubic easing and accumulated wheel deltas.
+    """
+
+    DURATION_MS: int = 260
+    STEP_MULTIPLIER: float = 5.25
+
+    def __init__(self, scrollbar: QScrollBar, parent: QObject | None = None) -> None:
+        super().__init__(parent or scrollbar)
+        self._scrollbar = scrollbar
+        self._target_value: float = 0.0
+
+        self._anim = QPropertyAnimation(self._scrollbar, b"value", self)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.setDuration(self.DURATION_MS)
+
+    def is_running(self) -> bool:
+        """Return True if a scroll animation is actively in progress."""
+        return self._anim.state() == QPropertyAnimation.State.Running
+
+    def scroll_by_delta(self, delta: int) -> bool:
+        """
+        Process a vertical wheel delta and animate the scrollbar.
+        Returns False immediately on horizontal scroll (delta == 0) or boundary limits.
+        """
+        # Strictly ignore horizontal-only wheel / touchpad events
+        if delta == 0:
+            return False
+
+        vbar = self._scrollbar
+        if vbar.maximum() <= vbar.minimum():
+            return False
+
+        current = vbar.value()
+        # If already animating, accumulate distance from active target for continuous momentum
+        if self.is_running():
+            pass
+        else:
+            self._target_value = float(current)
+
+        single = vbar.singleStep()
+        base_step = single if 10 <= single <= 40 else 20
+        step = base_step * self.STEP_MULTIPLIER * (delta / 120.0)
+
+        self._target_value = max(
+            float(vbar.minimum()),
+            min(self._target_value - step, float(vbar.maximum())),
+        )
+
+        self._anim.stop()
+        self._anim.setStartValue(current)
+        self._anim.setEndValue(round(self._target_value))
+        self._anim.start()
+        return True
+
+
+# endregion
+
+
 # region SmoothScrollArea
 
 
 class SmoothScrollArea(QScrollArea):
     """
-    Momentum-based smooth scrolling area with proactive Safe-Scroll filtering.
-
-    Safe-Scroll Rules:
-      1. Proactively strips WheelFocus from child spinboxes and comboboxes.
-      2. Non-editable QComboBox: Wheel never cycles options; smoothly scrolls the page.
-      3. Spinboxes & Editable ComboBoxes: Wheel only changes value if explicitly focused;
-         otherwise smoothly scrolls the page.
-      4. General Hover: Rolling the wheel over any card, label, or background immediately scrolls.
-      5. Dynamic Margin: If scroll_margin is specified, dynamically sets container layout's
-         right margin to 0 when hidden, and scroll_margin when the scrollbar is visible.
+    Momentum-based smooth scrolling area for widget layouts (pages & dialogs).
+    Uses SmoothScrollDriver for animations while enforcing proactive Safe-Scroll
+    and optional dynamic right margins.
     """
 
     def __init__(
@@ -194,11 +253,7 @@ class SmoothScrollArea(QScrollArea):
     ) -> None:
         super().__init__(parent)
         self._scroll_margin = scroll_margin
-        self._target_value = 0
-
-        self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.setDuration(300)
+        self._driver = SmoothScrollDriver(self.verticalScrollBar(), parent=self)
 
         self.verticalScrollBar().installEventFilter(self)
         if self._scroll_margin is not None:
@@ -250,6 +305,10 @@ class SmoothScrollArea(QScrollArea):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            # Ignore horizontal wheel events entirely
+            if event.angleDelta().y() == 0:
+                return super().eventFilter(obj, event)
+
             if obj == self.verticalScrollBar():
                 self.wheelEvent(event)
                 return True
@@ -282,7 +341,8 @@ class SmoothScrollArea(QScrollArea):
                     else:
                         return False
 
-                if self._anim.state() == QPropertyAnimation.State.Running:
+                # Restored: only intercept in-flight animations; otherwise let Qt dispatch naturally
+                if self._driver.is_running():
                     self.wheelEvent(event)
                     return True
 
@@ -290,29 +350,48 @@ class SmoothScrollArea(QScrollArea):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y()
-        if delta == 0:
-            super().wheelEvent(event)
-            return
-
-        vbar = self.verticalScrollBar()
-        if vbar.maximum() <= vbar.minimum():
+        if self._driver.scroll_by_delta(delta):
             event.accept()
-            return
+        else:
+            super().wheelEvent(event)
 
-        current = vbar.value()
-        if self._anim.state() != QPropertyAnimation.State.Running:
-            self._target_value = current
 
-        step = vbar.singleStep() * 5.25 * (delta / 120.0)
-        self._target_value -= step
-        self._target_value = max(vbar.minimum(), min(self._target_value, vbar.maximum()))
+# endregion
 
-        self._anim.stop()
-        self._anim.setStartValue(current)
-        self._anim.setEndValue(self._target_value)
-        self._anim.start()
 
-        event.accept()
+# region SmoothItemScrollFilter & Helper
+
+
+class SmoothItemScrollFilter(QObject):
+    """
+    Event filter that enables pixel-based momentum smooth scrolling
+    on any QAbstractItemView (QListWidget, QTableWidget, QTreeWidget, etc.).
+    Delegates all animation physics to SmoothScrollDriver.
+    """
+
+    def __init__(self, view: QAbstractItemView) -> None:
+        super().__init__(view)
+        self._view = view
+        self._view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._driver = SmoothScrollDriver(self._view.verticalScrollBar(), parent=self)
+
+        self._view.viewport().installEventFilter(self)
+        self._view.verticalScrollBar().installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            delta = event.angleDelta().y()
+            if self._driver.scroll_by_delta(delta):
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
+
+
+def install_smooth_scroll(view: QAbstractItemView) -> SmoothItemScrollFilter:
+    """Attach smooth pixel-level momentum scrolling to any list, table, or tree view."""
+    filt = SmoothItemScrollFilter(view)
+    view._smooth_scroll_filter = filt
+    return filt
 
 
 # endregion
