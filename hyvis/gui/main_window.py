@@ -4,6 +4,7 @@ main_window.py — Modern sidebar-driven desktop interface for HyVis.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,15 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
-from hyvis.gui.dialogs import AboutDialog, LaunchDialog, PreferencesDialog, UnsavedChangesAction, prompt_unsaved_changes
+from hyvis.gui.devtools import DevToolsStrip
+from hyvis.gui.dialogs import (
+    AboutDialog,
+    LaunchDialog,
+    PreferencesDialog,
+    UnsavedChangesAction,
+    UnsavedChangesDialog,
+    prompt_unsaved_changes,
+)
 from hyvis.gui.launcher import format_cli_command_str
 from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
 from hyvis.gui.settings import (
@@ -230,9 +239,10 @@ class WindowDragFilter(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, state: ConfigState | None = None) -> None:
+    def __init__(self, state: ConfigState | None = None, *, dev_mode: bool = False) -> None:
         super().__init__()
         self.state = state or ConfigState()
+        self.dev_mode = dev_mode
         self.gui_settings: GuiSettings = get_gui_settings()
         self._highlighted_error_widgets: set[QWidget] = set()
         self._manual_connect_requested: bool = False
@@ -392,15 +402,21 @@ class MainWindow(QMainWindow):
         divider.setStyleSheet("color: #333;")
         root_layout.addWidget(divider)
 
+        if self.dev_mode:
+            self.devtools = DevToolsStrip(
+                open_preferences=self._on_preferences,
+                open_about=self._on_about_hyvis,
+                open_launch=self._on_launch_terminal,
+                open_unsaved_changes=self._on_show_unsaved_changes,
+                simulate_crash=self._simulate_crash,
+                parent=central,
+            )
+            root_layout.addWidget(self.devtools)
+
         # 2. Main Vertical Splitter (Page Body + Issues Drawer)
         self.main_splitter = QSplitter(Qt.Orientation.Vertical, central)
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setStyleSheet(
-            "QSplitter::handle:vertical {"
-            "  height: 6px;"
-            "  border-top: 1px solid #333;"
-            "}"
-        )
+        self.main_splitter.setStyleSheet("QSplitter::handle:vertical {  height: 6px;  border-top: 1px solid #333;}")
         # Body container (Sidebar + Divider + Page Stack)
         body_container = QWidget(self.main_splitter)
         body_layout = QHBoxLayout(body_container)
@@ -683,6 +699,21 @@ class MainWindow(QMainWindow):
 
     def _on_about_qt(self) -> None:
         QMessageBox.aboutQt(self, "About Qt")
+
+    def _on_show_unsaved_changes(self) -> None:
+        dialog = UnsavedChangesDialog(current_path=self.state.current_path, parent=self)
+        dialog.exec()
+
+    def _simulate_crash(self) -> None:
+        """Persist the editor snapshot and terminate without normal Qt shutdown."""
+        if not save_session_tmp(self._gather_config_dict()):
+            QMessageBox.warning(
+                self,
+                "Could Not Save Recovery Data",
+                "The session recovery file could not be written, so the simulated crash was cancelled.",
+            )
+            return
+        os._exit(1)
 
     def _load_config_to_pages(self, cfg: AppConfig) -> None:
         """Reset pages to a clean baseline before populating the incoming configuration."""

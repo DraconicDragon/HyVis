@@ -33,10 +33,15 @@ def parse_gui_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="For development: restart the GUI after its window is closed.",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Show development controls in the UI.",
+    )
     return parser.parse_args(argv)
 
 
-def run_gui(initial_config: Path | str | None = None) -> int:
+def run_gui(initial_config: Path | str | None = None, *, dev_mode: bool = False) -> int:
     """Initialize and run the desktop PySide6 application."""
 
     # On Linux/BSD, tell Qt to use the modern native system file chooser via XDG Desktop Portal
@@ -49,7 +54,7 @@ def run_gui(initial_config: Path | str | None = None) -> int:
         from PySide6.QtWidgets import QApplication
 
         from hyvis.gui.main_window import MainWindow
-        from hyvis.gui.settings import StartupBehavior, get_gui_settings
+        from hyvis.gui.settings import StartupBehavior, get_gui_settings, has_session_tmp
         from hyvis.gui.state import ConfigState
     except ImportError as exc:
         print(
@@ -81,7 +86,7 @@ def run_gui(initial_config: Path | str | None = None) -> int:
     # 4. Fallback: clean default template (already initialized in ConfigState)
     target_config = initial_config
 
-    if not target_config:
+    if not target_config and not has_session_tmp():
         if gui_settings.startup_behavior == StartupBehavior.CUSTOM_PRESET and gui_settings.custom_preset_path:
             preset_path = Path(gui_settings.custom_preset_path)
             if preset_path.is_file():
@@ -96,7 +101,7 @@ def run_gui(initial_config: Path | str | None = None) -> int:
         if not ok and err:
             print(f"Warning: Could not open '{target_config}': {err}", file=sys.stderr)
 
-    window = MainWindow(state)
+    window = MainWindow(state, dev_mode=dev_mode)
     window.show()
 
     return app.exec()
@@ -105,10 +110,10 @@ def run_gui(initial_config: Path | str | None = None) -> int:
 def cli() -> None:
     args = parse_gui_args()
     if is_restart_child():
-        sys.exit(run_gui(args.config))
+        sys.exit(run_gui(args.config, dev_mode=args.dev))
     if args.hot_restart:
         sys.exit(run_with_restart(sys.argv[1:]))
-    sys.exit(run_gui(args.config))
+    sys.exit(run_gui(args.config, dev_mode=args.dev))
 
 
 if __name__ == "__main__":
