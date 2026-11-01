@@ -100,20 +100,6 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA cache_size = -65536")  # 64MiB
         self._conn.executescript(_SCHEMA_SQL)
-
-        # Migration: add missing columns if upgrading from an older HyVis database
-        cursor = self._conn.execute("PRAGMA table_info(known_files)")
-        known_cols = {row[1] for row in cursor.fetchall()}
-        if known_cols and "status" not in known_cols:
-            self._conn.execute("ALTER TABLE known_files ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
-
-        cursor = self._conn.execute("PRAGMA table_info(push_queue)")
-        queue_cols = {row[1] for row in cursor.fetchall()}
-        if queue_cols and "attempts" not in queue_cols:
-            self._conn.execute("ALTER TABLE push_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
-        if queue_cols and "last_error" not in queue_cols:
-            self._conn.execute("ALTER TABLE push_queue ADD COLUMN last_error TEXT")
-
         self._conn.commit()
         logger.debug("HyVis database opened at %s (WAL mode, min_cache_score=%.3f)", self._path, self._min_cache_score)
 
