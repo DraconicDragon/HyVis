@@ -1,5 +1,8 @@
 # TODO
 
+- option to not add the tag(s) from add_tags option if there were no tags emitted
+  - avoids situations where a file gets like "ai:tagged" but then there are no tags added because all are below threshold (likely if only allowing subset of tags to be emitted/outputted)
+
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
 
 - Character IP mapping support
