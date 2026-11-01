@@ -117,8 +117,8 @@ class LaunchDialog(QDialog):
         self._rejected_preview_sent = False
 
         self.setWindowTitle("Launch HyVis")
-        self.resize(580, 520)
-        self.setMinimumWidth(520)
+        self.resize(570, 610)
+        self.setMinimumWidth(505)
         self.setModal(True)
 
         self._setup_ui()
