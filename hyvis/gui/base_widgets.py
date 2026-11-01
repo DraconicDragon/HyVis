@@ -243,16 +243,27 @@ class SmoothScrollArea(QScrollArea):
     Momentum-based smooth scrolling area for widget layouts (pages & dialogs).
     Uses SmoothScrollDriver for animations while enforcing proactive Safe-Scroll
     and optional dynamic right margins.
+
+    Margin configuration:
+      - scroll_margin: Right margin applied when scrollbar is active (or (visible, hidden) tuple).
+      - base_margin: Right margin applied when scrollbar is inactive/hidden (defaults to 0).
     """
 
     def __init__(
         self,
         parent: QWidget | None = None,
         *,
-        scroll_margin: int | None = None,
+        scroll_margin: int | tuple[int, int] | None = None,
+        base_margin: int = 0,
     ) -> None:
         super().__init__(parent)
-        self._scroll_margin = scroll_margin
+        if isinstance(scroll_margin, tuple):
+            self._scroll_margin: int | None = scroll_margin[0]
+            self._base_margin: int = scroll_margin[1]
+        else:
+            self._scroll_margin = scroll_margin
+            self._base_margin = base_margin
+
         self._driver = SmoothScrollDriver(self.verticalScrollBar(), parent=self)
 
         self.verticalScrollBar().installEventFilter(self)
@@ -288,7 +299,7 @@ class SmoothScrollArea(QScrollArea):
 
         vbar = self.verticalScrollBar()
         has_scrollbar = vbar.maximum() > vbar.minimum()
-        target_right = self._scroll_margin if has_scrollbar else 0
+        target_right = self._scroll_margin if has_scrollbar else self._base_margin
 
         m = w.layout().contentsMargins()
         if m.right() != target_right:
