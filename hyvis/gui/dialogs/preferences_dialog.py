@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.gui.base_widgets import SmoothScrollArea
+from hyvis.gui.base_widgets import Divider, SmoothScrollArea
 from hyvis.gui.settings import (
     GuiSettings,
     StartupBehavior,
@@ -160,9 +160,7 @@ class PreferencesDialog(QDialog):
         )
 
         # Divider separating the preference sections from the action buttons
-        divider = QFrame(self)
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("color: #333;")
+        divider = Divider(self, QFrame.Shape.HLine)
         root.addWidget(divider)
 
         # Bottom Action Buttons

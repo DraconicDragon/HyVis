@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
+from hyvis.gui.base_widgets import Divider
 from hyvis.gui.devtools import DevToolsStrip
 from hyvis.gui.dialogs import (
     AboutDialog,
@@ -397,9 +398,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.top_bar_widget)
 
         # Divider line
-        divider = QFrame(self)
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("color: #333;")
+        divider = Divider(self, QFrame.Shape.HLine)
         root_layout.addWidget(divider)
 
         if self.dev_mode:
@@ -485,9 +484,7 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.sidebar)
 
         # Vertical Divider between sidebar and page stack
-        v_divider = QFrame(body_container)
-        v_divider.setFrameShape(QFrame.Shape.VLine)
-        v_divider.setStyleSheet("color: #333;")
+        v_divider = Divider(body_container, QFrame.Shape.VLine)
         body_layout.addWidget(v_divider)
 
         # Right Stacked Pages
@@ -576,9 +573,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.main_splitter, stretch=1)
 
         # 4. Bottom Action & Status Bar
-        bottom_bar_divider = QFrame(self)
-        bottom_bar_divider.setFrameShape(QFrame.Shape.HLine)
-        bottom_bar_divider.setStyleSheet("color: #333;")
+        bottom_bar_divider = Divider(self, QFrame.Shape.HLine)
         root_layout.addWidget(bottom_bar_divider)
 
         bottom_bar = QHBoxLayout()

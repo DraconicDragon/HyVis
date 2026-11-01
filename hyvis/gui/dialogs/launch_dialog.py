@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig
+from hyvis.gui.base_widgets import Divider
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.widgets import SectionCard
 from hyvis.hydrus import HydrusClient, HydrusError
@@ -201,8 +202,7 @@ class LaunchDialog(QDialog):
 
         # Divider between previews if both configured
         if self.has_candidate_preview and self.has_rejected_preview:
-            p_div = QFrame(self.preview_card)
-            p_div.setFrameShape(QFrame.Shape.HLine)
+            p_div = Divider(self.preview_card, QFrame.Shape.HLine)
             p_div.setStyleSheet("color: rgba(255, 255, 255, 0.08);")
             prev_layout.addWidget(p_div)
 
@@ -307,9 +307,7 @@ class LaunchDialog(QDialog):
         root_layout.addWidget(scroll_container, stretch=1)
 
         # Divider separating the preflight details from the action buttons
-        actions_divider = QFrame(self)
-        actions_divider.setFrameShape(QFrame.Shape.HLine)
-        actions_divider.setStyleSheet("color: #333;")
+        actions_divider = Divider(self, QFrame.Shape.HLine)
         root_layout.addWidget(actions_divider)
 
         # 5. Bottom Action Bar

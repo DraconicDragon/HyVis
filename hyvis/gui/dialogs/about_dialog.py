@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.gui.base_widgets import SmoothScrollArea
+from hyvis.gui.base_widgets import Divider, SmoothScrollArea
 from hyvis.system_info import format_system_info_text, get_system_info
 
 
@@ -67,8 +67,7 @@ class AboutDialog(QDialog):
         divider_layout.setContentsMargins(12, 0, 12, 0)
         divider_layout.setSpacing(0)
 
-        divider = QFrame(divider_container)
-        divider.setFrameShape(QFrame.Shape.HLine)
+        divider = Divider(divider_container, QFrame.Shape.HLine)
         divider.setFrameShadow(QFrame.Shadow.Sunken)
         divider_layout.addWidget(divider)
         root_layout.addWidget(divider_container)
@@ -93,9 +92,7 @@ class AboutDialog(QDialog):
         root_layout.addWidget(scroll_container, stretch=1)
 
         # Divider separating the scrollable details from the action buttons
-        actions_divider = QFrame(self)
-        actions_divider.setFrameShape(QFrame.Shape.HLine)
-        actions_divider.setStyleSheet("color: #333;")
+        actions_divider = Divider(self, QFrame.Shape.HLine)
         root_layout.addWidget(actions_divider)
 
         # 3. Action Buttons

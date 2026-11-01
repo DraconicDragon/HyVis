@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QScrollArea,
     QScrollBar,
     QTableWidget,
@@ -25,6 +26,28 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.settings import get_gui_settings, settings_signals
+
+# region Divider
+
+
+class Divider(QFrame):
+    """A reusable QFrame divider with configurable shape, shadow, and stylesheet."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        shape: QFrame.Shape = QFrame.Shape.HLine,
+        *,
+        shadow: QFrame.Shadow | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setFrameShape(shape)
+        self.setFrameShadow(shadow) if shadow is not None else None
+        self.setStyleSheet("color: #333;")
+
+
+# endregion
+
 
 # region FloatSpinBox
 
