@@ -77,11 +77,12 @@ class FiltersPage(BaseConfigPage):
         of_fields = OutputFilterConfig.model_fields
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 8, 0, 8)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         # 1. Top Scope Selector Bar
         scope_layout = QHBoxLayout()
+        scope_layout.setContentsMargins(12, 12, 4, 0)
         scope_layout.setSpacing(8)
 
         scope_label = QLabel("<b>Configuration Target:</b>", self)
@@ -95,7 +96,14 @@ class FiltersPage(BaseConfigPage):
         root.addLayout(scope_layout)
 
         # 2. Model Override Notice Banner (Hidden in Global Scope)
-        self.banner_card = SectionCard(theme=CardTheme.INFO_VIVID, parent=self)
+        # Keep the outer spacing separate from the card's internal content margins.
+        self.banner_container = QWidget(self)
+        banner_outer_layout = QHBoxLayout(self.banner_container)
+        banner_outer_layout.setContentsMargins(12, 12, 4, 4)
+        banner_outer_layout.setSpacing(0)
+
+        self.banner_card = SectionCard(theme=CardTheme.INFO_VIVID, parent=self.banner_container)
+        banner_outer_layout.addWidget(self.banner_card)
 
         banner_layout = QHBoxLayout()
         banner_layout.setContentsMargins(6, 6, 6, 4)
@@ -111,17 +119,18 @@ class FiltersPage(BaseConfigPage):
         banner_layout.addWidget(self.reset_overrides_btn)
 
         self.banner_card.setContentLayout(banner_layout)
-        self.banner_card.setVisible(False)
-        root.addWidget(self.banner_card)
+        self.banner_container.setVisible(False)
+
+        root.addWidget(self.banner_container)
 
         # 3. Main Scroll Area for Filter Cards
-        scroll = SmoothScrollArea(self, scroll_margin=12)
+        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setContentsMargins(12, 12, 0, 12)
         layout.setSpacing(12)
 
         # Card 1: Thresholds & TLT
@@ -443,7 +452,7 @@ class FiltersPage(BaseConfigPage):
         self._is_loading_ui = True
         try:
             is_global = self._current_scope == 0
-            self.banner_card.setVisible(not is_global)
+            self.banner_container.setVisible(not is_global)
 
             if is_global:
                 for card, (base_title, _) in self._card_meta.items():

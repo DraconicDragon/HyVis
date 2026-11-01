@@ -41,13 +41,13 @@ class AppDbPage(BaseConfigPage):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        scroll = SmoothScrollArea(self, scroll_margin=12)
+        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 8, 0, 8)
+        layout.setContentsMargins(12, 12, 0, 12)
         layout.setSpacing(12)
 
         # 1. Database Settings Card

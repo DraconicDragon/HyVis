@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
-from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
+from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea, install_smooth_scroll
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING, CardTheme
 from hyvis.gui.widgets import (
@@ -102,7 +102,7 @@ class ModelsPage(BaseConfigPage):
         inf_fields = InferenceConfig.model_fields
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 0, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         splitter = QSplitter(self)
         splitter.setChildrenCollapsible(False)
@@ -112,7 +112,7 @@ class ModelsPage(BaseConfigPage):
         left_widget.setMinimumWidth(145)
         left_widget.setMaximumWidth(380)
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(12, 12, 0, 12)
         left_layout.setSpacing(6)
 
         models_label = QLabel(f"<b>{inf_fields['models'].title}:</b>", left_widget)
@@ -138,13 +138,13 @@ class ModelsPage(BaseConfigPage):
         splitter.addWidget(left_widget)
 
         # 2. Right: Active Model Settings (Scrollable Container)
-        right_scroll = SmoothScrollArea(splitter, scroll_margin=12)
+        right_scroll = SmoothScrollArea(splitter, scroll_margin=(8, 4))
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         right_container = QWidget()
         self.form_layout = QVBoxLayout(right_container)
-        self.form_layout.setContentsMargins(12, 0, 0, 0)
+        self.form_layout.setContentsMargins(12, 12, 0, 12)
         self.form_layout.setSpacing(12)
 
         # Card 1: Model & Artifacts

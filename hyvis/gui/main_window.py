@@ -395,11 +395,16 @@ class MainWindow(QMainWindow):
         # 2. Main Vertical Splitter (Page Body + Issues Drawer)
         self.main_splitter = QSplitter(Qt.Orientation.Vertical, central)
         self.main_splitter.setChildrenCollapsible(False)
-
+        self.main_splitter.setStyleSheet(
+            "QSplitter::handle:vertical {"
+            "  height: 6px;"
+            "  border-top: 1px solid #333;"
+            "}"
+        )
         # Body container (Sidebar + Divider + Page Stack)
         body_container = QWidget(self.main_splitter)
         body_layout = QHBoxLayout(body_container)
-        body_layout.setContentsMargins(12, 0, 12, 0)
+        body_layout.setContentsMargins(12, 0, 8, 0)
         body_layout.setSpacing(0)
 
         # Left Sidebar
