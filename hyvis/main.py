@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import signal
 import sys
 from pathlib import Path
@@ -37,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 async def main() -> int:
     args = parse_args()
+
+    # Print invocation CLI arguments immediately
+    if len(sys.argv) > 1:
+        cmd_args = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
+        print(_c(f"Executing HyVis with arguments: {cmd_args}\n", DIM))
 
     # Every file hash processed/targeted during entire script run
     touched_hashes: set[str] = set()
