@@ -42,7 +42,10 @@ class Divider(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setFrameShape(shape)
-        self.setFrameShadow(shadow) if shadow is not None else None
+
+        if shadow is not None:
+            self.setFrameShadow(shadow)
+
         self.setStyleSheet("color: #333;")
 
 
