@@ -109,7 +109,7 @@ def get_card_stylesheet(theme: CardTheme, class_name: str = "QFrame") -> str:
 
 
 class HyVisAppStyle(QProxyStyle):
-    """Global proxy style that expands checkbox indicators to 18px application-wide."""
+    """Global proxy style that expands checkbox indicators application-wide."""
 
     def pixelMetric(
         self,
@@ -129,3 +129,65 @@ class CheckBoxCursorFilter(QObject):
         if event.type() == QEvent.Type.Enter and isinstance(obj, QCheckBox):
             obj.setCursor(Qt.CursorShape.PointingHandCursor)
         return super().eventFilter(obj, event)
+
+
+# region Modern Scrollbar Stylesheet
+
+MODERN_SCROLLBAR_STYLE = """
+/* Vertical ScrollBar */
+QScrollBar:vertical {
+    background: rgba(0, 0, 0, 0.25); /* Subtle dark recessed rail */
+    width: 8px;
+    margin: 6px 0px 6px 0px;         /* 6px inset from top and bottom edges */
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 0.20); /* Light pill contrasting against dark rail */
+    min-height: 28px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+QScrollBar::handle:vertical:pressed {
+    background: rgba(255, 255, 255, 0.50);
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+    width: 0px;
+    background: none;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* Horizontal ScrollBar */
+QScrollBar:horizontal {
+    background: rgba(0, 0, 0, 0.25); /* Subtle dark recessed rail */
+    height: 8px;
+    margin: 0px 6px 0px 6px;         /* 6px inset from left and right edges */
+    border-radius: 4px;
+}
+QScrollBar::handle:horizontal {
+    background: rgba(255, 255, 255, 0.20);
+    min-width: 28px;
+    border-radius: 4px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+QScrollBar::handle:horizontal:pressed {
+    background: rgba(255, 255, 255, 0.50);
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+    background: none;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+"""
+
+# endregion
