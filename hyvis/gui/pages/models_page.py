@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
-from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea, install_smooth_scroll
+from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING, CardTheme
 from hyvis.gui.widgets import (
