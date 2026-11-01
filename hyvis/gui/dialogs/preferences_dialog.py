@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -39,8 +40,7 @@ class PreferencesDialog(QDialog):
         self.settings: GuiSettings = settings or get_gui_settings()
 
         self.setWindowTitle("Preferences")
-        self.resize(600, 480)
-        self.setMinimumWidth(590)
+        self.resize(0, 500)
         self.setModal(True)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -49,17 +49,24 @@ class PreferencesDialog(QDialog):
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 7, 12)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        scroll = SmoothScrollArea(self)
+        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_container = QWidget(self)
+        scroll_layout = QVBoxLayout(scroll_container)
+        scroll_layout.setContentsMargins(12, 0, 8, 0)
+        scroll_layout.setSpacing(0)
+        scroll_layout.addWidget(scroll)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(2, 2, 8, 2)
-        layout.setSpacing(14)
+        layout.setContentsMargins(0, 12, 0, 12)
+        layout.setSpacing(12)
 
         # 1. Startup & Presets Card
         self.startup_card = SectionCard("Startup & Loading", parent=container)
@@ -138,10 +145,29 @@ class PreferencesDialog(QDialog):
 
         layout.addStretch(1)
         scroll.setWidget(container)
-        root.addWidget(scroll, stretch=1)
+        root.addWidget(scroll_container, stretch=1)
+
+        # Keep the viewport wide enough for its content so disabling horizontal
+        # scrolling does not simply clip the cards at a narrower window size.
+        scroll_margins = scroll_layout.contentsMargins()
+        scroll_chrome_width = scroll.frameWidth() * 2 + scroll.verticalScrollBar().sizeHint().width()
+        minimum_content_width = container.minimumSizeHint().width()
+        self.setMinimumWidth(
+            max(
+                self.minimumWidth(),
+                minimum_content_width + scroll_margins.left() + scroll_margins.right() + scroll_chrome_width,
+            )
+        )
+
+        # Divider separating the preference sections from the action buttons
+        divider = QFrame(self)
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color: #333;")
+        root.addWidget(divider)
 
         # Bottom Action Buttons
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(12, 12, 12, 12)
         btn_row.setSpacing(8)
 
         btn_row.addStretch(1)

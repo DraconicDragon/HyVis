@@ -59,11 +59,12 @@ class UnsavedChangesDialog(QDialog):
         style = self.style()
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 14)
-        root.setSpacing(14)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         # 1. Content row: Standard Question Icon + Text
         content_row = QHBoxLayout()
+        content_row.setContentsMargins(12, 12, 12, 12)
         content_row.setSpacing(14)
 
         icon_lbl = QLabel(self)
@@ -75,7 +76,7 @@ class UnsavedChangesDialog(QDialog):
         text_layout = QVBoxLayout()
         text_layout.setSpacing(4)
         path_str = f"'{self._current_path.name}'" if self._current_path else "Untitled Configuration"
-        title_lbl = QLabel(f"The configuration {path_str} has unsaved changes.\n", self)
+        title_lbl = QLabel(f"The configuration {path_str} has unsaved changes.", self)
         text_layout.addWidget(title_lbl)
 
         info_lbl = QLabel(self._message or "What would you like to do before proceeding?", self)
@@ -86,6 +87,7 @@ class UnsavedChangesDialog(QDialog):
 
         # 2. Buttons row
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(12, 12, 12, 12)
         btn_row.setSpacing(8)
 
         # 2a. Left: Discard

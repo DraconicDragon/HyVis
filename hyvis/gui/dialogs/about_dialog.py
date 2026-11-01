@@ -37,11 +37,12 @@ class AboutDialog(QDialog):
 
     def _setup_ui(self) -> None:
         root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(18, 16, 18, 14)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
         # 1. Header (Title + Description on one line, followed by Link & License)
         header_layout = QVBoxLayout()
+        header_layout.setContentsMargins(12, 12, 12, 12)
         header_layout.setSpacing(4)
 
         title_desc_lbl = QLabel(
@@ -61,26 +62,45 @@ class AboutDialog(QDialog):
         root_layout.addLayout(header_layout)
 
         # Native divider separating header from dependencies
-        divider = QFrame(self)
+        divider_container = QWidget(self)
+        divider_layout = QHBoxLayout(divider_container)
+        divider_layout.setContentsMargins(12, 0, 12, 0)
+        divider_layout.setSpacing(0)
+
+        divider = QFrame(divider_container)
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setFrameShadow(QFrame.Shadow.Sunken)
-        root_layout.addWidget(divider)
+        divider_layout.addWidget(divider)
+        root_layout.addWidget(divider_container)
 
         # 2. Smooth Scrollable Details (Borderless)
-        self.scroll_area = SmoothScrollArea(self)
+        self.scroll_area = SmoothScrollArea(self, scroll_margin=(8, 4))
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
+        scroll_container = QWidget(self)
+        scroll_layout = QVBoxLayout(scroll_container)
+        scroll_layout.setContentsMargins(12, 0, 8, 0)
+        scroll_layout.setSpacing(0)
+        scroll_layout.addWidget(self.scroll_area)
+
         self.container = QWidget()
         self.content_layout = QVBoxLayout(self.container)
-        self.content_layout.setContentsMargins(0, 4, 10, 4)
+        self.content_layout.setContentsMargins(0, 12, 0, 12)
         self.content_layout.setSpacing(12)
 
         self.scroll_area.setWidget(self.container)
-        root_layout.addWidget(self.scroll_area, stretch=1)
+        root_layout.addWidget(scroll_container, stretch=1)
+
+        # Divider separating the scrollable details from the action buttons
+        actions_divider = QFrame(self)
+        actions_divider.setFrameShape(QFrame.Shape.HLine)
+        actions_divider.setStyleSheet("color: #333;")
+        root_layout.addWidget(actions_divider)
 
         # 3. Action Buttons
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(12, 12, 12, 12)
         btn_row.setSpacing(8)
 
         self.copy_btn = QPushButton("Copy Details", self)

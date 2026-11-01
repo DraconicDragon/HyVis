@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -116,7 +116,7 @@ class LaunchDialog(QDialog):
         self._rejected_preview_sent = False
 
         self.setWindowTitle("Launch HyVis")
-        self.resize(580, 480)
+        self.resize(580, 520)
         self.setMinimumWidth(520)
         self.setModal(True)
 
@@ -124,15 +124,15 @@ class LaunchDialog(QDialog):
         self._run_preflight()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
         # 1. Connection Header & Progress Status
         self.conn_label = QLabel("◌ Connecting to Hydrus...", self)
+        self.conn_label.setContentsMargins(12, 12, 12, 0)
         self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
-        layout.addWidget(self.conn_label)
+        root_layout.addWidget(self.conn_label)
 
         # 2. Candidate Files SectionCard
         self.files_card = SectionCard("Candidate Files", parent=self)
@@ -144,16 +144,17 @@ class LaunchDialog(QDialog):
         self.files_card.setContentLayout(files_layout)
         layout.addWidget(self.files_card)
 
-        # 3. Client Preview SectionCard (Dual preview targets)
+        # Client Preview SectionCard (Dual preview targets)
         p = self.cfg.hydrus.preview
         self.has_candidate_preview = bool(p and p.page_name)
         self.has_rejected_preview = bool(p and p.rejected_page_name)
         self.has_any_preview = self.has_candidate_preview or self.has_rejected_preview
 
-        self.preview_card = SectionCard("Client Previews", parent=self)
+        self.preview_card = SectionCard("Client Previews", parent=container)
 
-        # Top-right header re-check button (checks page statuses only)
+        # Top-right header re-check button
         self.recheck_btn = QPushButton("⟳ Re-check", self.preview_card)
+        self.recheck_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.recheck_btn.setToolTip("Re-query Hydrus to check preview page status and file counts")
         self.recheck_btn.clicked.connect(self._recheck_preview_pages)
         self.preview_card.addHeaderWidget(self.recheck_btn)
@@ -207,8 +208,8 @@ class LaunchDialog(QDialog):
         self.preview_card.setVisible(self.has_any_preview)
         layout.addWidget(self.preview_card)
 
-        # 4. Execution Option Checkbox
-        self.prompt_chk = QCheckBox("Prompt for confirmation before inference", self)
+        # Execution Option Checkbox
+        self.prompt_chk = QCheckBox("Prompt for confirmation before inference", container)
         self.prompt_chk.setChecked(False)  # Unchecked by default -> runs --yes
         self.prompt_chk.setToolTip(
             "When enabled, the terminal displays the full operation summary and pauses for an ENTER keypress "
@@ -217,10 +218,10 @@ class LaunchDialog(QDialog):
         )
         layout.addWidget(self.prompt_chk)
 
-        # 5. Neutral Informational Tip
+        # Informational Tip
         tip_label = QLabel(
             "Tip: Once local file paths are resolved after launching, Hydrus can be closed during inference if you need to free system resources.",
-            self,
+            container,
         )
         tip_label.setStyleSheet("color: #8a9ba5;")
         tip_label.setWordWrap(True)
@@ -231,6 +232,7 @@ class LaunchDialog(QDialog):
 
         # 6. Bottom Action Bar
         btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(12, 12, 12, 12)
         btn_row.setSpacing(10)
 
         self.copy_cmd_btn = QPushButton("Copy Command", self)
@@ -246,6 +248,7 @@ class LaunchDialog(QDialog):
         self.launch_btn = QPushButton("Launch in Terminal", self)
         self.launch_btn.setStyleSheet("font-weight: 600;")
         self.launch_btn.setEnabled(False)
+        self.launch_btn.setDefault(True)
         self.launch_btn.clicked.connect(self._on_launch_clicked)
         btn_row.addWidget(self.launch_btn)
 
@@ -479,8 +482,7 @@ class LaunchDialog(QDialog):
         return args
 
     def _on_copy_command(self) -> None:
-        extra_args = self._build_effective_args()
-        cmd_str = format_cli_command_str(self.config_path, extra_args)
+        cmd_str = self.cmd_edit.toPlainText().strip()
         QApplication.clipboard().setText(cmd_str)
 
         self.copy_cmd_btn.setText("✓ Copied!")
@@ -494,9 +496,7 @@ class LaunchDialog(QDialog):
             msg_box = QMessageBox(self)
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setWindowTitle("Hydrus Backup Reminder")
-            msg_box.setText(
-                "It is strongly recommended to create or update your Hydrus backup."
-            )
+            msg_box.setText("It is strongly recommended to create or update your Hydrus backup.")
             msg_box.setInformativeText("Are you ready to proceed with launching?")
             msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
             msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
