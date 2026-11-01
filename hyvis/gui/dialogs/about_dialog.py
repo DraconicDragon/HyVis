@@ -27,7 +27,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("About HyVis")
-        self.resize(520, 560)
+        self.resize(520, 575)
         self.setMinimumSize(440, 400)
         self.setModal(True)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
@@ -79,7 +79,7 @@ class AboutDialog(QDialog):
 
         scroll_container = QWidget(self)
         scroll_layout = QVBoxLayout(scroll_container)
-        scroll_layout.setContentsMargins(12, 0, 8, 0)
+        scroll_layout.setContentsMargins(16, 0, 8, 0)
         scroll_layout.setSpacing(0)
         scroll_layout.addWidget(self.scroll_area)
 
