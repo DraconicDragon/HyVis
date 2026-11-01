@@ -134,8 +134,27 @@ class LaunchDialog(QDialog):
         self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
         root_layout.addWidget(self.conn_label)
 
-        # 2. Candidate Files SectionCard
-        self.files_card = SectionCard("Candidate Files", parent=self)
+        # 2. Main Scroll Area for Cards and Options
+        from hyvis.gui.base_widgets import AutoResizingTextEdit, SmoothScrollArea
+        from hyvis.gui.theme import CardTheme
+
+        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        scroll_container = QWidget(self)
+        scroll_layout = QVBoxLayout(scroll_container)
+        scroll_layout.setContentsMargins(12, 0, 8, 0)
+        scroll_layout.setSpacing(0)
+        scroll_layout.addWidget(scroll)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 12, 0, 12)
+        layout.setSpacing(12)
+
+        # Candidate Files SectionCard
+        self.files_card = SectionCard("Candidate Files", parent=container)
         files_layout = QVBoxLayout()
         files_layout.setContentsMargins(0, 0, 0, 0)
         self.files_label = QLabel("Checking queries...", self.files_card)
@@ -216,6 +235,7 @@ class LaunchDialog(QDialog):
             "after resolving file paths, giving you a manual breakpoint before model inference begins.\n\n"
             "When disabled (default), the CLI runs with '--yes' and proceeds immediately to model execution."
         )
+        self.prompt_chk.toggled.connect(self._on_prompt_chk_toggled)
         layout.addWidget(self.prompt_chk)
 
         # Informational Tip
@@ -227,10 +247,72 @@ class LaunchDialog(QDialog):
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
 
-        # Elastic space: absorbs expansion when maximized so cards remain top-anchored
-        layout.addStretch(1)
+        # 3. Execution Command SectionCard
+        self.cmd_card = SectionCard("Execution Command", parent=container)
 
-        # 6. Bottom Action Bar
+        self.manual_cmd_chk = QCheckBox("Edit Directly (Advanced)", self.cmd_card)
+        self.manual_cmd_chk.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.manual_cmd_chk.setToolTip("Unlock the command text box to customize paths or pass arbitrary CLI flags.")
+        self.manual_cmd_chk.toggled.connect(self._on_manual_cmd_toggled)
+        self.cmd_card.addHeaderWidget(self.manual_cmd_chk)
+
+        cmd_layout = QVBoxLayout()
+        cmd_layout.setContentsMargins(0, 0, 0, 0)
+        cmd_layout.setSpacing(6)
+
+        # Vivid Warning Card (Shown only when manually editing)
+        self.manual_cmd_warning = SectionCard(theme=CardTheme.WARNING_VIVID, parent=self.cmd_card)
+        warn_layout = QVBoxLayout()
+        warn_layout.setContentsMargins(6, 4, 6, 4)
+        warn_lbl = QLabel(
+            "<b>Editing command:</b> Please verify arguments carefully.",
+            self.manual_cmd_warning,
+        )
+        warn_lbl.setStyleSheet("border: none; background: transparent;")
+        warn_lbl.setWordWrap(True)
+        warn_layout.addWidget(warn_lbl)
+        self.manual_cmd_warning.setContentLayout(warn_layout)
+        self.manual_cmd_warning.setVisible(False)
+        cmd_layout.addWidget(self.manual_cmd_warning)
+
+        # Auto-resizing Word-wrapped Command Text Box
+        from PySide6.QtGui import QFontDatabase
+
+        self.cmd_edit = AutoResizingTextEdit(self.cmd_card)
+        self.cmd_edit.setReadOnly(True)
+
+        fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        fixed_font.setPointSize(10)
+        self.cmd_edit.setFont(fixed_font)
+
+        self.cmd_edit.setStyleSheet(
+            "QTextEdit {"
+            "  background: rgba(0, 0, 0, 0.25);"
+            "  border: 1px solid rgba(255, 255, 255, 0.1);"
+            "  border-radius: 4px;"
+            "  padding: 4px 6px;"
+            "  color: #e0e0e0;"
+            "}"
+            "QTextEdit:focus {"
+            "  border-color: #38bdf8;"  # todo: use from theme.py or something and have it be accent color
+            "}"
+        )
+        cmd_layout.addWidget(self.cmd_edit)
+
+        self.cmd_card.setContentLayout(cmd_layout)
+        layout.addWidget(self.cmd_card)
+
+        layout.addStretch(1)
+        scroll.setWidget(container)
+        root_layout.addWidget(scroll_container, stretch=1)
+
+        # Divider separating the preflight details from the action buttons
+        actions_divider = QFrame(self)
+        actions_divider.setFrameShape(QFrame.Shape.HLine)
+        actions_divider.setStyleSheet("color: #333;")
+        root_layout.addWidget(actions_divider)
+
+        # 5. Bottom Action Bar
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(12, 12, 12, 12)
         btn_row.setSpacing(10)
@@ -252,7 +334,29 @@ class LaunchDialog(QDialog):
         self.launch_btn.clicked.connect(self._on_launch_clicked)
         btn_row.addWidget(self.launch_btn)
 
-        layout.addLayout(btn_row)
+        root_layout.addLayout(btn_row)
+
+        # Initial command text population
+        self._sync_command_text()
+
+    def _sync_command_text(self) -> None:
+        """Update command text from current settings when not in manual edit mode."""
+        if not self.manual_cmd_chk.isChecked():
+            extra_args = self._build_effective_args()
+            cmd_str = format_cli_command_str(self.config_path, extra_args)
+            self.cmd_edit.setPlainText(cmd_str)
+
+    def _on_prompt_chk_toggled(self, checked: bool) -> None:
+        del checked
+        self._sync_command_text()
+
+    def _on_manual_cmd_toggled(self, checked: bool) -> None:
+        self.manual_cmd_warning.setVisible(checked)
+        self.cmd_edit.setReadOnly(not checked)
+        if not checked:
+            self._sync_command_text()
+        else:
+            self.cmd_edit.setFocus()
 
     def _run_preflight(self) -> None:
         self.conn_label.setText("◌ Connecting to Hydrus...")
@@ -511,8 +615,30 @@ class LaunchDialog(QDialog):
                 settings.prompt_backup_before_launch = False
                 save_gui_settings(settings)
 
-        extra_args = self._build_effective_args()
-        ok = launch_in_external_terminal(self.config_path, extra_args)
+        # Launch using custom edited command or default auto-generated args
+        if self.manual_cmd_chk.isChecked():
+            import shlex
+
+            raw_str = self.cmd_edit.toPlainText().strip()
+            try:
+                cmd_parts = shlex.split(raw_str)
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Command Syntax",
+                    f"Could not parse the command line string:\n\n{exc}\n\nCheck for unclosed quotes or syntax errors.",
+                )
+                return
+
+            if not cmd_parts:
+                QMessageBox.warning(self, "Empty Command", "The command line is empty.")
+                return
+
+            ok = launch_in_external_terminal(raw_command=cmd_parts)
+        else:
+            extra_args = self._build_effective_args()
+            ok = launch_in_external_terminal(self.config_path, extra_args)
+
         if ok:
             self.accept()
         else:

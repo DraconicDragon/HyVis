@@ -31,16 +31,23 @@ def format_cli_command_str(config_path: Path | str, extra_args: list[str] | None
 
 
 def launch_in_external_terminal(
-    config_path: Path | str,
+    config_path: Path | str | None = None,
     extra_args: list[str] | None = None,
+    raw_command: list[str] | None = None,
 ) -> bool:
     """
     Launch HyVis in a detached, independent terminal window.
     Keeps the terminal window open on completion, failure, or crash so the user can review output.
 
+    Accepts either (config_path, extra_args) or a pre-tokenized raw_command list.
     Returns True if successfully launched, False if terminal detection failed.
     """
-    cmd_list = build_cli_command(config_path, extra_args)
+    if raw_command is not None:
+        cmd_list = list(raw_command)
+    elif config_path is not None:
+        cmd_list = build_cli_command(config_path, extra_args)
+    else:
+        raise ValueError("Either config_path or raw_command must be provided.")
 
     # 1. Windows: cmd.exe with 'start' and /k keeps the shell open after completion
     if sys.platform == "win32":
