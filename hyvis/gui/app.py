@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 
+from hyvis.gui.hot_restart import is_restart_child, run_with_restart
 from hyvis.gui.theme import MODERN_SCROLLBAR_STYLE, CheckBoxCursorFilter, HyVisAppStyle
 
 # just append stylesheet strings here with +
@@ -28,14 +29,14 @@ def parse_gui_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional path to an existing TOML configuration file to open.",
     )
     parser.add_argument(
-        "--reload",
+        "--hot-restart",
         action="store_true",
-        help="For development: Hot-Reload changed GUI modules without restarting the app.",
+        help="For development: restart the GUI after its window is closed.",
     )
     return parser.parse_args(argv)
 
 
-def run_gui(initial_config: Path | str | None = None, *, reload_on_change: bool = False) -> int:
+def run_gui(initial_config: Path | str | None = None) -> int:
     """Initialize and run the desktop PySide6 application."""
 
     # On Linux/BSD, tell Qt to use the modern native system file chooser via XDG Desktop Portal
@@ -97,17 +98,17 @@ def run_gui(initial_config: Path | str | None = None, *, reload_on_change: bool 
 
     window = MainWindow(state)
     window.show()
-    if reload_on_change:
-        from hyvis.gui.hot_reload import HotReloadManager
-
-        HotReloadManager(app, window.rebuild_config_pages).start()
 
     return app.exec()
 
 
 def cli() -> None:
     args = parse_gui_args()
-    sys.exit(run_gui(args.config, reload_on_change=args.reload))
+    if is_restart_child():
+        sys.exit(run_gui(args.config))
+    if args.hot_restart:
+        sys.exit(run_with_restart(sys.argv[1:]))
+    sys.exit(run_gui(args.config))
 
 
 if __name__ == "__main__":

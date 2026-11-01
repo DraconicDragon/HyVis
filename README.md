@@ -245,6 +245,8 @@ Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
 - <a id="extra-hash-file"></a>`--extra-hash-file PATH`
   For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) Process a text file containing one SHA256 hash per line.
+- `hyvis-gui --hot-restart`
+  GUI-only. For development mainly. Continuously restarts app after window is closed.
 
 >[!TIP]
 > If a run was interrupted or you ran with `--infer-only`, all tags remain safely queued in the database. Run `hyvis <config.toml> --push-only` whenever you are ready to send them to Hydrus.
