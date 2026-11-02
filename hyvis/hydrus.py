@@ -5,12 +5,15 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import hydrus_api
 import hydrus_api.utils
 
 from hyvis.config import ALLOWED_MIMES, AppConfig, PageQueryConfig, TagQueryConfig
+
+if TYPE_CHECKING:
+    from hyvis.db import TagActionType
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +498,7 @@ class HydrusClient:
     def apply_tag_updates(
         self,
         file_hash: str,
-        service_updates: dict[str, dict[str, list[str]]],
+        service_updates: dict[str, dict[TagActionType, list[str]]],
     ) -> None:
         """
         Apply batched tag additions and deletions across multiple services for a single file in one request.

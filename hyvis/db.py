@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MIN_CACHE_SCORE = 0.01
 
 FileStatus = Literal["active", "missing_on_disk", "deleted_from_hydrus", "error"]
+TagActionType = Literal["add", "delete"]
 PushAction = Literal["add_tags", "delete_tags"]
 
 
@@ -315,7 +316,7 @@ class Database:
         if not tags:
             return
 
-        act_key = "delete" if action == "delete_tags" else "add"
+        act_key: TagActionType = "delete" if action == "delete_tags" else "add"
 
         row = self.conn.execute(
             "SELECT payload_json FROM push_queue WHERE file_hash = ?",
