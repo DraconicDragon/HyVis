@@ -383,7 +383,8 @@ class Database:
         for file_hash, payload_json in rows:
             try:
                 payload = json.loads(payload_json)
-            except Exception:
+            except Exception as exc:
+                logger.error("Corrupt payload_json for %s: %s", file_hash[:8], exc)
                 payload = {}
             results.append((file_hash, payload))
         return results
