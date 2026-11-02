@@ -15,6 +15,9 @@ import asyncio
 import logging
 import sys
 import time
+from typing import Any
+
+import hydrus_api
 
 from hyvis.db import Database
 from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
@@ -60,32 +63,57 @@ async def drain_push_queue(
 ) -> tuple[int, int]:
     """
     Drain pending items from push_queue until empty.
+    Processes one consolidated request per file across all services.
     Returns: (total_pushed_ok, total_errors)
     """
+
     total_ok = 0
     total_err = 0
 
     while True:
-        # 1. Fetch next batch of actionable tasks (attempts < 3)
-        tasks = db.fetch_push_batch(limit=batch_size, max_attempts=3)
-        if not tasks:
+        # 1. Fetch next batch of actionable file payloads (attempts < 3)
+        files = db.fetch_push_batch(limit=batch_size, max_attempts=3)
+        if not files:
             break
 
-        successful_tasks: list[tuple[str, str, str]] = []
+        successful_hashes: list[str] = []
 
         try:
-            for file_hash, service_key, action, tags in tasks:
-                if not tags:
-                    successful_tasks.append((file_hash, service_key, action))
+            for file_hash, payload in files:
+                # 2. Format payload: resolve conflicts (delete wins) and map to Hydrus TagActions
+                actions_payload: dict[str, dict[Any, list[str]]] = {}
+                has_any_action = False
+
+                for svc_key, acts in payload.items():
+                    add_tags = list(dict.fromkeys(acts.get("add", [])))
+                    del_tags = list(dict.fromkeys(acts.get("delete", [])))
+
+                    # If a tag is in both add and delete, delete takes precedence
+                    del_set = set(del_tags)
+                    add_tags = [t for t in add_tags if t not in del_set]
+
+                    svc_actions: dict[Any, list[str]] = {}
+                    if add_tags:
+                        svc_actions[hydrus_api.TagAction.ADD] = add_tags
+                        has_any_action = True
+                    if del_tags:
+                        svc_actions[hydrus_api.TagAction.DELETE] = del_tags
+                        has_any_action = True
+
+                    if svc_actions:
+                        actions_payload[svc_key] = svc_actions
+
+                # 3. If payload has no tags remaining, clear the file without sending an empty request
+                if not has_any_action:
+                    successful_hashes.append(file_hash)
+                    total_ok += 1
+                    if progress:
+                        progress.tick(processed=1)
                     continue
 
                 try:
-                    if action == "add_tags":
-                        hydrus.add_tags([file_hash], service_key, tags)
-                    elif action == "delete_tags":
-                        hydrus.delete_tags([file_hash], [service_key], tags)
-
-                    successful_tasks.append((file_hash, service_key, action))
+                    hydrus.apply_tag_updates(file_hash, actions_payload)
+                    successful_hashes.append(file_hash)
                     total_ok += 1
                     if progress:
                         progress.tick(processed=1)
@@ -104,19 +132,18 @@ async def drain_push_queue(
                     if progress:
                         progress.tick(errors=1)
 
-                    # 404: File was deleted from Hydrus!
+                    # 404: File was deleted from Hydrus
                     if hasattr(exc, "status_code") and exc.status_code == 404:
                         logger.warning("File %s was deleted from Hydrus; purging from queue.", file_hash[:8])
                         db.mark_file_status(file_hash, "deleted_from_hydrus")
                         db.clear_file_from_push_queue(file_hash)
                     else:
                         logger.error("Failed pushing to Hydrus for %s: %s", file_hash[:8], exc)
-                        # Increment attempts so this broken item does not stall the queue forever
-                        db.record_push_attempt_error(file_hash, service_key, action, str(exc))
+                        db.record_push_attempt_error(file_hash, str(exc))
 
         finally:
-            # 2. Always clear successful tasks, even on early return, disconnect, or Ctrl+C
-            if successful_tasks:
-                db.remove_from_push_queue(successful_tasks)
+            # 4. Always clear successfully pushed files, even on disconnect or Ctrl+C
+            if successful_hashes:
+                db.remove_from_push_queue(successful_hashes)
 
     return total_ok, total_err

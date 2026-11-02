@@ -492,6 +492,36 @@ class HydrusClient:
             )
 
     @_handle_hydrus_errors
+    def apply_tag_updates(
+        self,
+        file_hash: str,
+        service_keys_to_actions_to_tags: dict[str, dict[Any, list[str]]],
+    ) -> None:
+        """
+        Apply batched tag additions and deletions across multiple services for a single file in one request.
+        """
+        if not file_hash or not service_keys_to_actions_to_tags:
+            return
+
+        cleaned: dict[str, dict[Any, list[str]]] = {}
+        for svc_key, actions_map in service_keys_to_actions_to_tags.items():
+            valid_actions: dict[Any, list[str]] = {}
+            for action, tags in actions_map.items():
+                cleaned_tags = [str(t) for t in tags if t]
+                if cleaned_tags:
+                    valid_actions[action] = cleaned_tags
+            if valid_actions:
+                cleaned[svc_key] = valid_actions
+
+        if not cleaned:
+            return
+
+        self._client.add_tags(
+            hashes=[file_hash],
+            service_keys_to_actions_to_tags=cleaned,
+        )
+
+    @_handle_hydrus_errors
     def add_files_to_page(self, page_key: str, hashes: list[str]) -> None:
         """Add files to a specific page using the native hydrus-api wrapper."""
         if not hashes:

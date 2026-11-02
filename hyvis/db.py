@@ -48,23 +48,17 @@ CREATE TABLE IF NOT EXISTS inference_cache (
     FOREIGN KEY (file_hash) REFERENCES known_files(file_hash) ON DELETE CASCADE
 );
 
--- 3. Push Queue: Dedicated to-do list for Hydrus tag additions & cleanups
+-- 3. Push Queue: Dedicated to-do list for Hydrus tag additions & cleanups (1 row per file)
 CREATE TABLE IF NOT EXISTS push_queue (
-    file_hash       TEXT NOT NULL,
-    service_key     TEXT NOT NULL,
-    action          TEXT NOT NULL, -- 'add_tags', 'delete_tags'
-    tags_json       TEXT NOT NULL, -- JSON array of tags: ["tag1", "tag2"]
+    file_hash       TEXT PRIMARY KEY,
+    payload_json    TEXT NOT NULL, -- JSON object: {"<service_key>": {"add": [...], "delete": [...]}}
     attempts        INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT,
-    created_at      TEXT NOT NULL,
-    PRIMARY KEY (file_hash, service_key, action)
+    created_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_cache_lookup
     ON inference_cache(model_id, file_hash);
-
-CREATE INDEX IF NOT EXISTS idx_queue_service
-    ON push_queue(service_key);
 """
 
 # endregion
@@ -309,49 +303,53 @@ class Database:
         action: PushAction = "add_tags",
     ) -> None:
         """
-        Enqueue tags to be pushed to or removed from Hydrus.
-        If a task already exists for this (file, service, action), tags are merged without loss.
+        Enqueue tags to be pushed to or removed from Hydrus for a file.
+        Payload format: {"<service_key>": {"add": [tags...], "delete": [tags...]}}
         """
         if not tags:
             return
 
-        # Check for an existing task to avoid overwriting tags from earlier models
-        existing = self.conn.execute(
-            "SELECT tags_json FROM push_queue WHERE file_hash = ? AND service_key = ? AND action = ?",
-            (file_hash, service_key, action),
+        act_key = "delete" if action == "delete_tags" else "add"
+
+        row = self.conn.execute(
+            "SELECT payload_json FROM push_queue WHERE file_hash = ?",
+            (file_hash,),
         ).fetchone()
 
-        if existing:
+        if row:
             try:
-                existing_tags = json.loads(existing[0])
+                payload = json.loads(row[0])
             except Exception:
-                existing_tags = []
-            merged = list(dict.fromkeys(existing_tags + list(tags)))
-            self.conn.execute(
-                """
-                UPDATE push_queue
-                SET tags_json = ?, attempts = 0, last_error = NULL, created_at = ?
-                WHERE file_hash = ? AND service_key = ? AND action = ?
-                """,
-                (json.dumps(merged), _now_iso(), file_hash, service_key, action),
-            )
+                payload = {}
         else:
-            self.conn.execute(
-                """
-                INSERT INTO push_queue (file_hash, service_key, action, tags_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (file_hash, service_key, action, json.dumps(list(tags)), _now_iso()),
-            )
+            payload = {}
+
+        svc_entry = payload.setdefault(service_key, {})
+        existing = svc_entry.get(act_key, [])
+        merged = list(dict.fromkeys(existing + [str(t) for t in tags]))
+        svc_entry[act_key] = merged
+
+        self.conn.execute(
+            """
+            INSERT INTO push_queue (file_hash, payload_json, attempts, last_error, created_at)
+            VALUES (?, ?, 0, NULL, ?)
+            ON CONFLICT(file_hash) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                attempts     = 0,
+                last_error   = NULL,
+                created_at   = excluded.created_at
+            """,
+            (file_hash, json.dumps(payload), _now_iso()),
+        )
         self.batch_tick()
 
     def has_pending_pushes(self) -> bool:
-        """Check if any actionable items remain in the push queue."""
+        """Check if any actionable files remain in the push queue."""
         row = self.conn.execute("SELECT 1 FROM push_queue WHERE attempts < 3 LIMIT 1").fetchone()
         return row is not None
 
     def get_pending_push_count(self) -> int:
-        """Return the total count of actionable operations in the push queue."""
+        """Return the total count of actionable files in the push queue."""
         row = self.conn.execute("SELECT COUNT(*) FROM push_queue WHERE attempts < 3").fetchone()
         return row[0] if row else 0
 
@@ -359,61 +357,62 @@ class Database:
         self,
         limit: int = 50,
         max_attempts: int = 3,
-    ) -> list[tuple[str, str, PushAction, list[str]]]:
+    ) -> list[tuple[str, dict[str, dict[str, list[str]]]]]:
         """
-        Fetch a batch of pending push tasks that have not exceeded max_attempts.
-        Returns: list of (file_hash, service_key, action, list_of_tags)
+        Fetch a batch of pending file payloads that have not exceeded max_attempts.
+        Returns: list of (file_hash, payload_dict)
         """
         rows = self.conn.execute(
             """
-            SELECT file_hash, service_key, action, tags_json
+            SELECT file_hash, payload_json
             FROM push_queue
             WHERE attempts < ?
+            ORDER BY rowid
             LIMIT ?
             """,
             (max_attempts, limit),
         ).fetchall()
 
-        results: list[tuple[str, str, PushAction, list[str]]] = []
-        for file_hash, service_key, action, tags_json in rows:
+        results: list[tuple[str, dict[str, dict[str, list[str]]]]] = []
+        for file_hash, payload_json in rows:
             try:
-                tags = json.loads(tags_json)
+                payload = json.loads(payload_json)
             except Exception:
-                tags = []
-            results.append((file_hash, service_key, action, tags))
+                payload = {}
+            results.append((file_hash, payload))
         return results
 
-    def record_push_attempt_error(self, file_hash: str, service_key: str, action: str, error_msg: str) -> None:
-        """Increment attempt counter and record error message for a failed push task."""
+    def record_push_attempt_error(self, file_hash: str, error_msg: str) -> None:
+        """Increment attempt counter and record error message for a failed push file."""
         self.conn.execute(
             """
             UPDATE push_queue
             SET attempts = attempts + 1, last_error = ?
-            WHERE file_hash = ? AND service_key = ? AND action = ?
+            WHERE file_hash = ?
             """,
-            (str(error_msg)[:500], file_hash, service_key, action),
+            (str(error_msg)[:500], file_hash),
         )
         self.commit()
 
     def remove_from_push_queue(
         self,
-        tasks: Sequence[tuple[str, str, str]],
+        file_hashes: Sequence[str],
     ) -> None:
         """
-        Remove successfully pushed tasks from the queue.
-        tasks: Sequence of (file_hash, service_key, action)
+        Remove successfully pushed files from the queue.
+        file_hashes: Sequence of file_hash strings.
         """
-        if not tasks:
+        if not file_hashes:
             return
 
         with self.transaction():
             self.conn.executemany(
-                "DELETE FROM push_queue WHERE file_hash = ? AND service_key = ? AND action = ?",
-                tasks,
+                "DELETE FROM push_queue WHERE file_hash = ?",
+                [(h,) for h in file_hashes],
             )
 
     def clear_file_from_push_queue(self, file_hash: str) -> None:
-        """Remove all tasks for a specific file (e.g. if file was deleted in Hydrus)."""
+        """Remove a specific file from the queue (e.g. if deleted in Hydrus)."""
         self.conn.execute("DELETE FROM push_queue WHERE file_hash = ?", (file_hash,))
         self.commit()
 

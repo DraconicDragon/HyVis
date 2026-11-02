@@ -114,11 +114,11 @@ class DryRunDatabase(Database):
     def get_pending_push_count(self) -> int:
         return len(self.simulated_files_with_tags)
 
-    def record_push_attempt_error(self, file_hash: str, service_key: str, action: str, error_msg: str) -> None:
-        del file_hash, service_key, action, error_msg
+    def record_push_attempt_error(self, file_hash: str, error_msg: str) -> None:
+        del file_hash, error_msg
 
-    def remove_from_push_queue(self, tasks: Sequence[tuple[str, str, str]]) -> None:
-        del tasks
+    def remove_from_push_queue(self, file_hashes: Sequence[str]) -> None:
+        del file_hashes
 
     def clear_file_from_push_queue(self, file_hash: str) -> None:
         del file_hash
