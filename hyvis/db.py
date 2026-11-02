@@ -94,6 +94,12 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA cache_size = -65536")  # 64MiB
         self._conn.executescript(_SCHEMA_SQL)
+
+        # Apply sequential versioned migrations
+        from hyvis.db_migrations import apply_migrations
+
+        apply_migrations(self._conn, db_path=self._path)
+
         self._conn.commit()
         logger.debug("HyVis database opened at %s (WAL mode, min_cache_score=%.3f)", self._path, self._min_cache_score)
 
