@@ -143,6 +143,8 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_to_v1,
 ]
 
+LATEST_VERSION: int = len(MIGRATIONS)
+
 
 def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None) -> None:
     """
@@ -151,24 +153,17 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
     """
     row = conn.execute("PRAGMA user_version").fetchone()
     current_version: int = row[0] if row else 0
-    total_migrations = len(MIGRATIONS)
 
-    if current_version >= total_migrations:
+    if current_version >= LATEST_VERSION:
         return
 
-    logger.debug("Database user_version=%d (target=%d)", current_version, total_migrations)
+    logger.debug("Database user_version=%d (target=%d)", current_version, LATEST_VERSION)
 
-    # Only create a backup if the database already contains existing data (skips brand new databases)
-    has_data = False
-    try:
-        has_data = conn.execute("SELECT 1 FROM known_files LIMIT 1").fetchone() is not None
-    except Exception:
-        pass
-
-    if db_path and has_data:
+    # Pre-migration safety backup on existing databases
+    if db_path:
         _backup_database(conn, Path(db_path), current_version)
 
-    for idx in range(current_version, total_migrations):
+    for idx in range(current_version, LATEST_VERSION):
         target_version = idx + 1
         migration_fn = MIGRATIONS[idx]
         fn_name = getattr(migration_fn, "__name__", f"step_{target_version}")
@@ -177,7 +172,7 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
         # Force an explicit transaction so DDL (DROP TABLE, CREATE TABLE) is 100% atomic
         old_isolation = conn.isolation_level
         try:
-            conn.isolation_level = None  # Autocommit mode to allow manual transaction control
+            conn.isolation_level = None  # Autocommit mode for manual transaction control
             conn.execute("BEGIN IMMEDIATE")
             migration_fn(conn)
             conn.execute(f"PRAGMA user_version = {target_version}")
@@ -189,7 +184,7 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
         finally:
             conn.isolation_level = old_isolation
 
-    logger.info("Database migrations complete. Current schema version: v%d", total_migrations)
+    logger.info("Database migrations complete. Current schema version: v%d", LATEST_VERSION)
 
 
 # endregion

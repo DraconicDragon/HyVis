@@ -84,6 +84,8 @@ class Database:
         if self._conn is not None:
             return
 
+        is_new_db = not self._path.exists()
+
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(
             str(self._path),
@@ -97,9 +99,14 @@ class Database:
         self._conn.executescript(_SCHEMA_SQL)
 
         # Apply sequential versioned migrations
-        from hyvis.db_migrations import apply_migrations
+        from hyvis.db_migrations import LATEST_VERSION, apply_migrations
 
-        apply_migrations(self._conn, db_path=self._path)
+        if is_new_db:
+            # New installation: schema is already current, stamp version directly
+            self._conn.execute(f"PRAGMA user_version = {LATEST_VERSION}")
+        else:
+            # Existing database: inspect user_version and upgrade if older
+            apply_migrations(self._conn, db_path=self._path)
 
         self._conn.commit()
         logger.debug("HyVis database opened at %s (WAL mode, min_cache_score=%.3f)", self._path, self._min_cache_score)
