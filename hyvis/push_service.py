@@ -15,9 +15,6 @@ import asyncio
 import logging
 import sys
 import time
-from typing import Any
-
-import hydrus_api
 
 from hyvis.db import Database
 from hyvis.hydrus import HydrusClient, HydrusConnectionError, HydrusError
@@ -66,45 +63,22 @@ async def drain_push_queue(
     Processes one consolidated request per file across all services.
     Returns: (total_pushed_ok, total_errors)
     """
-
     total_ok = 0
     total_err = 0
 
     while True:
-        # 1. Fetch next batch of actionable file payloads (attempts < 3)
+        # Fetch next batch of actionable file payloads (attempts < 3)
         files = db.fetch_push_batch(limit=batch_size, max_attempts=3)
         if not files:
             break
 
+        logger.debug("Processing push batch: %d file(s) fetched from queue", len(files))
         successful_hashes: list[str] = []
 
         try:
             for file_hash, payload in files:
-                # 2. Format payload: resolve conflicts (delete wins) and map to Hydrus TagActions
-                actions_payload: dict[str, dict[Any, list[str]]] = {}
-                has_any_action = False
-
-                for svc_key, acts in payload.items():
-                    add_tags = list(dict.fromkeys(acts.get("add", [])))
-                    del_tags = list(dict.fromkeys(acts.get("delete", [])))
-
-                    # If a tag is in both add and delete, delete takes precedence
-                    del_set = set(del_tags)
-                    add_tags = [t for t in add_tags if t not in del_set]
-
-                    svc_actions: dict[Any, list[str]] = {}
-                    if add_tags:
-                        svc_actions[hydrus_api.TagAction.ADD] = add_tags
-                        has_any_action = True
-                    if del_tags:
-                        svc_actions[hydrus_api.TagAction.DELETE] = del_tags
-                        has_any_action = True
-
-                    if svc_actions:
-                        actions_payload[svc_key] = svc_actions
-
-                # 3. If payload has no tags remaining, clear the file without sending an empty request
-                if not has_any_action:
+                # If payload has no operations, clear without an API call
+                if not any(payload.get(svc, {}).get("add") or payload.get(svc, {}).get("delete") for svc in payload):
                     successful_hashes.append(file_hash)
                     total_ok += 1
                     if progress:
@@ -112,9 +86,10 @@ async def drain_push_queue(
                     continue
 
                 try:
-                    hydrus.apply_tag_updates(file_hash, actions_payload)
+                    hydrus.apply_tag_updates(file_hash, payload)
                     successful_hashes.append(file_hash)
                     total_ok += 1
+                    logger.debug("Successfully pushed tag updates for %s", file_hash[:8])
                     if progress:
                         progress.tick(processed=1)
 
@@ -122,7 +97,7 @@ async def drain_push_queue(
                     if wait_for_hydrus:
                         print(_c("\n  Hydrus connection lost during push.", RED))
                         await _wait_for_hydrus_reconnect(hydrus, wait_interval)
-                        break  # Retry remaining items in next while loop iteration
+                        break  # Retry remaining items in next iteration
                     else:
                         logger.warning("Hydrus offline. Suspending push: %s", exc)
                         return total_ok, total_err
@@ -134,16 +109,17 @@ async def drain_push_queue(
 
                     # 404: File was deleted from Hydrus
                     if hasattr(exc, "status_code") and exc.status_code == 404:
-                        logger.warning("File %s was deleted from Hydrus; purging from queue.", file_hash[:8])
+                        logger.warning("File %s was deleted from Hydrus; purging from push queue.", file_hash[:8])
                         db.mark_file_status(file_hash, "deleted_from_hydrus")
                         db.clear_file_from_push_queue(file_hash)
                     else:
-                        logger.error("Failed pushing to Hydrus for %s: %s", file_hash[:8], exc)
+                        logger.error("Failed pushing tags for %s: %s", file_hash[:8], exc)
                         db.record_push_attempt_error(file_hash, str(exc))
 
         finally:
-            # 4. Always clear successfully pushed files, even on disconnect or Ctrl+C
+            # Always clear successfully pushed files, even on disconnect or Ctrl+C
             if successful_hashes:
                 db.remove_from_push_queue(successful_hashes)
+                logger.debug("Flushed %d completed file(s) from push_queue", len(successful_hashes))
 
     return total_ok, total_err

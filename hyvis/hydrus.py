@@ -495,30 +495,40 @@ class HydrusClient:
     def apply_tag_updates(
         self,
         file_hash: str,
-        service_keys_to_actions_to_tags: dict[str, dict[Any, list[str]]],
+        service_updates: dict[str, dict[str, list[str]]],
     ) -> None:
         """
         Apply batched tag additions and deletions across multiple services for a single file in one request.
+        Translates 'add' and 'delete' keys into Hydrus TagActions internally.
         """
-        if not file_hash or not service_keys_to_actions_to_tags:
+        if not file_hash or not service_updates:
             return
 
-        cleaned: dict[str, dict[Any, list[str]]] = {}
-        for svc_key, actions_map in service_keys_to_actions_to_tags.items():
-            valid_actions: dict[Any, list[str]] = {}
-            for action, tags in actions_map.items():
-                cleaned_tags = [str(t) for t in tags if t]
-                if cleaned_tags:
-                    valid_actions[action] = cleaned_tags
-            if valid_actions:
-                cleaned[svc_key] = valid_actions
+        actions_map: dict[str, dict[Any, list[str]]] = {}
 
-        if not cleaned:
+        for svc_key, acts in service_updates.items():
+            add_tags = list(dict.fromkeys(acts.get("add", [])))
+            del_tags = list(dict.fromkeys(acts.get("delete", [])))
+
+            # Delete takes precedence if tag is present in both
+            del_set = set(del_tags)
+            add_tags = [t for t in add_tags if t not in del_set]
+
+            svc_actions: dict[Any, list[str]] = {}
+            if add_tags:
+                svc_actions[hydrus_api.TagAction.ADD] = add_tags
+            if del_tags:
+                svc_actions[hydrus_api.TagAction.DELETE] = del_tags
+
+            if svc_actions:
+                actions_map[svc_key] = svc_actions
+
+        if not actions_map:
             return
 
         self._client.add_tags(
             hashes=[file_hash],
-            service_keys_to_actions_to_tags=cleaned,
+            service_keys_to_actions_to_tags=actions_map,
         )
 
     @_handle_hydrus_errors
