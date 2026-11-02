@@ -371,7 +371,7 @@ class Database:
         self,
         limit: int = 50,
         max_attempts: int = 3,
-    ) -> list[tuple[str, dict[str, dict[str, list[str]]]]]:
+    ) -> list[tuple[str, dict[str, dict[TagActionType, list[str]]]]]:
         """
         Fetch a batch of pending file payloads that have not exceeded max_attempts.
         Returns: list of (file_hash, payload_dict)
@@ -387,7 +387,7 @@ class Database:
             (max_attempts, limit),
         ).fetchall()
 
-        results: list[tuple[str, dict[str, dict[str, list[str]]]]] = []
+        results: list[tuple[str, dict[str, dict[TagActionType, list[str]]]]] = []
         for file_hash, payload_json in rows:
             try:
                 payload = json.loads(payload_json)
