@@ -463,38 +463,6 @@ class HydrusClient:
             logger.error("Path resolution failed for %s: %s", info.file_hash, exc)
 
     @_handle_hydrus_errors
-    def add_tags(
-        self,
-        hashes: list[str],
-        service_key: str,
-        tags: list[str],
-    ) -> None:
-        """Apply tags to hashes on service_key using action ADD."""
-        if not tags or not hashes:
-            return
-        self._client.add_tags(
-            hashes=hashes,
-            service_keys_to_actions_to_tags={service_key: {hydrus_api.TagAction.ADD: tags}},
-        )
-
-    @_handle_hydrus_errors
-    def delete_tags(
-        self,
-        hashes: list[str],
-        service_keys: list[str],
-        tags: list[str],
-    ) -> None:
-        """Remove tags from hashes across the specified service keys."""
-        if not tags or not hashes or not service_keys:
-            return
-
-        for key in service_keys:
-            self._client.add_tags(
-                hashes=hashes,
-                service_keys_to_actions_to_tags={key: {hydrus_api.TagAction.DELETE: tags}},
-            )
-
-    @_handle_hydrus_errors
     def apply_tag_updates(
         self,
         file_hash: str,
