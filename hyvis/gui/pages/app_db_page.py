@@ -81,7 +81,7 @@ class AppDbPage(BaseConfigPage):
         self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, container)
         self.cache_raw_chk.setObjectName("cache_raw_predictions")
         setup_field_tooltip(self.cache_raw_chk, db_fields["cache_raw_predictions"])
-        self.cache_raw_chk.setChecked(True)
+        self.cache_raw_chk.setChecked(False)
         self.cache_raw_chk.toggled.connect(lambda _: self._on_field_changed())
         db_layout.addRow("", self.cache_raw_chk)
 
