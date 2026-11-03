@@ -1,47 +1,103 @@
 """
-parity.py — Automated contract check to ensure the GUI exposes all Pydantic settings.
+parity.py — Automated contract check ensuring the GUI exposes all Pydantic settings.
+Dynamically traverses Pydantic type annotations to audit GUI data without hardcoded lists.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import types
+from collections.abc import Mapping, Sequence
+from typing import Any, Union, get_args, get_origin
+
+from pydantic import BaseModel
 
 from hyvis.config import AppConfig
 
 
-def get_expected_schema_keys() -> dict[str, set[str]]:
-    """Return all field names grouped by top-level section from Pydantic models."""
-    return {
-        "hydrus": set(AppConfig.model_fields["hydrus"].annotation.model_fields.keys()),
-        "output_filter": set(AppConfig.model_fields["output_filter"].annotation.model_fields.keys()),
-        "database": set(AppConfig.model_fields["database"].annotation.model_fields.keys()),
-        "hyvis": set(AppConfig.model_fields["hyvis"].annotation.model_fields.keys()),
-    }
-
-
-def audit_gui_parity(gui_data: dict[str, Any]) -> tuple[list[str], list[str]]:
+def _resolve_submodel(annotation: Any) -> tuple[type[BaseModel] | None, str]:
     """
-    Compare a dictionary produced by MainWindow._gather_config_dict()
-    against AppConfig schema.
-
-    Returns:
-        (missing_fields, extra_fields)
+    Inspects a field's type annotation using standard Python typing reflection.
+    Returns (ModelClass, kind) where kind is 'model', 'list', 'dict', or 'leaf'.
     """
-    expected = get_expected_schema_keys()
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    # Unwrap Optional[T] / Union[T, None]
+    if origin is types.UnionType or origin is Union:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            annotation = non_none[0]
+            origin = get_origin(annotation)
+            args = get_args(annotation)
+
+    # 1. Direct BaseModel (e.g. OutputTagServices, PreviewConfig)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation, "model"
+
+    # 2. List of BaseModels (e.g. list[AddTagConfig], list[TagQueryConfig])
+    if origin in (list, Sequence) and args:
+        item_cls = _resolve_submodel(args[0])[0]
+        if item_cls:
+            return item_cls, "list"
+
+    # 3. Dict of BaseModels (e.g. dict[str, CategoryThresholdConfig])
+    if origin in (dict, Mapping) and len(args) == 2:
+        val_cls = _resolve_submodel(args[1])[0]
+        if val_cls:
+            return val_cls, "dict"
+
+    return None, "leaf"
+
+
+def _audit_model(
+    model_cls: type[BaseModel],
+    data: dict[str, Any],
+    prefix: str,
+    missing: list[str],
+    extra: list[str],
+) -> None:
+    # 1. Check for extra keys in GUI data that don't exist in Pydantic schema
+    for k in data.keys():
+        if k not in model_cls.model_fields:
+            extra.append(f"{prefix}.{k}" if prefix else k)
+
+    # 2. Check each declared field in the Pydantic model
+    for field_name, field_info in model_cls.model_fields.items():
+        current_path = f"{prefix}.{field_name}" if prefix else field_name
+
+        # Model-specific filter overrides are checked under root output_filter
+        if prefix == "inference.models" and field_name == "output_filter":
+            if field_name not in data:
+                missing.append(current_path)
+            continue
+
+        if field_name not in data:
+            missing.append(current_path)
+            continue
+
+        val = data[field_name]
+        sub_model, kind = _resolve_submodel(field_info.annotation)
+
+        if kind == "model" and sub_model is not None:
+            if isinstance(val, dict):
+                _audit_model(sub_model, val, current_path, missing, extra)
+        elif kind == "list" and sub_model is not None:
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+                _audit_model(sub_model, val[0], current_path, missing, extra)
+        elif kind == "dict" and sub_model is not None and isinstance(val, dict) and len(val) > 0:
+            first_val = next(iter(val.values()))
+            if isinstance(first_val, dict):
+                _audit_model(sub_model, first_val, current_path, missing, extra)
+
+
+def audit_gui_parity(data: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """
+    Compare serialized GUI dictionary against AppConfig schema models dynamically.
+    Returns: (missing_fields, extra_fields)
+    """
     missing: list[str] = []
     extra: list[str] = []
 
-    for section, expected_keys in expected.items():
-        actual_keys = set(gui_data.get(section, {}).keys())
+    _audit_model(AppConfig, data, "", missing, extra)
 
-        # Check for fields in config.py that the GUI forgot to include
-        diff_missing = expected_keys - actual_keys
-        for k in diff_missing:
-            missing.append(f"[{section}].{k}")
-
-        # Check for fields the GUI emitted that don't exist in config.py
-        diff_extra = actual_keys - expected_keys
-        for k in diff_extra:
-            extra.append(f"[{section}].{k}")
-
-    return missing, extra
+    return sorted(missing), sorted(extra)
