@@ -20,6 +20,7 @@ from hyvis.gui.theme.tokens import (
     ButtonSize,
     ButtonVariant,
     CardTheme,
+    ThemeProperty,
     ThemeTokens,
     WidgetState,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "HyVisAppStyle",
     "ThemeManager",
     "ThemePreset",
+    "ThemeProperty",
     "ThemeTokens",
     "WidgetState",
     "adjust_color_lightness",

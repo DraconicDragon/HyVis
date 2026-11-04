@@ -13,11 +13,12 @@ from PySide6.QtWidgets import QApplication
 from hyvis.gui.theme.colors import get_system_accent_color
 from hyvis.gui.theme.compiler import render_surgical_stylesheet
 from hyvis.gui.theme.presets import BUILTIN_THEMES
-from hyvis.gui.theme.tokens import ThemeTokens
+from hyvis.gui.theme.tokens import ThemeProperty, ThemeTokens
 
 logger = logging.getLogger(__name__)
 
-THEME_PROPERTY_NAMES = (b"cardTheme", b"state", b"btnVariant", b"btnSize")
+
+THEME_PROPERTY_NAMES = tuple(p.encode() for p in ThemeProperty)
 
 
 # region Dynamic Repolish Mixin

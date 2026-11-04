@@ -19,6 +19,13 @@ from hyvis.gui.theme.colors import (
 # region Semantic Enums
 
 
+class ThemeProperty(StrEnum):
+    CARD_THEME = "cardTheme"
+    STATE = "state"
+    BTN_VARIANT = "btnVariant"
+    BTN_SIZE = "btnSize"
+
+
 class CardTheme(StrEnum):
     DEFAULT = "default"
     INFO = "info"
