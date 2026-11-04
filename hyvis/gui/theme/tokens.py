@@ -133,7 +133,7 @@ class ThemeTokens:
         success_hex = "#34d399" if dark else "#059669"
         warning_hex = "#fbbf24" if dark else "#d97706"
         danger_hex = "#f43f5e" if dark else "#e11d48"
-        info_hex = accent_hex
+        info_hex = "#38bdf8" if dark else "#0284c7"
 
         accent_color_obj = QColor(accent_hex)
         contrast_text = "#ffffff" if accent_color_obj.lightnessF() < 0.65 else "#000000"
