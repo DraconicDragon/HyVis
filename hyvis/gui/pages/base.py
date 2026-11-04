@@ -10,6 +10,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 
 from hyvis.config import AppConfig
+from hyvis.gui.theme import ThemeTokens, theme_manager
 
 
 class BaseConfigPage(QWidget):
@@ -31,3 +32,8 @@ class BaseConfigPage(QWidget):
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         """Serialize active page controls into the target dictionary."""
         raise NotImplementedError
+
+    @property
+    def tokens(self) -> ThemeTokens:
+        """Convenience property for live, theme-synchronized tokens."""
+        return theme_manager.current_tokens
