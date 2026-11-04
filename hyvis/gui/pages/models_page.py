@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import COLOR_STATUS_READY, COLOR_STATUS_WARNING, CardTheme
+from hyvis.gui.theme import CardTheme, theme_manager
 from hyvis.gui.widgets import (
     SectionCard,
     TagServiceListEditor,
@@ -96,6 +96,15 @@ class ModelsPage(BaseConfigPage):
         self._active_size_worker: _HfSizeWorker | None = None
         self._is_loading_ui: bool = False
         self._setup_ui()
+        # todo: probably should put this in theme engine? and maybe do something about table styling in general
+        # Re-render status label and table colors when theme changes at runtime
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self) -> None:
+        if 0 <= self._current_index < len(self._models_data):
+            model_id = self.model_id_combo.currentText().strip()
+            self._update_availability(model_id)
+            self._update_filter_status_card(self._models_data[self._current_index])
 
     def _setup_ui(self) -> None:
         m_fields = ModelConfig.model_fields
@@ -222,7 +231,7 @@ class ModelsPage(BaseConfigPage):
 
         # Availability row
         self.info_avail_lbl = QLabel()
-        self.info_avail_lbl.setText("<span style='color: #888;'>Checking local files...</span>")
+        self.info_avail_lbl.setText(f"<span style='color: {self.tokens.text_muted};'>Checking local files...</span>")
         self.info_layout.addRow(self._make_detail_label("Availability:"), self.info_avail_lbl)
         self.info_card.content_layout.addLayout(self.info_layout)
 
@@ -264,7 +273,7 @@ class ModelsPage(BaseConfigPage):
         action_row.setSpacing(8)
 
         self.download_summary_lbl = QLabel(self.files_container)
-        self.download_summary_lbl.setStyleSheet("color: #8a9ba5;")
+        self.download_summary_lbl.setStyleSheet(f"color: {self.tokens.text_secondary};")
         action_row.addWidget(self.download_summary_lbl, stretch=1)
 
         self.check_size_btn = QPushButton("Check Remote Sizes", self.files_container)
@@ -496,11 +505,10 @@ class ModelsPage(BaseConfigPage):
         # 5. Refresh Model Details Box
         self._update_model_details(model_id)
 
-    @staticmethod
-    def _make_detail_label(text: str) -> QLabel:
+    def _make_detail_label(self, text: str) -> QLabel:
         """Create a clean, subtle key label for the details form."""
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #8a9ba5; font-weight: 500;")
+        lbl.setStyleSheet(f"color: {self.tokens.text_secondary}; font-weight: 500;")
         return lbl
 
     def _make_wrapping_label(self) -> QLabel:
@@ -524,7 +532,7 @@ class ModelsPage(BaseConfigPage):
             desc = plugin_cls.describe()
 
             self.info_name_lbl.setText(
-                f"{desc.identity.display_name} <span style='color: #8a9ba5;'>({desc.family_name})</span>"
+                f"{desc.identity.display_name} <span style='color: {self.tokens.text_secondary};'>({desc.family_name})</span>"
             )
             self.info_desc_lbl.setText(desc.identity.description or "No description available.")
 
@@ -561,7 +569,7 @@ class ModelsPage(BaseConfigPage):
                     default_tag = " (Default)" if is_default else ""
                     v_desc = f" - {active_v.description}" if active_v.description else ""
                     self.info_variant_lbl.setText(
-                        f"<b>{v_name}</b> <span style='color: #8a9ba5;'>[{b_name}]</span>{default_tag}{v_desc}"
+                        f"<b>{v_name}</b> <span style='color: {self.tokens.text_secondary};'>[{b_name}]</span>{default_tag}{v_desc}"
                     )
                 else:
                     self.info_variant_lbl.setText("(Default)")
@@ -574,7 +582,7 @@ class ModelsPage(BaseConfigPage):
             if repo:
                 self.info_repo_lbl.setText(f'<a href="https://huggingface.co/{repo}">{repo}</a>')
             else:
-                self.info_repo_lbl.setText("<span style='color: #888;'>(None / Custom)</span>")
+                self.info_repo_lbl.setText(f"<span style='color: {self.tokens.text_muted};'>(None / Custom)</span>")
 
             self.info_card.setVisible(True)
         except Exception:
@@ -582,7 +590,7 @@ class ModelsPage(BaseConfigPage):
             self.info_desc_lbl.setText("Custom or uncataloged model ID.")
             self.info_variant_lbl.setText("(None)")
             self.info_cats_lbl.setText("(Unknown)")
-            self.info_repo_lbl.setText("<span style='color: #888;'>(Custom)</span>")
+            self.info_repo_lbl.setText(f"<span style='color: {self.tokens.text_muted};'>(Custom)</span>")
             self.info_card.setVisible(True)
 
         # Force layout reflow so multi-line wrapped text is never clipped
@@ -598,7 +606,7 @@ class ModelsPage(BaseConfigPage):
     def _update_availability(self, model_id: str) -> None:
         """Inspect local availability offline and populate the 4-column artifact table."""
         if not model_id:
-            self.info_avail_lbl.setText("<span style='color: #888;'>No model selected</span>")
+            self.info_avail_lbl.setText(f"<span style='color: {self.tokens.text_muted};'>No model selected</span>")
             self.files_table.setRowCount(0)
             self.mismatch_card.setVisible(False)
             return
@@ -622,7 +630,9 @@ class ModelsPage(BaseConfigPage):
             avail = None
 
         if not avail or not avail.variants:
-            self.info_avail_lbl.setText("<span style='color: #888;'>Unknown model or custom plugin</span>")
+            self.info_avail_lbl.setText(
+                f"<span style='color: {self.tokens.text_muted};'>Unknown model or custom plugin</span>"
+            )
             self.files_table.setRowCount(0)
             self.download_summary_lbl.setText("")
             self.check_size_btn.setEnabled(False)
@@ -646,18 +656,18 @@ class ModelsPage(BaseConfigPage):
         if is_fully_cached:
             if is_local_source:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #34d399;'>● Ready in local folder</span> (All {total_req} {total_file_word} present)"
+                    f"<span style='color: {self.tokens.status_success};'>● Ready in local folder</span> (All {total_req} {total_file_word} present)"
                 )
                 self.info_avail_lbl.setToolTip("All required model files are present in your local folder.")
             else:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #34d399;'>● Ready locally</span> (All {total_req} {total_file_word} cached)"
+                    f"<span style='color: {self.tokens.status_success};'>● Ready locally</span> (All {total_req} {total_file_word} cached)"
                 )
                 self.info_avail_lbl.setToolTip("All required model files are present on disk.")
         else:
             if is_local_source:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #fbbf24;'>○ Incomplete local folder</span> ({missing_count}/{total_req} {file_word} missing)"
+                    f"<span style='color: {self.tokens.status_warning};'>○ Incomplete local folder</span> ({missing_count}/{total_req} {file_word} missing)"
                 )
                 folder_disp = source.removeprefix("local:") if source else ""
                 self.info_avail_lbl.setToolTip(
@@ -666,7 +676,7 @@ class ModelsPage(BaseConfigPage):
                 )
             else:
                 self.info_avail_lbl.setText(
-                    f"<span style='color: #fbbf24;'>○ Needs download</span> ({missing_count}/{total_req} {file_word} missing)"
+                    f"<span style='color: {self.tokens.status_warning};'>○ Needs download</span> ({missing_count}/{total_req} {file_word} missing)"
                 )
                 self.info_avail_lbl.setToolTip(
                     "Missing files will be downloaded automatically from Hugging Face on first inference run."
@@ -699,7 +709,9 @@ class ModelsPage(BaseConfigPage):
             # Col 1: Status
             status_item = QTableWidgetItem("● Cached" if art.is_available else "○ Missing")
             status_item.setFlags(item_flags)
-            status_item.setForeground(QColor(COLOR_STATUS_READY if art.is_available else COLOR_STATUS_WARNING))
+            status_item.setForeground(
+                QColor(self.tokens.status_success if art.is_available else self.tokens.status_warning)
+            )
             if art.is_available and art.path:
                 status_item.setToolTip(f"Located at:\n{art.path}")
             else:
@@ -729,7 +741,7 @@ class ModelsPage(BaseConfigPage):
                 if local_bytes is not None and abs(local_bytes - rem_bytes) > 1024:
                     mismatched_files.append((art.name, local_bytes, rem_bytes))
                     local_item.setText(f"{local_str} ⚠")
-                    local_item.setForeground(QColor(COLOR_STATUS_WARNING))
+                    local_item.setForeground(QColor(self.tokens.status_warning))
                     local_item.setToolTip(f"Size differs from expected repository ({rem_str})")
             else:
                 rem_str = "—"
@@ -750,7 +762,7 @@ class ModelsPage(BaseConfigPage):
             for fname, loc_sz, rem_sz in mismatched_files:
                 lines.append(f"• <b>{fname}</b>: {_format_bytes(loc_sz)} local vs {_format_bytes(rem_sz)} expected")
             lines.append(
-                "<span style='color: #aaa;'>This may indicate that the file in your source path is a different version, precision format, or checkpoint. If this is intentional, you can safely ignore this.</span>"
+                f"<span style='color: {self.tokens.text_muted};'>This may indicate that the file in your source path is a different version, precision format, or checkpoint. If this is intentional, you can safely ignore this.</span>"
             )
             self.mismatch_lbl.setText("<br>".join(lines))
             self.mismatch_card.setVisible(True)
@@ -839,7 +851,9 @@ class ModelsPage(BaseConfigPage):
         self._active_size_worker = None
         self.check_size_btn.setText("Check Remote Sizes")
         self.check_size_btn.setEnabled(True)
-        self.download_summary_lbl.setText(f"<span style='color: #f85149;'>Failed to check size: {err_msg[:60]}</span>")
+        self.download_summary_lbl.setText(
+            f"<span style='color: {self.tokens.status_danger};'>Failed to check size: {err_msg[:60]}</span>"
+        )
 
     def _update_device_constraints(self) -> None:
         """Enforce batch_size=1 when hardware device is CPU."""
@@ -1149,11 +1163,11 @@ class ModelsPage(BaseConfigPage):
         if m_filter:
             override_count = len(m_filter)
             self.filter_status_label.setText(
-                f"<span style='color: #4fc3f7;'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
+                f"<span style='color: {self.tokens.accent};'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
             )
         else:
             self.filter_status_label.setText(
-                "<span style='color: #888;'>Inheriting all settings from Global Filter</span>"
+                f"<span style='color: {self.tokens.text_muted};'>Inheriting all settings from Global Filter</span>"
             )
 
     def update_filter_overrides(self, models_data: list[dict[str, Any]]) -> None:
