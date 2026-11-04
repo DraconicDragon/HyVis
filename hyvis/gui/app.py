@@ -10,10 +10,7 @@ import sys
 from pathlib import Path
 
 from hyvis.gui.hot_restart import is_restart_child, run_with_restart
-from hyvis.gui.theme import MODERN_SCROLLBAR_STYLE, CheckBoxCursorFilter, HyVisAppStyle
-
-# just append stylesheet strings here with +
-_GLOBAL_APP_STYLE = MODERN_SCROLLBAR_STYLE
+from hyvis.gui.theme import CheckBoxCursorFilter, HyVisAppStyle
 
 
 def parse_gui_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -72,9 +69,13 @@ def run_gui(initial_config: Path | str | None = None, *, dev_mode: bool = False)
     app.setDesktopFileName("hyvis-gui")
 
     app.setStyle(HyVisAppStyle(app.style()))
-    app.setStyleSheet(_GLOBAL_APP_STYLE)
     _cursor_filter = CheckBoxCursorFilter(app)
     app.installEventFilter(_cursor_filter)
+
+    # Apply styling
+    from hyvis.gui.theme import theme_manager
+
+    theme_manager.init_app(app)
 
     state = ConfigState()
     gui_settings = get_gui_settings()

@@ -424,45 +424,9 @@ class MainWindow(QMainWindow):
 
         # Left Sidebar
         self.sidebar = QListWidget(body_container)
+        self.sidebar.setObjectName("sidebar")
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        palette = self.sidebar.palette()
-        highlight_col = palette.color(palette.ColorRole.Highlight)
-        r, g, b = highlight_col.red(), highlight_col.green(), highlight_col.blue()
-        hover_rgba = f"rgba({r}, {g}, {b}, 30)"
-        selected_rgba = f"rgba({r}, {g}, {b}, 60)"
-        accent_hex = highlight_col.name()
-
-        # Derive text colors dynamically from system palette (works for both light and dark mode)
-        text_col = palette.color(palette.ColorRole.Text)
-        tr, tg, tb = text_col.red(), text_col.green(), text_col.blue()
-        normal_text_rgba = f"rgba({tr}, {tg}, {tb}, 230)"
-        hover_text_rgba = f"rgba({tr}, {tg}, {tb}, 255)"
-
-        self.sidebar.setStyleSheet(
-            "QListWidget {"
-            "  background: transparent;"
-            "  border: none;"
-            "  outline: none;"
-            "  padding-top: 8px;"
-            "}"
-            "QListWidget::item {"
-            "  padding: 10px 14px;"
-            "  margin: 4px 12px 8px 0px;"
-            "  border-radius: 6px;"
-            f"  color: {normal_text_rgba};"
-            "}"
-            f"QListWidget::item:hover {{"
-            f"  background: {hover_rgba};"
-            f"  color: {hover_text_rgba};"
-            f"}}"
-            f"QListWidget::item:selected {{"
-            f"  background: {selected_rgba};"
-            f"  color: {accent_hex};"
-            f"  font-weight: 600;"
-            f"}}"
-        )
 
         sidebar_sections = [
             (app_fields["hydrus"].title, app_fields["hydrus"].description),
