@@ -54,7 +54,11 @@ def get_system_accent_color(palette: QPalette | None = None, fallback: str = "#3
 
 
 def is_palette_dark(palette: QPalette | None = None) -> bool:
-    """Detect dark mode using native Qt QStyleHints with window luminance fallback."""
+    """Detect dark mode by inspecting the palette's window background lightness."""
+    # If an explicit palette is passed (e.g. Catppuccin Latte), check ITS lightness first!
+    if palette is not None:
+        return palette.color(QPalette.ColorRole.Window).lightnessF() < 0.5
+
     app = QGuiApplication.instance()
     if app:
         scheme = app.styleHints().colorScheme()
@@ -63,7 +67,7 @@ def is_palette_dark(palette: QPalette | None = None) -> bool:
         if scheme == Qt.ColorScheme.Light:
             return False
 
-    pal = palette or (app.palette() if app else None)
+    pal = app.palette() if app else None
     if pal:
         return pal.color(QPalette.ColorRole.Window).lightnessF() < 0.5
     return True
