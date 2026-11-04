@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.base_widgets import AutoResizingTableWidget, FloatSpinBox, SuggestionComboBox
-from hyvis.gui.theme import STYLE_ERROR, STYLE_OVERRIDDEN, CardTheme, get_card_stylesheet
+from hyvis.gui.theme import CardTheme, DynamicStyleMixin, ThemeProperty, WidgetState
 
 HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
 
@@ -72,7 +72,7 @@ def bind_field_metadata(widget: QWidget, field_info: Any, set_placeholder: bool 
 
 
 def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bool = False) -> None:
-    """Apply or clear visual override/error highlighting on an input widget, card, or table/list."""
+    """Apply or clear visual override/error state on an input widget, card, or table/list."""
     target = widget
     if hasattr(widget, "list_widget"):
         target = widget.list_widget
@@ -83,12 +83,13 @@ def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bo
         target.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
         return
 
-    if is_error:
-        target.setStyleSheet(STYLE_ERROR)
-    elif is_overridden:
-        target.setStyleSheet(STYLE_OVERRIDDEN)
-    else:
-        target.setStyleSheet("")
+    state = WidgetState.ERROR if is_error else (WidgetState.OVERRIDDEN if is_overridden else WidgetState.DEFAULT)
+    target.setProperty(ThemeProperty.STATE, state)
+    style = target.style()
+    if style:
+        style.unpolish(target)
+        style.polish(target)
+        target.update()
 
 
 def add_form_row(
@@ -138,12 +139,10 @@ def add_form_row(
 # region Section Card
 
 
-class SectionCard(QFrame):
+class SectionCard(DynamicStyleMixin, QFrame):
     """
-    A structured card with an inline header:
-    [ Optional CheckBox ] [ Title Label (with tooltip) ] [ Stretch ] [ Status Badge ]
-    Clicking the title label toggles the checkbox when checkable.
-    Supports semantic themes (INFO, WARNING, SUCCESS, DANGER, PURPLE, DEFAULT).
+    Structured card with an inline header and QSS property integration.
+    Uses DynamicStyleMixin for automatic repolishing on property updates.
     """
 
     toggled = Signal(bool)
@@ -165,13 +164,14 @@ class SectionCard(QFrame):
             self.setObjectName(field_name)
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self._apply_base_stylesheet()
+        self.setProperty(ThemeProperty.CARD_THEME, theme)
+        self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
         card_layout.setSpacing(8)
 
-        # Header container (hides automatically if no title and not checkable)
+        # Header container
         self._header_widget = QWidget(self)
         header_layout = QHBoxLayout(self._header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
@@ -211,34 +211,14 @@ class SectionCard(QFrame):
     def content_layout(self) -> QVBoxLayout:
         return self._content_layout
 
-    def _apply_base_stylesheet(self) -> None:
-        self.setStyleSheet(get_card_stylesheet(self._theme, "SectionCard"))
-
-    def setTheme(self, theme: CardTheme) -> None:
-        """Update the card's semantic theme."""
-        self._theme = theme
-        self._apply_base_stylesheet()
-
     def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
-        """Apply error or override border highlight, restoring the card's base theme on clear."""
+        """Set state property; DynamicStyleMixin auto-repolishes QSS rules."""
         if is_error:
-            self.setStyleSheet(
-                "SectionCard {"
-                "  border: 1.5px solid #f85149;"
-                "  border-radius: 6px;"
-                "  background: rgba(248, 81, 73, 0.08);"
-                "}"
-            )
+            self.setProperty(ThemeProperty.STATE, WidgetState.ERROR)
         elif is_overridden:
-            self.setStyleSheet(
-                "SectionCard {"
-                "  border: 1.5px solid #38bdf8;"
-                "  border-radius: 6px;"
-                "  background: rgba(56, 189, 248, 0.08);"
-                "}"
-            )
+            self.setProperty(ThemeProperty.STATE, WidgetState.OVERRIDDEN)
         else:
-            self._apply_base_stylesheet()
+            self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
     def _update_header_visibility(self) -> None:
         # Hide header container if no title is present and card isn't checkable
@@ -1589,7 +1569,7 @@ class CategoryLimitEditor(QWidget):
 # region Tag Subset List Editor (Joint Subset Limits)
 
 
-class TagSubsetCard(QFrame):
+class TagSubsetCard(DynamicStyleMixin, QFrame):
     """
     A single card representing a Joint Subset Limit rule (max_tags_per_subset).
     Eliminates comma bugs by managing tags via StringListEditor (with multi-line paste).
@@ -1603,7 +1583,8 @@ class TagSubsetCard(QFrame):
         self._index = index
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(get_card_stylesheet(CardTheme.PURPLE, "TagSubsetCard"))
+        self.setProperty(ThemeProperty.CARD_THEME, CardTheme.PURPLE)
+        self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
@@ -1780,7 +1761,7 @@ class TagSubsetListEditor(QWidget):
 # region Tag Rule & Query Stacked Card Editors
 
 
-class TagRuleCard(QFrame):
+class TagRuleCard(DynamicStyleMixin, QFrame):
     """
     A single card mapping tags to a specific Hydrus service key.
     Used for:
@@ -1810,7 +1791,8 @@ class TagRuleCard(QFrame):
         self._theme = theme
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(get_card_stylesheet(self._theme, "TagRuleCard"))
+        self.setProperty(ThemeProperty.CARD_THEME, self._theme)
+        self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
         card_layout = QVBoxLayout(self)
         card_layout.setContentsMargins(10, 8, 10, 10)
