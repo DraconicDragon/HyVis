@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import CardTheme
+from hyvis.gui.theme import CardTheme, theme_manager
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
@@ -72,6 +72,12 @@ class FiltersPage(BaseConfigPage):
 
         self._card_meta: dict[SectionCard, tuple[str, list[str]]] = {}
         self._setup_ui()
+        # todo: check models_page for related todo
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self) -> None:
+        self._update_scope_banner()
+        self._update_badges_and_tooltips()
 
     def _setup_ui(self) -> None:
         of_fields = OutputFilterConfig.model_fields
@@ -463,7 +469,7 @@ class FiltersPage(BaseConfigPage):
                         card.setChecked(is_filtered)
                         card.setBadge(
                             "(Filter Active)" if is_filtered else "(All Categories Allowed)",
-                            color="#34d399" if is_filtered else "#888",
+                            color=self.tokens.status_success if is_filtered else self.tokens.text_muted,
                         )
                     else:
                         card.setCheckable(False)
@@ -476,10 +482,7 @@ class FiltersPage(BaseConfigPage):
                 model_idx = self._current_scope - 1
                 m = self._models_data[model_idx]
                 model_id = str(m.get("model_id") or f"Model {model_idx + 1}")
-                self.banner_label.setText(
-                    f"<b>Configuring overrides for: <span style='color: #38bdf8;'>{model_id}</span></b><br>"
-                    "<span style='color: #aaa;'>Unchecked cards inherit live baseline settings from Global Output Filter.</span>"
-                )
+                self._update_scope_banner(model_id)
 
                 m_filter = m.get("output_filter") or {}
 
@@ -497,6 +500,22 @@ class FiltersPage(BaseConfigPage):
             self._is_loading_ui = False
 
         self._update_badges_and_tooltips()
+
+    def _update_scope_banner(self, model_id: str | None = None) -> None:
+        if self._current_scope == 0:
+            return
+
+        if model_id is None:
+            model_idx = self._current_scope - 1
+            if not 0 <= model_idx < len(self._models_data):
+                return
+            model_id = str(self._models_data[model_idx].get("model_id") or f"Model {model_idx + 1}")
+
+        self.banner_label.setText(
+            f"<b>Configuring overrides for: <span style='color: {self.tokens.accent};'>{model_id}</span></b><br>"
+            f"<span style='color: {self.tokens.text_secondary};'>"
+            "Unchecked cards inherit live baseline settings from Global Output Filter.</span>"
+        )
 
     def _populate_all_widgets(self, d: dict[str, Any]) -> None:
         for card in self._card_meta:
@@ -607,7 +626,8 @@ class FiltersPage(BaseConfigPage):
             # Global Scope toggling is specifically supported for cat_card
             if card is self.cat_card:
                 card.setBadge(
-                    "(Filter Active)" if checked else "(All Categories Allowed)", color="#34d399" if checked else "#888"
+                    "(Filter Active)" if checked else "(All Categories Allowed)",
+                    color=self.tokens.status_success if checked else self.tokens.text_muted,
                 )
                 self._save_active_scope_to_state()
                 self._update_badges_and_tooltips()
@@ -694,7 +714,7 @@ class FiltersPage(BaseConfigPage):
                         break
 
                 if has_divergence:
-                    card.setBadge("⚡ Overridden", color="#38bdf8")
+                    card.setBadge("⚡ Overridden", color=self.tokens.accent)
                     card.set_info_tooltip(f"{base_desc}\n\n⚡ Overridden in one or more models.")
                 else:
                     card.setBadge("")
@@ -702,10 +722,10 @@ class FiltersPage(BaseConfigPage):
             else:
                 # Model Scope: indicate custom override vs inherited
                 if card.isChecked():
-                    card.setBadge("Custom Override", color="#38bdf8")
+                    card.setBadge("Custom Override", color=self.tokens.accent)
                     card.set_info_tooltip(f"{base_desc}\n\nCustom override active for this model.")
                 else:
-                    card.setBadge("Inherited from Global", color="#888")
+                    card.setBadge("Inherited from Global", color=self.tokens.text_muted)
                     card.set_info_tooltip(f"{base_desc}\n\nInherits live baseline values from Global Output Filter.")
 
         # 2. Update Input Widget Highlighting & Tooltips across all cards
