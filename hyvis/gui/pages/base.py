@@ -25,6 +25,13 @@ class BaseConfigPage(QWidget):
 
     changed = Signal()
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        theme_manager.theme_changed.connect(self.refresh_theme)
+
+    def refresh_theme(self) -> None:
+        """Refresh page-specific content that embeds theme token values."""
+
     def load_config(self, cfg: AppConfig) -> None:
         """Populate page controls from an incoming AppConfig instance."""
         raise NotImplementedError

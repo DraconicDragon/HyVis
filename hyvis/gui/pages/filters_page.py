@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import CardTheme, theme_manager
+from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
@@ -72,10 +72,8 @@ class FiltersPage(BaseConfigPage):
 
         self._card_meta: dict[SectionCard, tuple[str, list[str]]] = {}
         self._setup_ui()
-        # todo: check models_page for related todo
-        theme_manager.theme_changed.connect(self._on_theme_changed)
 
-    def _on_theme_changed(self) -> None:
+    def refresh_theme(self) -> None:
         self._update_scope_banner()
         self._update_badges_and_tooltips()
 

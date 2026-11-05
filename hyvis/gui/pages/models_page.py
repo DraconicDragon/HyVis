@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import CardTheme, theme_manager
+from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     SectionCard,
     TagServiceListEditor,
@@ -96,11 +96,8 @@ class ModelsPage(BaseConfigPage):
         self._active_size_worker: _HfSizeWorker | None = None
         self._is_loading_ui: bool = False
         self._setup_ui()
-        # todo: probably should put this in theme engine? and maybe do something about table styling in general
-        # Re-render status label and table colors when theme changes at runtime
-        theme_manager.theme_changed.connect(self._on_theme_changed)
 
-    def _on_theme_changed(self) -> None:
+    def refresh_theme(self) -> None:
         if 0 <= self._current_index < len(self._models_data):
             model_id = self.model_id_combo.currentText().strip()
             self._update_availability(model_id)
