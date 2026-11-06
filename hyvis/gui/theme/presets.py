@@ -21,6 +21,12 @@ class ThemePreset:
     create_tokens: Callable[[QPalette, str | None], ThemeTokens]
 
 
+def _set_disabled_text_colors(palette: QPalette, muted_color: str) -> None:
+    color = QColor(muted_color)
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, color)
+
+
 def _build_mocha_palette(_: QPalette) -> QPalette:
     pal = QPalette()
     pal.setColor(QPalette.ColorRole.Window, QColor("#1e1e2e"))
@@ -34,6 +40,7 @@ def _build_mocha_palette(_: QPalette) -> QPalette:
     pal.setColor(QPalette.ColorRole.Highlight, QColor("#89b4fa"))
     pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#11111b"))
     pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#6c7086"))
+    _set_disabled_text_colors(pal, "#6c7086")
     return pal
 
 
@@ -50,6 +57,7 @@ def _build_latte_palette(_: QPalette) -> QPalette:
     pal.setColor(QPalette.ColorRole.Highlight, QColor("#1e66f5"))
     pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
     pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#8c8fa1"))
+    _set_disabled_text_colors(pal, "#8c8fa1")
     return pal
 
 
