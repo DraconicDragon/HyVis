@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig
 from hyvis.gui.base_widgets import Divider
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
+from hyvis.gui.theme import ThemeTokens, theme_manager
 from hyvis.gui.widgets import SectionCard
 from hyvis.hydrus import HydrusClient, HydrusError
 from hyvis.preflight import PreflightResult, run_preflight
@@ -102,6 +103,10 @@ class _PreviewCheckWorker(QRunnable):
 class LaunchDialog(QDialog):
     """Modal preflight review and terminal launcher."""
 
+    @property
+    def tokens(self) -> ThemeTokens:
+        return theme_manager.current_tokens
+
     def __init__(
         self,
         config: AppConfig,
@@ -132,7 +137,7 @@ class LaunchDialog(QDialog):
         # 1. Connection Header & Progress Status
         self.conn_label = QLabel("◌ Connecting to Hydrus...", self)
         self.conn_label.setContentsMargins(12, 12, 12, 0)
-        self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
         root_layout.addWidget(self.conn_label)
 
         # 2. Main Scroll Area for Cards and Options
@@ -203,7 +208,6 @@ class LaunchDialog(QDialog):
         # Divider between previews if both configured
         if self.has_candidate_preview and self.has_rejected_preview:
             p_div = Divider(self.preview_card, QFrame.Shape.HLine)
-            p_div.setStyleSheet("color: rgba(255, 255, 255, 0.08);")
             prev_layout.addWidget(p_div)
 
         # Row B: Rejected Preview
@@ -243,7 +247,7 @@ class LaunchDialog(QDialog):
             "Tip: Once local file paths are resolved after launching, Hydrus can be closed during inference if you need to free system resources.",
             container,
         )
-        tip_label.setStyleSheet("color: #8a9ba5;")
+        tip_label.setStyleSheet(f"color: {self.tokens.text_secondary};")
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
 
@@ -286,16 +290,9 @@ class LaunchDialog(QDialog):
         self.cmd_edit.setFont(fixed_font)
 
         self.cmd_edit.setStyleSheet(
-            "QTextEdit {"
-            "  background: rgba(0, 0, 0, 0.25);"
-            "  border: 1px solid rgba(255, 255, 255, 0.1);"
-            "  border-radius: 4px;"
-            "  padding: 4px 6px;"
-            "  color: #e0e0e0;"
-            "}"
-            "QTextEdit:focus {"
-            "  border-color: #38bdf8;"  # todo: use from theme.py or something and have it be accent color
-            "}"
+            f"QTextEdit {{ background: {self.tokens.bg_surface}; border: 1px solid {self.tokens.border_default}; "
+            f"border-radius: {self.tokens.radius_sm}px; padding: 4px 6px; color: {self.tokens.text_primary}; }}"
+            f"QTextEdit:focus {{ border-color: {self.tokens.accent}; }}"
         )
         cmd_layout.addWidget(self.cmd_edit)
 
@@ -358,7 +355,7 @@ class LaunchDialog(QDialog):
 
     def _run_preflight(self) -> None:
         self.conn_label.setText("◌ Connecting to Hydrus...")
-        self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
         self.launch_btn.setEnabled(False)
         self.recheck_btn.setEnabled(False)
 
@@ -378,7 +375,7 @@ class LaunchDialog(QDialog):
             self.conn_label.setText(f"◌ {msg} ({cur}/{tot})")
         else:
             self.conn_label.setText(f"◌ {msg}")
-        self.conn_label.setStyleSheet("font-weight: 600; color: #fbbf24;")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
 
     def _on_preflight_success(self, result: PreflightResult) -> None:
         self._result = result
@@ -389,13 +386,13 @@ class LaunchDialog(QDialog):
 
         # Connection header
         self.conn_label.setText(f"● Connected to Hydrus v{v_str} at {url}")
-        self.conn_label.setStyleSheet("font-weight: 600; color: #34d399;")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_success};")
         self.recheck_btn.setEnabled(True)
 
         # Candidate and Rejected Files summary
         if cand_count == 0 and rej_count == 0:
             self.files_label.setText(
-                "<span style='color: #fbbf24;'>No candidate files matched your queries. Nothing to process.</span>"
+                f"<span style='color: {self.tokens.status_warning};'>No candidate files matched your queries. Nothing to process.</span>"
             )
             self.launch_btn.setEnabled(False)
             return
@@ -404,7 +401,7 @@ class LaunchDialog(QDialog):
         if rej_count > 0:
             mimes_str = ", ".join(sorted(result.rejected_mimes)) if result.rejected_mimes else "unknown"
             msg_lines.append(
-                f"<span style='color: #8a9ba5;'>{rej_count} file(s) rejected with unsupported MIME: {mimes_str}</span>"
+                f"<span style='color: {self.tokens.text_secondary};'>{rej_count} file(s) rejected with unsupported MIME: {mimes_str}</span>"
             )
         self.files_label.setText("<br>".join(msg_lines))
 
@@ -414,8 +411,8 @@ class LaunchDialog(QDialog):
 
     def _on_preflight_error(self, err_msg: str) -> None:
         self.conn_label.setText("▲ Could not reach Hydrus Client API")
-        self.conn_label.setStyleSheet("font-weight: 600; color: #f85149;")
-        self.files_label.setText(f"<span style='color: #f85149;'>{err_msg}</span>")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_danger};")
+        self.files_label.setText(f"<span style='color: {self.tokens.status_danger};'>{err_msg}</span>")
         self.launch_btn.setEnabled(False)
         self.recheck_btn.setEnabled(True)
 
@@ -435,14 +432,14 @@ class LaunchDialog(QDialog):
 
             if cp.status == "dirty":
                 self.cand_status_label.setText(
-                    f"<span style='color: #fbbf24;'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
+                    f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
                 )
                 self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
                 self.send_cand_btn.setEnabled(cand_count > 0)
 
             elif cp.status == "ready":
                 self.cand_status_label.setText(
-                    f"<span style='color: #34d399;'>Page '{cp.page_name}' is empty and ready.</span>"
+                    f"<span style='color: {self.tokens.status_success};'>Page '{cp.page_name}' is empty and ready.</span>"
                 )
                 self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
                 self.send_cand_btn.setEnabled(cand_count > 0)
@@ -450,13 +447,13 @@ class LaunchDialog(QDialog):
             elif cp.status == "will_create":
                 if v_num is not None and v_num < 676:
                     self.cand_status_label.setText(
-                        f"<span style='color: #f85149;'>⚠ Page '{cp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
+                        f"<span style='color: {self.tokens.status_danger};'>⚠ Page '{cp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
                     )
                     self.send_cand_btn.setText(f"👁 Send Candidate Preview ({cand_count} files)")
                     self.send_cand_btn.setEnabled(False)
                 else:
                     self.cand_status_label.setText(
-                        f"<span style='color: #888;'>Page '{cp.page_name}' will be created.</span>"
+                        f"<span style='color: {self.tokens.text_muted};'>Page '{cp.page_name}' will be created.</span>"
                     )
                     self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
                     self.send_cand_btn.setEnabled(cand_count > 0)
@@ -468,20 +465,20 @@ class LaunchDialog(QDialog):
 
             if rp.status == "dirty":
                 self.rej_status_label.setText(
-                    f"<span style='color: #fbbf24;'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
+                    f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
                 )
             elif rp.status == "ready":
                 self.rej_status_label.setText(
-                    f"<span style='color: #34d399;'>Page '{rp.page_name}' is empty and ready.</span>"
+                    f"<span style='color: {self.tokens.status_success};'>Page '{rp.page_name}' is empty and ready.</span>"
                 )
             elif rp.status == "will_create":
                 if v_num is not None and v_num < 676:
                     self.rej_status_label.setText(
-                        f"<span style='color: #f85149;'>⚠ Page '{rp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
+                        f"<span style='color: {self.tokens.status_danger};'>⚠ Page '{rp.page_name}' does not exist. Automatic page creation requires Hydrus v676+ (connected: v{self._result.hydrus_version}). Please create this empty page manually in Hydrus.</span>"
                     )
                 else:
                     self.rej_status_label.setText(
-                        f"<span style='color: #888;'>Page '{rp.page_name}' will be created.</span>"
+                        f"<span style='color: {self.tokens.text_muted};'>Page '{rp.page_name}' will be created.</span>"
                     )
 
             if rej_count > 0:
@@ -539,7 +536,7 @@ class LaunchDialog(QDialog):
             hydrus.setup_preview_page(p.page_name, self._result.candidate_hashes, p.page_index, focus=True)
             self._candidate_preview_sent = True
             self.cand_status_label.setText(
-                f"<span style='color: #34d399;'>✓ {cand_count} files sent to '{p.page_name}'.</span>"
+                f"<span style='color: {self.tokens.status_success};'>✓ {cand_count} files sent to '{p.page_name}'.</span>"
             )
             self.send_cand_btn.setText(f"👁 Re-send Candidate Preview ({cand_count} files)")
             self.send_cand_btn.setEnabled(True)
@@ -565,7 +562,7 @@ class LaunchDialog(QDialog):
             )
             self._rejected_preview_sent = True
             self.rej_status_label.setText(
-                f"<span style='color: #34d399;'>✓ {rej_count} files sent to '{p.rejected_page_name}'.</span>"
+                f"<span style='color: {self.tokens.status_success};'>✓ {rej_count} files sent to '{p.rejected_page_name}'.</span>"
             )
             self.send_rej_btn.setText(f"👁 Re-send Rejected Preview ({rej_count} files)")
             self.send_rej_btn.setEnabled(True)
