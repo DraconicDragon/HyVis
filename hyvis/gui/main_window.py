@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from hyvis.cli import get_version
 from hyvis.config import AppConfig
-from hyvis.gui.base_widgets import Divider
+from hyvis.gui.base_widgets import Divider, install_smooth_scroll
 from hyvis.gui.devtools import DevToolsStrip
 from hyvis.gui.dialogs import (
     AboutDialog,
@@ -58,6 +58,7 @@ from hyvis.gui.settings import (
     save_session_tmp,
 )
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
+from hyvis.gui.theme import ThemeTokens, theme_manager
 
 
 @dataclass(frozen=True)
@@ -255,6 +256,8 @@ class MainWindow(QMainWindow):
         self._setup_menu_bar()
         self._setup_ui()
         self._setup_signals()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+        self.refresh_theme()
 
         # Enable native window dragging on menu and top bar
         self._drag_filter = WindowDragFilter(self)
@@ -374,17 +377,12 @@ class MainWindow(QMainWindow):
         top_bar.setContentsMargins(12, 10, 12, 10)
         top_bar.setSpacing(10)
 
-        app_title = QLabel(
-            f"<span style='font-size: 24px; font-weight: 650; letter-spacing: 0.5px;'>HyVis</span> "
-            f"<span style='color: #8a9ba5; font-size: 14px; font-weight: 450;'>{get_version()}</span>",
-            self.top_bar_widget,
-        )
-        top_bar.addWidget(app_title)
+        self.app_title_label = QLabel(self.top_bar_widget)
+        top_bar.addWidget(self.app_title_label)
 
         top_bar.addStretch()
 
         self.conn_indicator = QLabel(self.top_bar_widget)
-        self.conn_indicator.setText("<span style='color: #d4a359; font-weight: 600;'>○ Hydrus Offline</span>")
         self.conn_indicator.setToolTip(
             "Hydrus Client API is not connected.\nClick 'Connect' to fetch live tag services and open tabs."
         )
@@ -415,7 +413,6 @@ class MainWindow(QMainWindow):
         # 2. Main Vertical Splitter (Page Body + Issues Drawer)
         self.main_splitter = QSplitter(Qt.Orientation.Vertical, central)
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setStyleSheet("QSplitter::handle:vertical {  height: 6px;  border-top: 1px solid #333;}")
         # Body container (Sidebar + Divider + Page Stack)
         body_container = QWidget(self.main_splitter)
         body_layout = QHBoxLayout(body_container)
@@ -427,6 +424,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        install_smooth_scroll(self.sidebar)
 
         sidebar_sections = [
             (app_fields["hydrus"].title, app_fields["hydrus"].description),
@@ -476,9 +474,6 @@ class MainWindow(QMainWindow):
         # 3. Resizable Issues Panel (Drawer)
         self.issues_panel = QFrame(self.main_splitter)
         self.issues_panel.setFrameShape(QFrame.Shape.StyledPanel)
-        self.issues_panel.setStyleSheet(
-            "QFrame {  background: rgba(255, 255, 255, 0.015);  border-top: 1px solid rgba(255, 255, 255, 0.08);}"
-        )
         issues_layout = QVBoxLayout(self.issues_panel)
         issues_layout.setContentsMargins(12, 6, 12, 8)
         issues_layout.setSpacing(6)
@@ -489,41 +484,15 @@ class MainWindow(QMainWindow):
         issues_header.addWidget(self.issues_title)
         issues_header.addStretch(1)
 
-        close_issues_btn = QPushButton("✕", self.issues_panel)
-        close_issues_btn.setFixedWidth(24)
-        close_issues_btn.setFixedHeight(24)
-        close_issues_btn.setToolTip("Hide Issues Panel")
-        close_issues_btn.setStyleSheet(
-            "QPushButton { border: none; color: #888; font-weight: bold; border-radius: 3px; }"
-            "QPushButton:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }"
-        )
-        close_issues_btn.clicked.connect(lambda: self.issues_panel.setVisible(False))
-        issues_header.addWidget(close_issues_btn)
+        self.close_issues_btn = QPushButton("✕", self.issues_panel)
+        self.close_issues_btn.setFixedWidth(24)
+        self.close_issues_btn.setFixedHeight(24)
+        self.close_issues_btn.setToolTip("Hide Issues Panel")
+        self.close_issues_btn.clicked.connect(lambda: self.issues_panel.setVisible(False))
+        issues_header.addWidget(self.close_issues_btn)
         issues_layout.addLayout(issues_header)
 
         self.issues_list = QListWidget(self.issues_panel)
-        self.issues_list.setStyleSheet(
-            "QListWidget {"
-            "  background: transparent;"
-            "  border: 1px solid rgba(255, 255, 255, 0.06);"
-            "  border-radius: 4px;"
-            "  outline: none;"  # Removes the dotted focus rect
-            "}"
-            "QListWidget::item {"
-            "  padding: 6px 10px;"
-            "  color: #ff8585;"  # Immediately visible red error text
-            "  border-bottom: 1px solid rgba(255, 255, 255, 0.03);"
-            "  border-radius: 3px;"
-            "}"
-            "QListWidget::item:hover {"
-            "  background: rgba(248, 81, 73, 0.12);"
-            "  color: #ffffff;"
-            "}"
-            "QListWidget::item:selected {"
-            "  background: rgba(248, 81, 73, 0.22);"
-            "  color: #ffffff;"
-            "}"
-        )
         self.issues_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.issues_list.customContextMenuRequested.connect(self._on_issues_context_menu)
         self.issues_list.itemClicked.connect(self._on_issue_selected)
@@ -574,6 +543,61 @@ class MainWindow(QMainWindow):
         self.state.connection_changed.connect(self._on_connection_changed)
 
         self._setup_page_signals()
+
+    @property
+    def tokens(self) -> ThemeTokens:
+        return theme_manager.current_tokens
+
+    def refresh_theme(self) -> None:
+        tokens = self.tokens
+        self.app_title_label.setText(
+            f"<span style='font-size: 24px; font-weight: 650; letter-spacing: 0.5px;'>HyVis</span> "
+            f"<span style='color: {tokens.text_secondary}; font-size: 14px; font-weight: 450;'>{get_version()}</span>"
+        )
+        self.issues_panel.setStyleSheet(
+            f"QFrame {{ background: {tokens.bg_surface}; border-top: 1px solid {tokens.border_default}; }}"
+        )
+        self.close_issues_btn.setStyleSheet(
+            f"QPushButton {{ border: none; color: {tokens.text_muted}; font-weight: bold; border-radius: 3px; }}"
+            f"QPushButton:hover {{ color: {tokens.text_primary}; background: {tokens.bg_subtle_hover}; }}"
+        )
+        self.issues_list.setStyleSheet(
+            "QListWidget { background: transparent; "
+            f"border: 1px solid {tokens.border_subtle}; border-radius: {tokens.radius_sm}px; outline: none; }}"
+            "QListWidget::item { padding: 6px 10px; "
+            f"color: {tokens.status_danger}; border-bottom: 1px solid {tokens.border_subtle}; "
+            f"border-radius: {tokens.radius_sm}px; }}"
+            "QListWidget::item:hover { "
+            f"background: {tokens.status_danger_wash}; color: {tokens.text_primary}; }}"
+            "QListWidget::item:selected { "
+            f"background: {tokens.status_danger_wash}; color: {tokens.text_primary}; }}"
+        )
+        self._style_status_button(self.issues_list.count() == 0)
+        self._render_connection_indicator(self.state.connection_status, self.state.connection_info)
+
+    def _style_status_button(self, is_valid: bool) -> None:
+        tokens = self.tokens
+        color = tokens.status_success if is_valid else tokens.status_danger
+        hover = tokens.status_success_wash if is_valid else tokens.status_danger_wash
+        weight = "normal" if is_valid else "600"
+        self.status_btn.setStyleSheet(
+            "QPushButton#status_btn {"
+            f"background: transparent; border: none; text-align: left; padding: 4px 8px; "
+            f"border-radius: {tokens.radius_sm}px; color: {color}; font-weight: {weight}; }}"
+            f"QPushButton#status_btn:hover {{ background: {hover}; }}"
+        )
+
+    def _render_connection_indicator(self, status: ConnectionStatus, info: str) -> None:
+        tokens = self.tokens
+        if status == "connected":
+            text, color = f"● {info}", tokens.status_success
+        elif status == "connecting":
+            text, color = "◌ Connecting...", tokens.status_warning
+        elif status == "error":
+            text, color = "▲ Connection Failed", tokens.status_danger
+        else:
+            text, color = "○ Hydrus Offline", tokens.status_warning
+        self.conn_indicator.setText(f"<span style='color: {color}; font-weight: 600;'>{text}</span>")
 
     def _setup_page_signals(self) -> None:
         """Connect cross-page and modification signals for the current page set."""
@@ -787,25 +811,13 @@ class MainWindow(QMainWindow):
         # 2. Update status button and panel
         if count == 0:
             self.status_btn.setText("● Configuration Valid")
-            self.status_btn.setStyleSheet(
-                "QPushButton#status_btn {"
-                "  background: transparent; border: none; text-align: left;"
-                "  padding: 4px 8px; border-radius: 4px; color: #2e7d32; font-weight: normal;"
-                "}"
-                "QPushButton#status_btn:hover { background: rgba(46, 125, 50, 0.08); }"
-            )
+            self._style_status_button(is_valid=True)
             self.status_btn.setToolTip("No validation issues found")
             self.launch_btn.setEnabled(True)
             self.issues_panel.setVisible(False)
         else:
             self.status_btn.setText(f"▲ {count} Issue{'s' if count != 1 else ''} Found  (Click to view)")
-            self.status_btn.setStyleSheet(
-                "QPushButton#status_btn {"
-                "  background: transparent; border: none; text-align: left;"
-                "  padding: 4px 8px; border-radius: 4px; color: #f85149; font-weight: 600;"
-                "}"
-                "QPushButton#status_btn:hover { background: rgba(248, 81, 73, 0.1); }"
-            )
+            self._style_status_button(is_valid=False)
             self.status_btn.setToolTip(f"{count} validation issues blocking launch. Click to toggle panel.")
             self.launch_btn.setEnabled(False)
             # self.issues_panel.setVisible(True)  # Auto-expand drawer on issues detected
@@ -904,9 +916,9 @@ class MainWindow(QMainWindow):
 
     def _on_connection_changed(self, status: ConnectionStatus, info: str) -> None:
         """Update top-bar status badge and button state based on connection health."""
+        self._render_connection_indicator(status, info)
         if status == "connected":
             self._manual_connect_requested = False
-            self.conn_indicator.setText(f"<span style='color: #34d399; font-weight: 600;'>● {info}</span>")
             url = self.hydrus_page.api_url_edit.text().strip()
             self.conn_indicator.setToolTip(
                 f"Connected to {info} at {url}.\nClick 'Refresh' to re-sync tag services and open tabs."
@@ -916,7 +928,6 @@ class MainWindow(QMainWindow):
             self.sync_services_btn.setEnabled(True)
 
         elif status == "connecting":
-            self.conn_indicator.setText("<span style='color: #fbbf24; font-weight: 600;'>◌ Connecting...</span>")
             self.conn_indicator.setToolTip("Attempting to reach Hydrus Client API...")
             self.sync_services_btn.setText("Connecting...")
             self.sync_services_btn.setToolTip("Connection attempt in progress")
@@ -926,7 +937,6 @@ class MainWindow(QMainWindow):
             was_manual = self._manual_connect_requested
             self._manual_connect_requested = False
 
-            self.conn_indicator.setText("<span style='color: #f85149; font-weight: 600;'>▲ Connection Failed</span>")
             self.conn_indicator.setToolTip(
                 f"Hydrus connection failed:\n{info}\n\nClick 'Retry' to attempt reconnection."
             )
@@ -953,7 +963,6 @@ class MainWindow(QMainWindow):
 
         else:  # offline
             self._manual_connect_requested = False
-            self.conn_indicator.setText("<span style='color: #d4a359; font-weight: 600;'>○ Hydrus Offline</span>")
             self.conn_indicator.setToolTip(
                 "Hydrus Client API is not connected.\nClick 'Connect' to fetch live tag services and open tabs."
             )
