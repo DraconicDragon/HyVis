@@ -24,6 +24,7 @@ class ThemeProperty(StrEnum):
     STATE = "state"
     BTN_VARIANT = "btnVariant"
     BTN_SIZE = "btnSize"
+    TEXT_ROLE = "textRole"
 
 
 class CardTheme(StrEnum):
@@ -49,6 +50,16 @@ class ButtonVariant(StrEnum):
     DEFAULT = "default"
     PRIMARY = "primary"
     GHOST = "ghost"
+    DANGER = "danger"
+    DANGER_GHOST = "danger_ghost"
+
+
+class TextRole(StrEnum):
+    SECONDARY = "secondary"
+    MUTED = "muted"
+    ACCENT = "accent"
+    SUCCESS = "success"
+    WARNING = "warning"
     DANGER = "danger"
 
 

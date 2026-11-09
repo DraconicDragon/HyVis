@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from hyvis.gui.theme.tokens import ThemeTokens
 
+# todo: add AppButton to base_widgets and look over qpushbutton QSS again
+
 
 def render_surgical_stylesheet(t: ThemeTokens) -> str:
     """Generate scoped QSS for custom cards, scrollbars, and button variants."""
@@ -123,6 +125,14 @@ SectionCard[state="overridden"], TagSubsetCard[state="overridden"], TagRuleCard[
     background-color: {t.accent_wash} !important;
 }}
 
+/* Semantic Text Roles */
+QLabel[textRole="secondary"] {{ color: {t.text_secondary}; }}
+QLabel[textRole="muted"] {{ color: {t.text_muted}; }}
+QLabel[textRole="accent"] {{ color: {t.accent}; }}
+QLabel[textRole="success"] {{ color: {t.status_success}; }}
+QLabel[textRole="warning"] {{ color: {t.status_warning}; }}
+QLabel[textRole="danger"] {{ color: {t.status_danger}; }}
+
 /* Opt-In AppButton Variants */
 QPushButton[btnVariant] {{
     border-radius: {t.radius_sm}px;
@@ -191,6 +201,16 @@ QPushButton[btnVariant="danger"]:hover {{
     background-color: {t.status_danger};
     border-color: {t.status_danger};
     color: {t.text_on_accent};
+}}
+QPushButton[btnVariant="danger_ghost"] {{
+    background-color: transparent;
+    border: 1px solid {t.border_default};
+    color: {t.text_muted};
+}}
+QPushButton[btnVariant="danger_ghost"]:hover {{
+    background-color: {t.status_danger_wash};
+    border-color: {t.status_danger};
+    color: {t.status_danger};
 }}
 
 /* Custom Scrollbars */
