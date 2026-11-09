@@ -128,6 +128,12 @@ class LaunchDialog(QDialog):
 
         self._setup_ui()
         self._run_preflight()
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self) -> None:
+        self._sync_theme_labels()
+        if self._result:
+            self._update_preview_ui()
 
     def _setup_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -247,7 +253,7 @@ class LaunchDialog(QDialog):
             "Tip: Once local file paths are resolved after launching, Hydrus can be closed during inference if you need to free system resources.",
             container,
         )
-        tip_label.setStyleSheet(f"color: {self.tokens.text_secondary};")
+        tip_label.setObjectName("dialog_tip")
         tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
 
@@ -283,17 +289,12 @@ class LaunchDialog(QDialog):
         from PySide6.QtGui import QFontDatabase
 
         self.cmd_edit = AutoResizingTextEdit(self.cmd_card)
+        self.cmd_edit.setObjectName("cmd_edit")
         self.cmd_edit.setReadOnly(True)
 
         fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         fixed_font.setPointSize(10)
         self.cmd_edit.setFont(fixed_font)
-
-        self.cmd_edit.setStyleSheet(
-            f"QTextEdit {{ background: {self.tokens.bg_surface}; border: 1px solid {self.tokens.border_default}; "
-            f"border-radius: {self.tokens.radius_sm}px; padding: 4px 6px; color: {self.tokens.text_primary}; }}"
-            f"QTextEdit:focus {{ border-color: {self.tokens.accent}; }}"
-        )
         cmd_layout.addWidget(self.cmd_edit)
 
         self.cmd_card.setContentLayout(cmd_layout)
@@ -333,6 +334,12 @@ class LaunchDialog(QDialog):
 
         # Initial command text population
         self._sync_command_text()
+
+    def _sync_theme_labels(self) -> None:
+        if not self._result:
+            self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
+        else:
+            self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_success};")
 
     def _sync_command_text(self) -> None:
         """Update command text from current settings when not in manual edit mode."""

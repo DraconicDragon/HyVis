@@ -58,7 +58,7 @@ from hyvis.gui.settings import (
     save_session_tmp,
 )
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
-from hyvis.gui.theme import ThemeTokens, theme_manager
+from hyvis.gui.theme import ThemeProperty, ThemeTokens, WidgetState, theme_manager
 
 
 @dataclass(frozen=True)
@@ -473,6 +473,7 @@ class MainWindow(QMainWindow):
 
         # 3. Resizable Issues Panel (Drawer)
         self.issues_panel = QFrame(self.main_splitter)
+        self.issues_panel.setObjectName("issues_panel")
         self.issues_panel.setFrameShape(QFrame.Shape.StyledPanel)
         issues_layout = QVBoxLayout(self.issues_panel)
         issues_layout.setContentsMargins(12, 6, 12, 8)
@@ -485,6 +486,7 @@ class MainWindow(QMainWindow):
         issues_header.addStretch(1)
 
         self.close_issues_btn = QPushButton("✕", self.issues_panel)
+        self.close_issues_btn.setObjectName("close_issues_btn")
         self.close_issues_btn.setFixedWidth(24)
         self.close_issues_btn.setFixedHeight(24)
         self.close_issues_btn.setToolTip("Hide Issues Panel")
@@ -493,6 +495,7 @@ class MainWindow(QMainWindow):
         issues_layout.addLayout(issues_header)
 
         self.issues_list = QListWidget(self.issues_panel)
+        self.issues_list.setObjectName("issues_list")
         self.issues_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.issues_list.customContextMenuRequested.connect(self._on_issues_context_menu)
         self.issues_list.itemClicked.connect(self._on_issue_selected)
@@ -554,38 +557,17 @@ class MainWindow(QMainWindow):
             f"<span style='font-size: 24px; font-weight: 650; letter-spacing: 0.5px;'>HyVis</span> "
             f"<span style='color: {tokens.text_secondary}; font-size: 14px; font-weight: 450;'>{get_version()}</span>"
         )
-        self.issues_panel.setStyleSheet(
-            f"QFrame {{ background: {tokens.bg_surface}; border-top: 1px solid {tokens.border_default}; }}"
-        )
-        self.close_issues_btn.setStyleSheet(
-            f"QPushButton {{ border: none; color: {tokens.text_muted}; font-weight: bold; border-radius: 3px; }}"
-            f"QPushButton:hover {{ color: {tokens.text_primary}; background: {tokens.bg_subtle_hover}; }}"
-        )
-        self.issues_list.setStyleSheet(
-            "QListWidget { background: transparent; "
-            f"border: 1px solid {tokens.border_subtle}; border-radius: {tokens.radius_sm}px; outline: none; }}"
-            "QListWidget::item { padding: 6px 10px; "
-            f"color: {tokens.status_danger}; border-bottom: 1px solid {tokens.border_subtle}; "
-            f"border-radius: {tokens.radius_sm}px; }}"
-            "QListWidget::item:hover { "
-            f"background: {tokens.status_danger_wash}; color: {tokens.text_primary}; }}"
-            "QListWidget::item:selected { "
-            f"background: {tokens.status_danger_wash}; color: {tokens.text_primary}; }}"
-        )
         self._style_status_button(self.issues_list.count() == 0)
         self._render_connection_indicator(self.state.connection_status, self.state.connection_info)
 
     def _style_status_button(self, is_valid: bool) -> None:
-        tokens = self.tokens
-        color = tokens.status_success if is_valid else tokens.status_danger
-        hover = tokens.status_success_wash if is_valid else tokens.status_danger_wash
-        weight = "normal" if is_valid else "600"
-        self.status_btn.setStyleSheet(
-            "QPushButton#status_btn {"
-            f"background: transparent; border: none; text-align: left; padding: 4px 8px; "
-            f"border-radius: {tokens.radius_sm}px; color: {color}; font-weight: {weight}; }}"
-            f"QPushButton#status_btn:hover {{ background: {hover}; }}"
-        )
+        state = WidgetState.DEFAULT if is_valid else WidgetState.ERROR
+        self.status_btn.setProperty(ThemeProperty.STATE, state)
+        style = self.status_btn.style()
+        if style:
+            style.unpolish(self.status_btn)
+            style.polish(self.status_btn)
+            self.status_btn.update()
 
     def _render_connection_indicator(self, status: ConnectionStatus, info: str) -> None:
         tokens = self.tokens

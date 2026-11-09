@@ -65,6 +65,78 @@ QLineEdit[state="overridden"], QListWidget[state="overridden"], QTableWidget[sta
     background-color: {t.accent_wash} !important;
 }}
 
+/* Issues Panel & List */
+QFrame#issues_panel {{
+    background-color: {t.bg_surface};
+    border-top: 1px solid {t.border_default};
+}}
+QPushButton#close_issues_btn {{
+    border: none;
+    color: {t.text_muted};
+    font-weight: bold;
+    border-radius: 3px;
+}}
+QPushButton#close_issues_btn:hover {{
+    color: {t.text_primary};
+    background-color: {t.bg_subtle_hover};
+}}
+QListWidget#issues_list {{
+    background: transparent;
+    border: 1px solid {t.border_subtle};
+    border-radius: {t.radius_sm}px;
+    outline: none;
+}}
+QListWidget#issues_list::item {{
+    padding: 6px 10px;
+    color: {t.status_danger};
+    border-bottom: 1px solid {t.border_subtle};
+    border-radius: {t.radius_sm}px;
+}}
+QListWidget#issues_list::item:hover {{
+    background-color: {t.status_danger_wash};
+    color: {t.text_primary};
+}}
+QListWidget#issues_list::item:selected {{
+    background-color: {t.status_danger_wash};
+    color: {t.text_primary};
+}}
+
+/* Bottom Status Button */
+QPushButton#status_btn {{
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 4px 8px;
+    border-radius: {t.radius_sm}px;
+    color: {t.status_success};
+    font-weight: normal;
+}}
+QPushButton#status_btn:hover {{
+    background-color: {t.status_success_wash};
+}}
+QPushButton#status_btn[state="error"] {{
+    color: {t.status_danger};
+    font-weight: 600;
+}}
+QPushButton#status_btn[state="error"]:hover {{
+    background-color: {t.status_danger_wash};
+}}
+
+/* Execution Command Box & Dialog Tips */
+QTextEdit#cmd_edit, AutoResizingTextEdit#cmd_edit {{
+    background-color: {t.bg_surface};
+    border: 1px solid {t.border_default};
+    border-radius: {t.radius_sm}px;
+    padding: 4px 6px;
+    color: {t.text_primary};
+}}
+QTextEdit#cmd_edit:focus, AutoResizingTextEdit#cmd_edit:focus {{
+    border-color: {t.accent};
+}}
+QLabel#dialog_tip {{
+    color: {t.text_secondary};
+}}
+
 /* Custom Cards */
 SectionCard, TagSubsetCard, TagRuleCard {{
     background-color: {t.bg_surface};
