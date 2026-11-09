@@ -46,8 +46,6 @@ class Divider(QFrame):
         if shadow is not None:
             self.setFrameShadow(shadow)
 
-        self.setStyleSheet("color: #333;")
-
 
 # endregion
 
