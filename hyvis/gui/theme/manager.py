@@ -24,7 +24,7 @@ THEME_PROPERTY_NAMES = tuple(p.encode() for p in ThemeProperty)
 # region Dynamic Repolish Mixin
 
 
-class DynamicStyleMixin:
+class AutoRepolishMixin:
     """Automatically unpolishes and repolishes QSS when dynamic styling properties change."""
 
     _is_repolishing: bool = False

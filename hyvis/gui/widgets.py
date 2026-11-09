@@ -45,12 +45,12 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.base_widgets import AutoResizingTableWidget, FloatSpinBox, SuggestionComboBox
-from hyvis.gui.theme import ButtonVariant, CardTheme, DynamicStyleMixin, TextRole, ThemeProperty, WidgetState
+from hyvis.gui.theme import AutoRepolishMixin, ButtonVariant, CardTheme, TextRole, ThemeProperty, WidgetState
 
 HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
 
 
-class SemanticLabel(DynamicStyleMixin, QLabel):
+class SemanticLabel(AutoRepolishMixin, QLabel):
     """A label with a semantic text role for shared styling."""
 
     def __init__(
@@ -152,10 +152,10 @@ def add_form_row(
 # region Section Card
 
 
-class SectionCard(DynamicStyleMixin, QFrame):
+class SectionCard(AutoRepolishMixin, QFrame):
     """
     Structured card with an inline header and QSS property integration.
-    Uses DynamicStyleMixin for automatic repolishing on property updates.
+    Uses AutoRepolishMixin for automatic repolishing on property updates.
     """
 
     toggled = Signal(bool)
@@ -225,7 +225,7 @@ class SectionCard(DynamicStyleMixin, QFrame):
         return self._content_layout
 
     def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
-        """Set state property; DynamicStyleMixin auto-repolishes QSS rules."""
+        """Set state property; AutoRepolishMixin auto-repolishes QSS rules."""
         if is_error:
             self.setProperty(ThemeProperty.STATE, WidgetState.ERROR)
         elif is_overridden:
@@ -1581,7 +1581,7 @@ class CategoryLimitEditor(QWidget):
 # region Tag Subset List Editor (Joint Subset Limits)
 
 
-class TagSubsetCard(DynamicStyleMixin, QFrame):
+class TagSubsetCard(AutoRepolishMixin, QFrame):
     """
     A single card representing a Joint Subset Limit rule (max_tags_per_subset).
     Eliminates comma bugs by managing tags via StringListEditor (with multi-line paste).
@@ -1770,7 +1770,7 @@ class TagSubsetListEditor(QWidget):
 # region Tag Rule & Query Stacked Card Editors
 
 
-class TagRuleCard(DynamicStyleMixin, QFrame):
+class TagRuleCard(AutoRepolishMixin, QFrame):
     """
     A single card mapping tags to a specific Hydrus service key.
     Used for:
