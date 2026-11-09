@@ -45,9 +45,22 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.base_widgets import AutoResizingTableWidget, FloatSpinBox, SuggestionComboBox
-from hyvis.gui.theme import CardTheme, DynamicStyleMixin, ThemeProperty, WidgetState
+from hyvis.gui.theme import ButtonVariant, CardTheme, DynamicStyleMixin, TextRole, ThemeProperty, WidgetState
 
 HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
+
+
+class SemanticLabel(DynamicStyleMixin, QLabel):
+    """A label with a semantic text role for shared styling."""
+
+    def __init__(
+        self,
+        text: str = "",
+        role: TextRole = TextRole.MUTED,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self.setProperty(ThemeProperty.TEXT_ROLE, role)
 
 
 def setup_field_tooltip(widget: QWidget, field_info: Any) -> None:
@@ -192,7 +205,7 @@ class SectionCard(DynamicStyleMixin, QFrame):
 
         header_layout.addStretch(1)
 
-        self._badge_label = QLabel(self._header_widget)
+        self._badge_label = SemanticLabel(parent=self._header_widget, role=TextRole.ACCENT)
         self._badge_label.setStyleSheet("font-size: 12px; font-weight: 500;")
         self._badge_label.setVisible(False)
         header_layout.addWidget(self._badge_label)
@@ -258,9 +271,10 @@ class SectionCard(DynamicStyleMixin, QFrame):
         self._title_label.setText(title)
         self._update_header_visibility()
 
-    def setBadge(self, text: str, color: str = "#38bdf8") -> None:
+    def setBadge(self, text: str, tone: TextRole = TextRole.ACCENT) -> None:
+        self._badge_label.setProperty(ThemeProperty.TEXT_ROLE, tone)
         if text:
-            self._badge_label.setText(f"<span style='color: {color};'>{text}</span>")
+            self._badge_label.setText(text)
             self._badge_label.setVisible(True)
         else:
             self._badge_label.clear()
@@ -592,8 +606,8 @@ class BaseStackedEntityEditor(QWidget):
         self._root_layout.addWidget(self._stack_widget)
 
         # 2. Empty placeholder label
-        self.empty_label = QLabel(self.empty_text, self)
-        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self.empty_label = SemanticLabel(self.empty_text, parent=self)
+        self.empty_label.setStyleSheet("font-style: italic; padding: 4px;")
         self._root_layout.addWidget(self.empty_label)
 
         # 3. Add button
@@ -683,12 +697,10 @@ class BaseStackedEntityEditor(QWidget):
         row_layout.addWidget(combo, stretch=1)
 
         del_btn = QPushButton("✕", row_widget)
+        del_btn.setProperty(ThemeProperty.BTN_VARIANT, ButtonVariant.DANGER_GHOST)
         del_btn.setFixedWidth(28)
         del_btn.setToolTip("Remove this entry")
-        del_btn.setStyleSheet(
-            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
-            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
-        )
+        del_btn.setStyleSheet("font-weight: bold;")
         del_btn.clicked.connect(lambda: self._on_remove_row(row_widget))
         row_layout.addWidget(del_btn)
 
@@ -1599,12 +1611,10 @@ class TagSubsetCard(DynamicStyleMixin, QFrame):
         header_layout.addStretch(1)
 
         self.del_btn = QPushButton("✕", self)
+        self.del_btn.setProperty(ThemeProperty.BTN_VARIANT, ButtonVariant.DANGER_GHOST)
         self.del_btn.setFixedWidth(26)
         self.del_btn.setToolTip("Remove this subset group")
-        self.del_btn.setStyleSheet(
-            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
-            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
-        )
+        self.del_btn.setStyleSheet("font-weight: bold;")
         self.del_btn.clicked.connect(self.delete_requested.emit)
         header_layout.addWidget(self.del_btn)
 
@@ -1613,8 +1623,7 @@ class TagSubsetCard(DynamicStyleMixin, QFrame):
         # 2. Limit row
         limit_row = QHBoxLayout()
         limit_row.setSpacing(8)
-        limit_lbl = QLabel("Max Output Limit:", self)
-        limit_lbl.setStyleSheet("color: #b0bec5;")
+        limit_lbl = SemanticLabel("Max Output Limit:", TextRole.SECONDARY, self)
         limit_row.addWidget(limit_lbl)
 
         self.limit_spin = QSpinBox(self)
@@ -1624,16 +1633,14 @@ class TagSubsetCard(DynamicStyleMixin, QFrame):
         self.limit_spin.valueChanged.connect(lambda _: self.changed.emit())
         limit_row.addWidget(self.limit_spin)
 
-        tags_suffix = QLabel("tag(s)", self)
-        tags_suffix.setStyleSheet("color: #888;")
+        tags_suffix = SemanticLabel("tag(s)", TextRole.MUTED, self)
         limit_row.addWidget(tags_suffix)
 
         limit_row.addStretch(1)
         card_layout.addLayout(limit_row)
 
         # 3. Tags in subset
-        t_label = QLabel("Tags in Subset:", self)
-        t_label.setStyleSheet("color: #b0bec5;")
+        t_label = SemanticLabel("Tags in Subset:", TextRole.SECONDARY, self)
         card_layout.addWidget(t_label)
 
         self.tags_editor = StringListEditor(placeholder="Add tag to subset group...", parent=self)
@@ -1679,8 +1686,10 @@ class TagSubsetListEditor(QWidget):
         layout.addWidget(self._cards_widget)
 
         # 2. Empty placeholder
-        self.empty_label = QLabel("(No joint subset limits configured — click '+ Add Subset Group' below)", self)
-        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self.empty_label = SemanticLabel(
+            "(No joint subset limits configured — click '+ Add Subset Group' below)", parent=self
+        )
+        self.empty_label.setStyleSheet("font-style: italic; padding: 4px;")
         layout.addWidget(self.empty_label)
 
         # 3. Add button
@@ -1807,12 +1816,10 @@ class TagRuleCard(DynamicStyleMixin, QFrame):
         header_layout.addStretch(1)
 
         self.del_btn = QPushButton("✕", self)
+        self.del_btn.setProperty(ThemeProperty.BTN_VARIANT, ButtonVariant.DANGER_GHOST)
         self.del_btn.setFixedWidth(26)
         self.del_btn.setToolTip("Remove this rule")
-        self.del_btn.setStyleSheet(
-            "QPushButton { color: #888; font-weight: bold; border: 1px solid #444; border-radius: 3px; }"
-            "QPushButton:hover { color: #d32f2f; border-color: #d32f2f; background: rgba(211, 47, 47, 0.1); }"
-        )
+        self.del_btn.setStyleSheet("font-weight: bold;")
         self.del_btn.clicked.connect(self.delete_requested.emit)
         header_layout.addWidget(self.del_btn)
 
@@ -1821,8 +1828,7 @@ class TagRuleCard(DynamicStyleMixin, QFrame):
         # 2. Target Service row
         svc_row = QHBoxLayout()
         svc_row.setSpacing(8)
-        svc_label = QLabel("Target Service:", self)
-        svc_label.setStyleSheet("color: #b0bec5;")
+        svc_label = SemanticLabel("Target Service:", TextRole.SECONDARY, self)
         svc_row.addWidget(svc_label)
 
         self.service_combo = QComboBox(self)
@@ -1834,8 +1840,7 @@ class TagRuleCard(DynamicStyleMixin, QFrame):
         card_layout.addLayout(svc_row)
 
         # 3. Tags list editor
-        t_label = QLabel(tags_label, self)
-        t_label.setStyleSheet("color: #b0bec5;")
+        t_label = SemanticLabel(tags_label, TextRole.SECONDARY, self)
         card_layout.addWidget(t_label)
 
         self.tags_editor = StringListEditor(placeholder=placeholder, parent=self)
@@ -1975,8 +1980,8 @@ class TagRuleListEditor(QWidget):
         self._root_layout.addWidget(self._cards_widget)
 
         # 2. Empty placeholder
-        self.empty_label = QLabel(empty_text, self)
-        self.empty_label.setStyleSheet("color: #888; font-style: italic; padding: 4px;")
+        self.empty_label = SemanticLabel(empty_text, parent=self)
+        self.empty_label.setStyleSheet("font-style: italic; padding: 4px;")
         self._root_layout.addWidget(self.empty_label)
 
         # 3. Add button

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import CardTheme
+from hyvis.gui.theme import CardTheme, TextRole
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
     CategoryTagEditor,
@@ -467,7 +467,7 @@ class FiltersPage(BaseConfigPage):
                         card.setChecked(is_filtered)
                         card.setBadge(
                             "(Filter Active)" if is_filtered else "(All Categories Allowed)",
-                            color=self.tokens.status_success if is_filtered else self.tokens.text_muted,
+                            tone=TextRole.SUCCESS if is_filtered else TextRole.MUTED,
                         )
                     else:
                         card.setCheckable(False)
@@ -625,7 +625,7 @@ class FiltersPage(BaseConfigPage):
             if card is self.cat_card:
                 card.setBadge(
                     "(Filter Active)" if checked else "(All Categories Allowed)",
-                    color=self.tokens.status_success if checked else self.tokens.text_muted,
+                    tone=TextRole.SUCCESS if checked else TextRole.MUTED,
                 )
                 self._save_active_scope_to_state()
                 self._update_badges_and_tooltips()
@@ -712,7 +712,7 @@ class FiltersPage(BaseConfigPage):
                         break
 
                 if has_divergence:
-                    card.setBadge("⚡ Overridden", color=self.tokens.accent)
+                    card.setBadge("⚡ Overridden", tone=TextRole.ACCENT)
                     card.set_info_tooltip(f"{base_desc}\n\n⚡ Overridden in one or more models.")
                 else:
                     card.setBadge("")
@@ -720,10 +720,10 @@ class FiltersPage(BaseConfigPage):
             else:
                 # Model Scope: indicate custom override vs inherited
                 if card.isChecked():
-                    card.setBadge("Custom Override", color=self.tokens.accent)
+                    card.setBadge("Custom Override", tone=TextRole.ACCENT)
                     card.set_info_tooltip(f"{base_desc}\n\nCustom override active for this model.")
                 else:
-                    card.setBadge("Inherited from Global", color=self.tokens.text_muted)
+                    card.setBadge("Inherited from Global", tone=TextRole.MUTED)
                     card.set_info_tooltip(f"{base_desc}\n\nInherits live baseline values from Global Output Filter.")
 
         # 2. Update Input Widget Highlighting & Tooltips across all cards
