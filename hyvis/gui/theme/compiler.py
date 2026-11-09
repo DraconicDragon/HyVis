@@ -26,11 +26,6 @@ QSplitter::handle:vertical {
     background-color: transparent;
     border-top: 1px solid palette(mid);
 }
-QSplitter::handle:horizontal {
-    width: 6px;
-    background-color: transparent;
-    border-left: 1px solid palette(mid);
-}
 """
 
 
