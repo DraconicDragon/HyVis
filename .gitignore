@@ -2,6 +2,7 @@
 *.db
 *.db-shm
 *.db-wal
+*.db.*
 t_*.toml
 md_notes.md
 md_notes.png

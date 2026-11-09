@@ -49,7 +49,10 @@
     - Change of UI layout to be in 2 columns (like add/remove tags) may be beneficial for efficient space usage
   - replace tables with custom compound of widgets, tables too much styling and extra functionality when i only kinda need rows of widgets together and table cells dont seem to be a nice place to put widgets into
 
-- Least priority: polish widget styling so it works with light mode better (the custom style for the page switcher list view on the left is too bright for light mode, text mainly)
+- Least priority:
+  - troubleshoot accent color application and dynamic updates at runtime
+    - For custom themes that use QPalette, the QPalette needs to be reset to get updated accent color, so truly dynamic accent color not possible
+      - But at least it should be saved on launch so it can be used again, right now its not possible to use it after switching to custom theme
 
 ### Potential Settings To Implement
 
