@@ -10,10 +10,10 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 
 from hyvis.config import AppConfig
-from hyvis.gui.theme import ThemeTokens, theme_manager
+from hyvis.gui.theme import ThemeSubscriberMixin
 
 
-class BaseConfigPage(QWidget):
+class BaseConfigPage(ThemeSubscriberMixin, QWidget):
     """
     Base widget for all primary configuration pages.
 
@@ -21,16 +21,13 @@ class BaseConfigPage(QWidget):
       - `changed`: Emitted when any setting is modified by the user.
       - `load_config(cfg)`: Populates UI components from a validated AppConfig.
       - `apply_to_dict(data)`: Serializes UI component states into a configuration dictionary.
+      - Inherits `ThemeSubscriberMixin` for automatic self.tokens and refresh_theme().
     """
 
     changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        theme_manager.theme_changed.connect(self.refresh_theme)
-
-    def refresh_theme(self) -> None:
-        """Refresh page-specific content that embeds theme token values."""
+        super().__init__(parent=parent)
 
     def load_config(self, cfg: AppConfig) -> None:
         """Populate page controls from an incoming AppConfig instance."""
@@ -39,8 +36,3 @@ class BaseConfigPage(QWidget):
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         """Serialize active page controls into the target dictionary."""
         raise NotImplementedError
-
-    @property
-    def tokens(self) -> ThemeTokens:
-        """Convenience property for live, theme-synchronized tokens."""
-        return theme_manager.current_tokens

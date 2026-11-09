@@ -5,6 +5,7 @@ manager.py — Runtime theme controller with instant, zero-delay synchronization
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
@@ -20,8 +21,10 @@ logger = logging.getLogger(__name__)
 
 THEME_PROPERTY_NAMES = tuple(p.encode() for p in ThemeProperty)
 
+# NOTE: accent color does not update automatically in-app when changed in OS settings. Needs app restart
+# AFAIK cant be easily fixed using only Qt stuff
 
-# region Dynamic Repolish Mixin
+# region Component & Subscriber Mixins
 
 
 class AutoRepolishMixin:
@@ -44,6 +47,39 @@ class AutoRepolishMixin:
                         self._is_repolishing = False
 
         return super().event(event)  # type: ignore
+
+
+class ThemeSubscriberMixin:
+    """
+    Pure Python mixin for QWidgets, QDialogs, and QWindows that consume theme tokens.
+    Automatically connects to theme_manager.theme_changed and provides self.tokens.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        theme_manager.theme_changed.connect(self._on_theme_changed_subscriber)
+
+        # Clean up signal connection when Qt destroys the underlying C++ widget
+        if hasattr(self, "destroyed"):
+            self.destroyed.connect(self._on_destroyed_cleanup)
+
+    def _on_destroyed_cleanup(self) -> None:
+        try:
+            theme_manager.theme_changed.disconnect(self._on_theme_changed_subscriber)
+        except Exception:
+            pass
+
+    def _on_theme_changed_subscriber(self, tokens: ThemeTokens) -> None:
+        del tokens
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
+        """Override in subclasses to update programmatic colors or HTML spans."""
+
+    @property
+    def tokens(self) -> ThemeTokens:
+        """Convenience property for live, theme-synchronized tokens."""
+        return theme_manager.current_tokens
 
 
 # endregion

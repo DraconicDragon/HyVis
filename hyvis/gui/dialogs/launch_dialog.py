@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig
 from hyvis.gui.base_widgets import Divider
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
-from hyvis.gui.theme import ThemeTokens, theme_manager
+from hyvis.gui.theme import ThemeSubscriberMixin
 from hyvis.gui.widgets import SectionCard
 from hyvis.hydrus import HydrusClient, HydrusError
 from hyvis.preflight import PreflightResult, run_preflight
@@ -100,12 +100,8 @@ class _PreviewCheckWorker(QRunnable):
             self.signals.error.emit(str(exc))
 
 
-class LaunchDialog(QDialog):
+class LaunchDialog(ThemeSubscriberMixin, QDialog):
     """Modal preflight review and terminal launcher."""
-
-    @property
-    def tokens(self) -> ThemeTokens:
-        return theme_manager.current_tokens
 
     def __init__(
         self,
@@ -113,7 +109,7 @@ class LaunchDialog(QDialog):
         config_path: Path,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self.cfg = config
         self.config_path = config_path
 
@@ -128,9 +124,9 @@ class LaunchDialog(QDialog):
 
         self._setup_ui()
         self._run_preflight()
-        theme_manager.theme_changed.connect(self._on_theme_changed)
 
-    def _on_theme_changed(self) -> None:
+    def refresh_theme(self) -> None:
+        """Automatically called by ThemeSubscriberMixin when theme changes."""
         self._sync_theme_labels()
         if self._result:
             self._update_preview_ui()

@@ -14,7 +14,7 @@ from hyvis.gui.theme.colors import (
     is_palette_dark,
 )
 from hyvis.gui.theme.compiler import render_surgical_stylesheet
-from hyvis.gui.theme.manager import AutoRepolishMixin, ThemeManager, theme_manager
+from hyvis.gui.theme.manager import AutoRepolishMixin, ThemeManager, ThemeSubscriberMixin, theme_manager
 from hyvis.gui.theme.presets import BUILTIN_THEMES, ThemePreset
 from hyvis.gui.theme.tokens import (
     ButtonSize,
@@ -53,12 +53,12 @@ __all__ = [
     "ButtonVariant",
     "CardTheme",
     "CheckBoxCursorFilter",
-    "DynamicStyleMixin",
     "HyVisAppStyle",
     "TextRole",
     "ThemeManager",
     "ThemePreset",
     "ThemeProperty",
+    "ThemeSubscriberMixin",
     "ThemeTokens",
     "WidgetState",
     "adjust_color_lightness",

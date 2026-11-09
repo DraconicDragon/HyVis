@@ -58,7 +58,7 @@ from hyvis.gui.settings import (
     save_session_tmp,
 )
 from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
-from hyvis.gui.theme import ThemeProperty, ThemeTokens, WidgetState, theme_manager
+from hyvis.gui.theme import ThemeProperty, ThemeSubscriberMixin, WidgetState
 
 
 @dataclass(frozen=True)
@@ -240,7 +240,7 @@ class WindowDragFilter(QObject):
         return super().eventFilter(obj, event)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(ThemeSubscriberMixin, QMainWindow):
     def __init__(self, state: ConfigState | None = None, *, dev_mode: bool = False) -> None:
         super().__init__()
         self.state = state or ConfigState()
@@ -256,7 +256,8 @@ class MainWindow(QMainWindow):
         self._setup_menu_bar()
         self._setup_ui()
         self._setup_signals()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+
+        # Initial theme sync (ThemeSubscriberMixin auto-handles subsequent runtime theme switches)
         self.refresh_theme()
 
         # Enable native window dragging on menu and top bar
@@ -546,10 +547,6 @@ class MainWindow(QMainWindow):
         self.state.connection_changed.connect(self._on_connection_changed)
 
         self._setup_page_signals()
-
-    @property
-    def tokens(self) -> ThemeTokens:
-        return theme_manager.current_tokens
 
     def refresh_theme(self) -> None:
         tokens = self.tokens
