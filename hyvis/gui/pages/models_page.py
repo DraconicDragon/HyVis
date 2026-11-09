@@ -100,7 +100,7 @@ class ModelsPage(BaseConfigPage):
     def refresh_theme(self) -> None:
         if 0 <= self._current_index < len(self._models_data):
             model_id = self.model_id_combo.currentText().strip()
-            self._update_availability(model_id)
+            self._update_model_details(model_id) # this function also calls _update_availability()
             self._update_filter_status_card(self._models_data[self._current_index])
 
     def _setup_ui(self) -> None:
@@ -577,7 +577,9 @@ class ModelsPage(BaseConfigPage):
             # Resolve effective repository without extra text or fluff
             repo = self._get_effective_repo_id(model_id, selected_var_data)
             if repo:
-                self.info_repo_lbl.setText(f'<a href="https://huggingface.co/{repo}">{repo}</a>')
+                self.info_repo_lbl.setText(
+                    f'<a href="https://huggingface.co/{repo}" style="color: {self.tokens.status_info};">{repo}</a>'
+                )
             else:
                 self.info_repo_lbl.setText(f"<span style='color: {self.tokens.text_muted};'>(None / Custom)</span>")
 

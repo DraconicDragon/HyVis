@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.base_widgets import Divider, SmoothScrollArea
+from hyvis.gui.theme import theme_manager
 from hyvis.system_info import format_system_info_text, get_system_info
 
 
@@ -53,7 +54,9 @@ class AboutDialog(QDialog):
         header_layout.addWidget(title_desc_lbl)
 
         meta_lbl = QLabel(
-            '<a href="https://github.com/DraconicDragon/HyVis">GitHub Repository</a> &nbsp;|&nbsp; License: MIT',
+            f'<a href="https://github.com/DraconicDragon/HyVis" '
+            f'style="color: {theme_manager.current_tokens.status_info};">GitHub Repository</a> '
+            "&nbsp;|&nbsp; License: MIT",
             self,
         )
         meta_lbl.setOpenExternalLinks(True)
