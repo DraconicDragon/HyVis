@@ -85,8 +85,8 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 
 
 def _build_cards(t: ThemeTokens) -> str:
-    purple_wash = "rgba(168, 85, 247, 0.035)" if t.is_dark else "rgba(168, 85, 247, 0.06)"
-    purple_border = "rgba(168, 85, 247, 0.18)" if t.is_dark else "rgba(168, 85, 247, 0.25)"
+    purple_wash = "rgba(168, 85, 247, 0.12)" if t.is_dark else "rgba(168, 85, 247, 0.09)"
+    purple_border = "rgba(168, 85, 247, 0.50)" if t.is_dark else "rgba(168, 85, 247, 0.40)"
 
     return f"""
 /* Custom Cards Base */
@@ -289,6 +289,7 @@ QListWidget#sidebar::item {{
     padding: 10px 14px;
     margin: 4px 12px 8px 0px;
     border-radius: {t.radius_md}px;
+    border: 1px solid transparent;
     color: {t.text_primary};
 }}
 QListWidget#sidebar::item:hover {{
@@ -297,7 +298,8 @@ QListWidget#sidebar::item:hover {{
 }}
 QListWidget#sidebar::item:selected {{
     background-color: {t.accent_wash};
-    color: {t.accent};
+    border: 1px solid {t.accent_border};
+    color: {t.text_primary};
     font-weight: 600;
 }}
 
