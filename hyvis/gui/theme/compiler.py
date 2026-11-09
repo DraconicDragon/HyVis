@@ -132,6 +132,7 @@ QLabel[textRole="accent"] {{ color: {t.accent}; }}
 QLabel[textRole="success"] {{ color: {t.status_success}; }}
 QLabel[textRole="warning"] {{ color: {t.status_warning}; }}
 QLabel[textRole="danger"] {{ color: {t.status_danger}; }}
+QLabel[textRole="info"] {{ color: {t.status_info}; }}
 
 /* Opt-In AppButton Variants */
 QPushButton[btnVariant] {{

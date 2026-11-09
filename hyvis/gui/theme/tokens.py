@@ -61,6 +61,7 @@ class TextRole(StrEnum):
     SUCCESS = "success"
     WARNING = "warning"
     DANGER = "danger"
+    INFO = "info"
 
 
 class ButtonSize(StrEnum):

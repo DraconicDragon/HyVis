@@ -510,7 +510,7 @@ class FiltersPage(BaseConfigPage):
             model_id = str(self._models_data[model_idx].get("model_id") or f"Model {model_idx + 1}")
 
         self.banner_label.setText(
-            f"<b>Configuring overrides for: <span style='color: {self.tokens.accent};'>{model_id}</span></b><br>"
+            f"<b>Configuring overrides for: <span style='color: {self.tokens.status_info};'>{model_id}</span></b><br>"
             f"<span style='color: {self.tokens.text_secondary};'>"
             "Unchecked cards inherit live baseline settings from Global Output Filter.</span>"
         )
@@ -712,7 +712,7 @@ class FiltersPage(BaseConfigPage):
                         break
 
                 if has_divergence:
-                    card.setBadge("⚡ Overridden", tone=TextRole.ACCENT)
+                    card.setBadge("⚡ Overridden", tone=TextRole.INFO)
                     card.set_info_tooltip(f"{base_desc}\n\n⚡ Overridden in one or more models.")
                 else:
                     card.setBadge("")
@@ -720,7 +720,7 @@ class FiltersPage(BaseConfigPage):
             else:
                 # Model Scope: indicate custom override vs inherited
                 if card.isChecked():
-                    card.setBadge("Custom Override", tone=TextRole.ACCENT)
+                    card.setBadge("Custom Override", tone=TextRole.INFO)
                     card.set_info_tooltip(f"{base_desc}\n\nCustom override active for this model.")
                 else:
                     card.setBadge("Inherited from Global", tone=TextRole.MUTED)

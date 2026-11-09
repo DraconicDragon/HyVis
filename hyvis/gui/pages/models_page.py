@@ -1160,7 +1160,7 @@ class ModelsPage(BaseConfigPage):
         if m_filter:
             override_count = len(m_filter)
             self.filter_status_label.setText(
-                f"<span style='color: {self.tokens.accent};'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
+                f"<span style='color: {self.tokens.status_info};'>Custom overrides active ({override_count} section{'s' if override_count != 1 else ''})</span>"
             )
         else:
             self.filter_status_label.setText(
