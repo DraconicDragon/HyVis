@@ -94,6 +94,7 @@ class ThemeTokens:
     text_primary: str
     text_secondary: str
     text_muted: str
+    text_disabled: str
     text_on_accent: str
 
     # Accent
@@ -163,6 +164,7 @@ class ThemeTokens:
             text_primary=text_color,
             text_secondary=hex_to_rgba(text_color, 0.75 if dark else 0.70),
             text_muted=hex_to_rgba(text_color, 0.50),
+            text_disabled=hex_to_rgba(text_color, 0.4 if dark else 0.55),
             text_on_accent=contrast_text,
             accent=accent_hex,
             accent_hover=adjust_color_lightness(accent_hex, 1.15 if dark else 0.90),

@@ -249,6 +249,17 @@ QPushButton[btnVariant="danger_ghost"]:hover {{
 
 def _build_validation_and_text_roles(t: ThemeTokens) -> str:
     return f"""
+/* Universal Disabled State Contrast */
+QWidget:disabled,
+QLabel:disabled,
+QLineEdit:disabled,
+QComboBox:disabled,
+QAbstractSpinBox:disabled,
+QPushButton:disabled,
+QPushButton[btnVariant]:disabled {{
+    color: {t.text_disabled} !important;
+}}
+
 /* Targeted Form State Highlights */
 QLineEdit[state="error"], QListWidget[state="error"], QTableWidget[state="error"], AutoResizingTableWidget[state="error"] {{
     border: 1.5px solid {t.status_danger} !important;
