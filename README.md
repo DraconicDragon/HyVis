@@ -30,7 +30,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 ## Some Key Features
 
 - **Desktop GUI (**`hyvis-gui`**)**: PySide6 (Qt) based UI for creating/editing HyVis TOML configuration files - with live Hydrus service sync and real-time validation; Should be a decent UX boost over editing TOMLs directly
-- **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying [`--extra-hash-file`](#extra-hash-file) (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
+- **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying `--extra-hash-file` (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
 - **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
 - **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
 - **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
