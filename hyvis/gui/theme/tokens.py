@@ -136,10 +136,12 @@ class ThemeTokens:
         dark = is_palette_dark(palette)
         accent_hex = accent_override or get_system_accent_color(palette)
 
-        text_color = palette.color(QPalette.ColorRole.Text).name()
+        text_color = palette.color(QPalette.ColorRole.WindowText).name()
         base_color = palette.color(QPalette.ColorRole.Base).name()
         window_color = palette.color(QPalette.ColorRole.Window).name()
         mid_color = palette.color(QPalette.ColorRole.Mid).name()
+
+        card_surface = adjust_color_lightness(window_color, 1.10) if dark else base_color
 
         # Semantic status colors
         success_hex = "#34d399" if dark else "#059669"
@@ -152,14 +154,14 @@ class ThemeTokens:
 
         return cls(
             is_dark=dark,
-            bg_surface=base_color,
+            bg_surface=card_surface,
             bg_subtle_hover=hex_to_rgba(text_color, 0.05),
-            border_subtle=hex_to_rgba(text_color, 0.08),
-            border_default=hex_to_rgba(text_color, 0.15),
-            border_strong=hex_to_rgba(text_color, 0.28),
+            border_subtle=hex_to_rgba(text_color, 0.10 if dark else 0.08),
+            border_default=hex_to_rgba(text_color, 0.18 if dark else 0.15),
+            border_strong=hex_to_rgba(text_color, 0.30 if dark else 0.25),
             divider=mid_color if mid_color != window_color else hex_to_rgba(text_color, 0.12),
             text_primary=text_color,
-            text_secondary=palette.color(QPalette.ColorRole.PlaceholderText).name(),
+            text_secondary=hex_to_rgba(text_color, 0.75 if dark else 0.70),
             text_muted=hex_to_rgba(text_color, 0.50),
             text_on_accent=contrast_text,
             accent=accent_hex,
