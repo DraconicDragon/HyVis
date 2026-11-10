@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
-from hyvis.gui.theme import CardTheme
+from hyvis.gui.theme import CardTheme, TextRole, ThemeProperty
 from hyvis.gui.widgets import (
     SectionCard,
     TagServiceListEditor,
@@ -100,7 +100,7 @@ class ModelsPage(BaseConfigPage):
     def refresh_theme(self) -> None:
         if 0 <= self._current_index < len(self._models_data):
             model_id = self.model_id_combo.currentText().strip()
-            self._update_model_details(model_id) # this function also calls _update_availability()
+            self._update_model_details(model_id)  # this function also calls _update_availability()
             self._update_filter_status_card(self._models_data[self._current_index])
 
     def _setup_ui(self) -> None:
@@ -502,10 +502,12 @@ class ModelsPage(BaseConfigPage):
         # 5. Refresh Model Details Box
         self._update_model_details(model_id)
 
-    def _make_detail_label(self, text: str) -> QLabel:
+    @staticmethod
+    def _make_detail_label(text: str) -> QLabel:
         """Create a clean, subtle key label for the details form."""
         lbl = QLabel(text)
-        lbl.setStyleSheet(f"color: {self.tokens.text_secondary}; font-weight: 500;")
+        lbl.setProperty(ThemeProperty.TEXT_ROLE, TextRole.MUTED)
+        lbl.setStyleSheet("font-weight: 500;")
         return lbl
 
     def _make_wrapping_label(self) -> QLabel:
