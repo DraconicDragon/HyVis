@@ -142,12 +142,12 @@ SectionCard[cardTheme="danger_vivid"] {{
 
 /* Card State Overrides */
 SectionCard[state="error"], TagSubsetCard[state="error"], TagRuleCard[state="error"] {{
-    border: 1.5px solid {t.status_danger} !important;
-    background-color: {t.status_danger_wash} !important;
+    border: 1.5px solid {t.status_danger};
+    background-color: {t.status_danger_wash};
 }}
 SectionCard[state="overridden"], TagSubsetCard[state="overridden"], TagRuleCard[state="overridden"] {{
-    border: 1.5px solid {t.accent} !important;
-    background-color: {t.accent_wash} !important;
+    border: 1.5px solid {t.accent};
+    background-color: {t.accent_wash};
 }}
 """
 
@@ -257,17 +257,17 @@ QComboBox:disabled,
 QAbstractSpinBox:disabled,
 QPushButton:disabled,
 QPushButton[btnVariant]:disabled {{
-    color: {t.text_disabled} !important;
+    color: {t.text_disabled};
 }}
 
 /* Targeted Form State Highlights */
 QLineEdit[state="error"], QListWidget[state="error"], QTableWidget[state="error"], AutoResizingTableWidget[state="error"] {{
-    border: 1.5px solid {t.status_danger} !important;
-    background-color: {t.status_danger_wash} !important;
+    border: 1.5px solid {t.status_danger};
+    background-color: {t.status_danger_wash};
 }}
 QLineEdit[state="overridden"], QListWidget[state="overridden"], QTableWidget[state="overridden"] {{
-    border: 1.5px solid {t.accent} !important;
-    background-color: {t.accent_wash} !important;
+    border: 1.5px solid {t.accent};
+    background-color: {t.accent_wash};
 }}
 
 /* Semantic Text Roles */
