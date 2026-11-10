@@ -1,5 +1,8 @@
 # TODO
 
+- [ ] Save logs to files with rotation so logs don't fill up space too much
+  - Logs in terminal fight for space with the progress printing during inference
+
 - option to not add the tag(s) from add_tags option if there were no tags emitted
   - avoids situations where a file gets like "ai:tagged" but then there are no tags added because all are below threshold (likely if only allowing subset of tags to be emitted/outputted)
 
@@ -14,9 +17,6 @@
   - as example, this is possible if only rating tags are to be emitted from pixai-tagger-v1.0 and the recommended threshold is used, however the recommended threshold for rating category is an averaged out score of each rating tag, and in reality the recommended thresholds for each rating tag are WIDELY different (see best_threshold csv of animetimm tags) so for general, suggestive and questionable the ideal threshold is actually lower (i think)
 
 - Consider: improve descriptiveness of config option's descriptions in config.py so they are more informative as tooltips in the GUI
-
-- Save logs to files with rotation so logs don't fill up space too much
-  - Logs in terminal fight for space with the progress printing during inference
 
 - Something to do infer-only, but not send to push queue?
   - DB currently does not save whether something has been successfully pushed and all
