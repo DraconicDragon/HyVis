@@ -91,13 +91,16 @@ def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bo
         target = widget.list_widget
     elif hasattr(widget, "table"):
         target = widget.table
+    elif hasattr(widget, "set_highlight_state"):
+        widget.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
+        return
 
     if isinstance(target, SectionCard):
         target.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
         return
 
     state = WidgetState.ERROR if is_error else (WidgetState.OVERRIDDEN if is_overridden else WidgetState.DEFAULT)
-    target.setProperty(ThemeProperty.STATE, state)
+    target.setProperty(ThemeProperty.STATE, state.value if hasattr(state, "value") else str(state))
     style = target.style()
     if style:
         style.unpolish(target)
@@ -1647,6 +1650,11 @@ class TagSubsetCard(AutoRepolishMixin, QFrame):
         self.tags_editor.changed.connect(self.changed.emit)
         card_layout.addWidget(self.tags_editor)
 
+    def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
+        """Update state property; AutoRepolishMixin automatically triggers restyling."""
+        state = WidgetState.ERROR if is_error else (WidgetState.OVERRIDDEN if is_overridden else WidgetState.DEFAULT)
+        self.setProperty(ThemeProperty.STATE, state)
+
     def set_index(self, index: int) -> None:
         self._index = index
         self.title_label.setText(f"<b>Subset Group #{self._index}</b>")
@@ -1701,6 +1709,10 @@ class TagSubsetListEditor(QWidget):
         layout.addLayout(btn_layout)
 
         self._update_empty_state()
+
+    def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
+        for card in self._cards:
+            card.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
 
     def get_subsets(self) -> list[dict[str, Any]]:
         subsets: list[dict[str, Any]] = []

@@ -146,8 +146,8 @@ SectionCard[state="error"], TagSubsetCard[state="error"], TagRuleCard[state="err
     background-color: {t.status_danger_wash};
 }}
 SectionCard[state="overridden"], TagSubsetCard[state="overridden"], TagRuleCard[state="overridden"] {{
-    border: 1.5px solid {t.accent};
-    background-color: {t.accent_wash};
+    border: 1.5px solid {t.status_info};
+    background-color: {t.status_info_wash};
 }}
 """
 
@@ -261,13 +261,36 @@ QPushButton[btnVariant]:disabled {{
 }}
 
 /* Targeted Form State Highlights */
-QLineEdit[state="error"], QListWidget[state="error"], QTableWidget[state="error"], AutoResizingTableWidget[state="error"] {{
+QLineEdit[state="overridden"],
+QAbstractSpinBox[state="overridden"],
+QComboBox[state="overridden"],
+QListWidget[state="overridden"],
+QTableWidget[state="overridden"],
+AutoResizingTableWidget[state="overridden"] {{
+    border: 1.5px solid {t.status_info};
+    background-color: {t.status_info_wash};
+}}
+QAbstractSpinBox[state="overridden"] QLineEdit {{
+    background-color: {t.status_info_wash};
+}}
+
+/* Checkbox Overridden & Error States */
+QCheckBox[state="error"] {{
+    color: {t.status_danger};
+    font-weight: 600;
+}}
+QCheckBox[state="error"]::indicator {{
     border: 1.5px solid {t.status_danger};
     background-color: {t.status_danger_wash};
 }}
-QLineEdit[state="overridden"], QListWidget[state="overridden"], QTableWidget[state="overridden"] {{
-    border: 1.5px solid {t.accent};
-    background-color: {t.accent_wash};
+
+QCheckBox[state="overridden"] {{
+    color: {t.status_info};
+    font-weight: 600;
+}}
+QCheckBox[state="overridden"]::indicator {{
+    border: 1.5px solid {t.status_info};
+    background-color: {t.status_info_wash};
 }}
 
 /* Semantic Text Roles */
