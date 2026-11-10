@@ -23,6 +23,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
   - [Configuration](#configuration)
     - [Supported and Recommended Models](#supported-and-recommended-models)
   - [Useful CLI Flags](#useful-cli-flags)
+- [FAQ](#faq)
 
 ---
 
@@ -71,7 +72,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 ### 1. Prerequisites
 
 - **git** | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- **Python 3.11** ***or higher*** | Python 3.12 is recommended and tested
+- **Python 3.11** ***or higher*** | Python 3.12 to 3.14 is recommended (packages may not be up to date for 3.15+ yet, like `pillow-jxl-plugin`)
 - Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with [Client API enabled](https://hydrusnetwork.github.io/hydrus/client_api.html).
 
 ### 2. Clone the Repository
@@ -83,13 +84,20 @@ cd HyVis
 
 ### 3. Create and Activate a Virtual Environment
 
+Create the virtual environment:
+
 ```bash
 python -m venv .venv
 ```
 
-- **Linux/macOS:** `source .venv/bin/activate`
+Activate the virtual environment:
+
+- **Linux / macOS:** `source .venv/bin/activate`
 - **Windows (CMD):** `.venv\Scripts\activate.bat`
 - **Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
+
+> [!TIP]
+> Whenever you want to install a package (e.g. with `pip`; see below) to HyVis or run HyVis itself, remember to be in an activated venv. If you are outside a venv, it's likely the packages will be installed to your system's Python location
 
 ### 4. Install HyVis
 
@@ -107,7 +115,7 @@ pip install ".[gui]"
 
 HyVis supports PyTorch and ONNX backends. You do not need to install both; choose the one that matches the models you plan to run if you want to save space. PyTorch is recommended for broader model compatibility.
 
-> **Hardware Support Note:** HyVis is made and tested on Nvidia hardware. AMD ROCm and Intel GPU configurations are untested since I don't have the respective hardware. If you run HyVis on these platforms, you may need to install the corresponding backend packages manually (e.g., `onnxruntime-rocm`). It is possible that a few-line code change may or may not be needed to support other hardware-specific libraries.  
+> **Hardware Support Note:** HyVis is made and tested on an x86_64 CPU and an Nvidia consumer GPU. AMD ROCm, Intel GPU, Apple silicon and similar configurations are untested since I don't have the respective hardware. If you run HyVis on these platforms, you may need to install the corresponding backend packages manually (e.g., `onnxruntime-rocm`). It is possible that a few-line code change may or may not be needed to support other hardware-specific libraries.  
 Feedback on alternative hardware configurations is welcome.
 
 #### Option A: PyTorch Backend (Recommended)
@@ -126,7 +134,7 @@ Feedback on alternative hardware configurations is welcome.
 
 > NOTE: If you have a Maxwell (eg: GTX 9xx), Pascal (GTX 10xx/Tesla P100/P40) or Volta (V100) GPU (or older), then you **MUST** switch out `cu128` in the install command above to `cu126` or `cu124`.  
 `cu128` dropped support for sm_50, sm_60 and sm_70.
-Otherwise your GPU should support cu128 and you may even increase value to `cu130` or `cu132` - if your drivers are up to date (I don't know about any practical differences)
+Otherwise your GPU should support cu128 and you may even increase value to `cu132` or higher - given that your drivers are up to date (I don't know about any practical differences of different CUDA versions)
 
 #### Option B: ONNX Backend
 
@@ -150,11 +158,11 @@ Otherwise your GPU should support cu128 and you may even increase value to `cu13
 
 ## Updating
 
-You can update HyVis by using the commands below *or* use the update\.sh script (Linux/macOS) or update.bat (Windows) in the repository root.
+You can update HyVis by using the commands below *or* use the update\.sh script (Linux / macOS) or update.bat (Windows) in the repository root.
 
 ```bash
 cd HyVis
-source .venv/bin/activate   # Linux/macOS
+source .venv/bin/activate      # Linux / macOS
 # .venv\Scripts\activate.bat      # Windows CMD
 # .venv\Scripts\Activate.ps1      # Windows PowerShell
 
@@ -168,14 +176,14 @@ pip install .
 
 ### Desktop Interface (GUI)
 
-You can launch the desktop configurator to visually configure settings, inspect candidate files, and launch tasks.
-While the venv is activated:
+You can launch the desktop configurator to visually create and edit HyVis configuration files. It also gives you a simple option to launch HyVis from the GUI.
+While the venv is activated enter the following:
 
 ```bash
 # Without TOML
 hyvis-gui
 
-# With TOML
+# With TOML, though usually not needed
 hyvis-gui path/to/config.toml
 ```
 
@@ -197,7 +205,7 @@ hyvis path/to/config.toml
 
 HyVis uses TOML configuration files to define your Hydrus API connection, search rules, models and output filtering.  
 
-To get started you can create a copy of one of the examples in the `config_examples/` directory and modify the copy to your liking.
+To get started you can create a copy of one of the examples in the `config_examples/` directory and modify the copy to your liking (if you use the GUI then there's probably no need for this).
 
 For a comprehensive list of all configuration options, see the [Configuration Guide](CONFIGURATION.md). You may want to have this open while checking the example configs and editing/creating your own.
 
@@ -207,7 +215,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 > You can customize `source` for each model in two ways:
 >
 > - **Existing local directory**: Prefix the path with `local:` (e.g. `source = "local:/path/to/model"`) to use files already on disk without any HuggingFace network requests.
-> - **Custom Hugging Face repo**: Provide a repository ID (e.g. `source = "username/my-custom-model"`) to download from an alternative repository or community fork.
+> - **Advanced - Custom Hugging Face repo**: Provide a repository ID (e.g. `source = "username/my-custom-model"`) to download from an alternative repository or community fork.
 
 **Available example configs:**
 
@@ -245,16 +253,26 @@ Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
 - <a id="extra-hash-file"></a>`--extra-hash-file PATH`
   For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) Process a text file containing one SHA256 hash per line.
-- `hyvis-gui --hot-restart`
-  GUI-only. For development mainly. Continuously restarts app after window is closed.
+
+#### GUI (`hyvis-gui`) CLI Flags
+
+- `--hot-restart`
+  For development. Continuously restarts app after window is closed.
+- `--dev`
+  For development. Displays a very simple devtools bar below the top bar with some actions that can be helpful.
 
 >[!TIP]
-> If a run was interrupted or you ran with `--infer-only`, all tags remain safely queued in the database. Run `hyvis <config.toml> --push-only` whenever you are ready to send them to Hydrus.
+> If a run was interrupted after inference during the "Push" phase, or if you ran with `--infer-only`, all tags remain safely queued in the database. Run `hyvis <config.toml> --push-only` whenever you are ready to send them to Hydrus.
 
-<!-- ## FAQ
+## FAQ
 
-There would be frequently asked questions here, but there are none, because I can't come up with any and nobody asked yet 
+Nobody actually asked these but these are what I think someone might ask
 
 Q: Hydrus executable manager compatibility?
-A: Uhhhhhhh, need hyvis daemon
--->
+A: Uhhhhhhh, needs HyVis to have a daemon or such, which it doesn't right now. I will see when exe manager is finished (I don't think using HyVis through exe manager would be even remotely efficient but that's a separate matter)
+
+Q: Can I try models before starting a run/outside of HyVis as like a model preview thing?
+A: No. I have something like a separate model preview module in mind for which I can add a button to hyvis-gui's models page, but that's about it. It may also be GUI only (no CLI/TUI), at first at least
+
+Q: Video/Animation support?
+A: soon™, perhaps. I have ideas and a rough plan for it
