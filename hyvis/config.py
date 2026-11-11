@@ -688,13 +688,35 @@ class HyvisConfig(StrictBaseModel):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="WARNING",
-        title="Console Log Level",
-        description="Console logging verbosity level.",
+        title="Log Level",
+        description="Logging verbosity.",
     )
     infer_only: bool = Field(
         default=False,
         title="Inference Only Mode",
         description="Run model inference only; do not push results to Hydrus.",
+    )
+    log_to_file: bool = Field(
+        default=True,
+        title="Log to File",
+        description=(
+            "When enabled, HyVis automatically writes detailed timestamped execution logs to a file in the log directory."
+        ),
+    )
+    max_log_files: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        title="Max Log Files",
+        description=(
+            "The maximum number of past log files to keep on disk.\n"
+            "When this limit is exceeded, older run logs are automatically deleted."
+        ),
+    )
+    log_dir: str = Field(
+        default="logs",
+        title="Log Directory",
+        description="Directory path where run log files are stored.",
     )
 
     @field_validator("log_level", mode="before")
