@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, setup_field_tooltip
 
 
@@ -50,6 +52,20 @@ class AppDbPage(BaseConfigPage):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 12, 0, 12)
         layout.setSpacing(12)
+
+        # 0. Informational Notice Card (Advanced Settings)
+        self.notice_card = SectionCard(theme=CardTheme.INFO_VIVID, parent=container)
+        notice_layout = QVBoxLayout()
+        notice_layout.setContentsMargins(6, 6, 6, 6)
+        notice_lbl = QLabel(
+            "<b>Notice:</b> Default settings here should be fine. Aside from Log Level, most users likely do not want/need to change anything on this page.",
+            self.notice_card,
+        )
+        notice_lbl.setStyleSheet("border: none; background: transparent;")
+        notice_lbl.setWordWrap(True)
+        notice_layout.addWidget(notice_lbl)
+        self.notice_card.setContentLayout(notice_layout)
+        layout.addWidget(self.notice_card)
 
         # 1. Database Settings Card
         db_title = app_fields["database"].title or "Database"
