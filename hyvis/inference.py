@@ -522,6 +522,7 @@ async def infer_files(
 
             print(f"    Runtime: {_c(runtime_str, GREEN)}")
             print()
+            logger.info("Model '%s' initialized | %s", model_cfg.model_id, runtime_str)
 
             progress.reset_start_time()
             pipeline = build_transform_pipeline(session, eff_filter)
@@ -653,6 +654,17 @@ async def infer_files(
             listener.join(timeout=1.0)
         db.commit()
 
+    logger.info(
+        "Model '%s' pass finished: processed=%d (inferred=%d, cached=%d) | with_tags=%d (enqueued=%d tags) | zero_tags=%d | errors=%d",
+        model_cfg.model_id,
+        stats.ok + stats.skipped,
+        stats.ok,
+        stats.skipped,
+        (stats.ok + stats.skipped) - stats.zero_tags,
+        stats.total_tags_enqueued,
+        stats.zero_tags,
+        stats.errors,
+    )
     return stats
 
 

@@ -65,6 +65,7 @@ async def drain_push_queue(
     """
     total_ok = 0
     total_err = 0
+    logger.info("Starting push queue drain (batch_size=%d, wait_for_hydrus=%s)", batch_size, wait_for_hydrus)
 
     while True:
         # Fetch next batch of actionable file payloads (attempts < 3)
@@ -96,6 +97,7 @@ async def drain_push_queue(
                 except HydrusConnectionError as exc:
                     if wait_for_hydrus:
                         print(_c("\n  Hydrus connection lost during push.", RED))
+                        logger.warning("Hydrus connection lost during push: %s. Pausing to reconnect...", exc)
                         await _wait_for_hydrus_reconnect(hydrus, wait_interval)
                         break  # Retry remaining items in next iteration
                     else:
@@ -122,4 +124,5 @@ async def drain_push_queue(
                 db.remove_from_push_queue(successful_hashes)
                 logger.debug("Flushed %d completed file(s) from push_queue", len(successful_hashes))
 
+    logger.info("Push queue drain finished: %d succeeded, %d failed", total_ok, total_err)
     return total_ok, total_err
