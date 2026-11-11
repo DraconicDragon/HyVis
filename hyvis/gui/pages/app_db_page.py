@@ -107,7 +107,7 @@ class AppDbPage(BaseConfigPage):
         app_layout.setSpacing(8)
 
         self.log_level_combo = QComboBox(container)
-        self.log_level_combo.addItems(["WARNING", "INFO", "DEBUG", "ERROR"])
+        self.log_level_combo.addItems(["INFO", "DEBUG", "WARNING", "ERROR"])
         self.log_level_combo.currentTextChanged.connect(lambda _: self._on_field_changed())
         add_form_row(app_layout, hy_fields, "log_level", self.log_level_combo)
 

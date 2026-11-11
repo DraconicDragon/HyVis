@@ -687,7 +687,7 @@ class HyvisConfig(StrictBaseModel):
     """Application-level settings."""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
-        default="WARNING",
+        default="INFO",
         title="Log Level",
         description="Logging verbosity written to the session log file.",
     )

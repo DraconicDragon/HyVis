@@ -86,7 +86,7 @@ def prune_old_logs(log_dir: Path, max_files: int) -> None:
 
 
 def setup_logging(
-    log_level: str = "WARNING",
+    log_level: str = "INFO",
     *,
     log_dir: str | Path = "logs",
     max_log_files: int = 20,
@@ -98,7 +98,7 @@ def setup_logging(
       - Console: Secondary destination. Surfaces WARNING & ERROR to protect terminal progress displays.
     Returns the Path to the created run log file, or None if file initialization fails.
     """
-    file_level = getattr(logging, log_level.upper(), logging.WARNING)
+    file_level = getattr(logging, log_level.upper(), logging.INFO)
     root = logging.getLogger()
 
     # Clear existing handlers to prevent duplicate output on re-configuration
