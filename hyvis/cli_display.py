@@ -361,12 +361,36 @@ def print_run_summary(
     print(f"  Output    : {total_files_with_tags} with tags, {total_zero_tags} with zero tags")
 
     if mode == "dry_run":
-        print(f"  Push      : {_c('Dry run (0 tags pushed, 0 DB writes)', DIM)}")
+        push_summary = "Dry run (0 tags pushed, 0 DB writes)"
+        print(f"  Push      : {_c(push_summary, DIM)}")
     elif mode == "infer_only":
-        print(f"  Push      : {_c('Skipped (--infer-only, tags queued in DB)', DIM)}")
+        push_summary = "Skipped (--infer-only, tags queued in DB)"
+        print(f"  Push      : {_c(push_summary, DIM)}")
     elif mode == "default":
         err_str = f", {total_push_err} errors" if total_push_err else ""
-        print(f"  Push      : {total_push_ok} files pushed{err_str}")
+        push_summary = f"{total_push_ok} files pushed{err_str}"
+        print(f"  Push      : {push_summary}")
         if total_push_err:
             print(_c("  Tip: Run 'hyvis <config> --push-only' to retry failed pushes and process cleanups.", DIM))
     print()
+
+    # Mirror structured run summary into the log file
+    logger.info(
+        "=== HyVis Run Summary ===\n"
+        "  Status:    %s\n"
+        "  Mode:      %s\n"
+        "  Processed: %d files (%d newly inferred, %d cached)\n"
+        "  Output:    %d files with tags, %d zero-tag files\n"
+        "  Errors:    %d inference errors\n"
+        "  Push:      %s\n"
+        "=========================",
+        run_status,
+        mode,
+        total_processed,
+        total_infer_ok,
+        total_skipped,
+        total_files_with_tags,
+        total_zero_tags,
+        total_infer_err,
+        push_summary,
+    )
