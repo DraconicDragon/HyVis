@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -117,6 +118,24 @@ class AppDbPage(BaseConfigPage):
         self.infer_only_chk.toggled.connect(lambda _: self._on_field_changed())
         app_layout.addRow("", self.infer_only_chk)
 
+        self.log_to_file_chk = QCheckBox(hy_fields["log_to_file"].title, container)
+        self.log_to_file_chk.setObjectName("log_to_file")
+        setup_field_tooltip(self.log_to_file_chk, hy_fields["log_to_file"])
+        self.log_to_file_chk.setChecked(True)
+        self.log_to_file_chk.toggled.connect(lambda _: self._on_field_changed())
+        app_layout.addRow("", self.log_to_file_chk)
+
+        self.max_log_files_spin = QSpinBox(container)
+        self.max_log_files_spin.setRange(1, 100)
+        self.max_log_files_spin.setValue(20)
+        self.max_log_files_spin.valueChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(app_layout, hy_fields, "max_log_files", self.max_log_files_spin)
+
+        self.log_dir_edit = QLineEdit(container)
+        self.log_dir_edit.setText("logs")
+        self.log_dir_edit.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(app_layout, hy_fields, "log_dir", self.log_dir_edit)
+
         self.app_card.setContentLayout(app_layout)
         layout.addWidget(self.app_card)
 
@@ -138,6 +157,9 @@ class AppDbPage(BaseConfigPage):
 
             self.log_level_combo.setCurrentText(cfg.hyvis.log_level)
             self.infer_only_chk.setChecked(cfg.hyvis.infer_only)
+            self.log_to_file_chk.setChecked(cfg.hyvis.log_to_file)
+            self.max_log_files_spin.setValue(cfg.hyvis.max_log_files)
+            self.log_dir_edit.setText(cfg.hyvis.log_dir)
         finally:
             self._is_loading_ui = False
 
@@ -150,6 +172,9 @@ class AppDbPage(BaseConfigPage):
         hy_dict: dict[str, Any] = data.setdefault("hyvis", {})
         hy_dict["log_level"] = self.log_level_combo.currentText()
         hy_dict["infer_only"] = self.infer_only_chk.isChecked()
+        hy_dict["log_to_file"] = self.log_to_file_chk.isChecked()
+        hy_dict["max_log_files"] = self.max_log_files_spin.value()
+        hy_dict["log_dir"] = self.log_dir_edit.text().strip() or "logs"
 
     def _on_browse_db(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
