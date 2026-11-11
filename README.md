@@ -268,11 +268,11 @@ Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
 
 Nobody actually asked these but these are what I think someone might ask
 
-Q: Hydrus executable manager compatibility?
+Q: Hydrus executable manager compatibility?  
 A: Uhhhhhhh, needs HyVis to have a daemon or such, which it doesn't right now. I will see when exe manager is finished (I don't think using HyVis through exe manager would be even remotely efficient but that's a separate matter)
 
-Q: Can I try models before starting a run/outside of HyVis as like a model preview thing?
+Q: Can I try models before starting a run/outside of HyVis as like a model preview thing?  
 A: No. I have something like a separate model preview module in mind for which I can add a button to hyvis-gui's models page, but that's about it. It may also be GUI only (no CLI/TUI), at first at least
 
-Q: Video/Animation support?
+Q: Video/Animation support?  
 A: soon™, perhaps. I have ideas and a rough plan for it
