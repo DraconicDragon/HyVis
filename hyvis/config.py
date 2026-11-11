@@ -689,19 +689,12 @@ class HyvisConfig(StrictBaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="WARNING",
         title="Log Level",
-        description="Logging verbosity.",
+        description="Logging verbosity written to the session log file.",
     )
     infer_only: bool = Field(
         default=False,
         title="Inference Only Mode",
         description="Run model inference only; do not push results to Hydrus.",
-    )
-    log_to_file: bool = Field(
-        default=True,
-        title="Log to File",
-        description=(
-            "When enabled, HyVis automatically writes detailed timestamped execution logs to a file in the log directory."
-        ),
     )
     max_log_files: int = Field(
         default=20,
@@ -716,7 +709,9 @@ class HyvisConfig(StrictBaseModel):
     log_dir: str = Field(
         default="logs",
         title="Log Directory",
-        description="Directory path where run log files are stored.",
+        description="Directory path where session run logs are stored. Relative paths resolve against the working directory.",
+        json_schema_extra=field_meta(picker="directory"),
+        examples=["logs"],
     )
 
     @field_validator("log_level", mode="before")

@@ -118,23 +118,28 @@ class AppDbPage(BaseConfigPage):
         self.infer_only_chk.toggled.connect(lambda _: self._on_field_changed())
         app_layout.addRow("", self.infer_only_chk)
 
-        self.log_to_file_chk = QCheckBox(hy_fields["log_to_file"].title, container)
-        self.log_to_file_chk.setObjectName("log_to_file")
-        setup_field_tooltip(self.log_to_file_chk, hy_fields["log_to_file"])
-        self.log_to_file_chk.setChecked(True)
-        self.log_to_file_chk.toggled.connect(lambda _: self._on_field_changed())
-        app_layout.addRow("", self.log_to_file_chk)
-
         self.max_log_files_spin = QSpinBox(container)
         self.max_log_files_spin.setRange(1, 100)
         self.max_log_files_spin.setValue(20)
         self.max_log_files_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(app_layout, hy_fields, "max_log_files", self.max_log_files_spin)
 
-        self.log_dir_edit = QLineEdit(container)
-        self.log_dir_edit.setText("logs")
+        # Log Directory Row with Folder Browser
+        log_dir_box = QWidget(container)
+        log_dir_row = QHBoxLayout(log_dir_box)
+        log_dir_row.setContentsMargins(0, 0, 0, 0)
+        log_dir_row.setSpacing(6)
+
+        self.log_dir_edit = QLineEdit(log_dir_box)
+        bind_field_metadata(self.log_dir_edit, hy_fields["log_dir"])
         self.log_dir_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(app_layout, hy_fields, "log_dir", self.log_dir_edit)
+        log_dir_row.addWidget(self.log_dir_edit, stretch=1)
+
+        self.browse_log_dir_btn = QPushButton("Browse Folder...", log_dir_box)
+        self.browse_log_dir_btn.clicked.connect(self._on_browse_log_dir)
+        log_dir_row.addWidget(self.browse_log_dir_btn)
+
+        add_form_row(app_layout, hy_fields, "log_dir", log_dir_box)
 
         self.app_card.setContentLayout(app_layout)
         layout.addWidget(self.app_card)
@@ -157,7 +162,6 @@ class AppDbPage(BaseConfigPage):
 
             self.log_level_combo.setCurrentText(cfg.hyvis.log_level)
             self.infer_only_chk.setChecked(cfg.hyvis.infer_only)
-            self.log_to_file_chk.setChecked(cfg.hyvis.log_to_file)
             self.max_log_files_spin.setValue(cfg.hyvis.max_log_files)
             self.log_dir_edit.setText(cfg.hyvis.log_dir)
         finally:
@@ -172,7 +176,6 @@ class AppDbPage(BaseConfigPage):
         hy_dict: dict[str, Any] = data.setdefault("hyvis", {})
         hy_dict["log_level"] = self.log_level_combo.currentText()
         hy_dict["infer_only"] = self.infer_only_chk.isChecked()
-        hy_dict["log_to_file"] = self.log_to_file_chk.isChecked()
         hy_dict["max_log_files"] = self.max_log_files_spin.value()
         hy_dict["log_dir"] = self.log_dir_edit.text().strip() or "logs"
 
@@ -182,4 +185,10 @@ class AppDbPage(BaseConfigPage):
         )
         if path:
             self.db_path_edit.setText(path)
+            self._on_field_changed()
+
+    def _on_browse_log_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Log Directory")
+        if folder:
+            self.log_dir_edit.setText(folder)
             self._on_field_changed()

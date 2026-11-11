@@ -88,24 +88,25 @@ def prune_old_logs(log_dir: Path, max_files: int) -> None:
 def setup_logging(
     log_level: str = "WARNING",
     *,
-    log_to_file: bool = True,
     log_dir: str | Path = "logs",
     max_log_files: int = 20,
     config_path: Path | str | None = None,
 ) -> Path | None:
     """
-    Returns the Path to the active run log file if file logging is enabled, else None.
+    Configure dual-handler logging:
+      - File: Primary destination. Writes comprehensive run logs at the configured `log_level`.
+      - Console: Secondary destination. Surfaces WARNING & ERROR to protect terminal progress displays.
+    Returns the Path to the created run log file, or None if file initialization fails.
     """
-    target_level = getattr(logging, log_level.upper(), logging.WARNING)
+    file_level = getattr(logging, log_level.upper(), logging.WARNING)
     root = logging.getLogger()
 
     # Clear existing handlers to prevent duplicate output on re-configuration
     for handler in list(root.handlers):
         root.removeHandler(handler)
 
-    # 1. Console Handler: strictly WARNING & ERROR (never DEBUG or INFO to protect terminal progress)
-    # If target_level is ERROR or higher, console also rises to ERROR (excluding warnings)
-    console_level = max(logging.WARNING, target_level)
+    # 1. Console Handler: strictly WARNING & ERROR (never cluttering terminal progress)
+    console_level = max(logging.WARNING, file_level)
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(console_level)
     console_handler.setFormatter(ColorFormatter("%(asctime)s  %(levelname)s %(name)s  %(message)s", datefmt="%H:%M:%S"))
@@ -113,54 +114,45 @@ def setup_logging(
 
     active_log_file: Path | None = None
 
-    # 2. File Handler
-    if target_level <= logging.DEBUG:
-        file_level = logging.DEBUG
-    elif target_level <= logging.WARNING:
-        file_level = logging.INFO
-    else:
-        file_level = target_level  # ERROR or CRITICAL
+    # 2. File Handler: always active by default
+    try:
+        target_dir = Path(log_dir).resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
 
-    if log_to_file:
-        try:
-            target_dir = Path(log_dir).resolve()
-            target_dir.mkdir(parents=True, exist_ok=True)
+        prune_old_logs(target_dir, max_log_files)
 
-            prune_old_logs(target_dir, max_log_files)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        active_log_file = target_dir / f"hyvis_{timestamp}.log"
 
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            active_log_file = target_dir / f"hyvis_{timestamp}.log"
+        version_str = get_version()
+        cmd_invocation = shlex.join(sys.argv)
 
-            version_str = get_version()
+        # Write run metadata header
+        with active_log_file.open("w", encoding="utf-8") as fh:
+            fh.write(f"=== HyVis Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            fh.write(f"HyVis Version: {version_str}\n")
+            fh.write(f"Command:       {cmd_invocation}\n")
+            if config_path:
+                fh.write(f"Config:        {Path(config_path).resolve()}\n")
+            fh.write(f"Platform:      {sys.platform} | Python: {sys.version.split()[0]}\n")
+            fh.write(f"Log Level:     {logging.getLevelName(file_level)}\n")
+            fh.write("=" * 55 + "\n\n")
 
-            cmd_invocation = shlex.join(sys.argv)
-
-            # Write run metadata header
-            with active_log_file.open("w", encoding="utf-8") as fh:
-                fh.write(f"=== HyVis Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-                fh.write(f"HyVis Version: {version_str}\n")
-                fh.write(f"Command:       {cmd_invocation}\n")
-                if config_path:
-                    fh.write(f"Config:        {Path(config_path).resolve()}\n")
-                fh.write(f"Platform:      {sys.platform} | Python: {sys.version.split()[0]}\n")
-                fh.write("=" * 55 + "\n\n")
-
-            file_handler = logging.FileHandler(active_log_file, mode="a", encoding="utf-8")
-            file_handler.setLevel(file_level)
-            file_handler.setFormatter(
-                logging.Formatter(
-                    fmt="%(asctime)s [%(levelname)-7s] (%(name)s:%(lineno)d): %(message)s",
-                    datefmt="%Y-%m-%d %H:%M:%S",
-                )
+        file_handler = logging.FileHandler(active_log_file, mode="a", encoding="utf-8")
+        file_handler.setLevel(file_level)
+        file_handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s [%(levelname)-7s] (%(name)s:%(lineno)d): %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             )
-            root.addHandler(file_handler)
+        )
+        root.addHandler(file_handler)
 
-            # Root logger must allow the most verbose handler through
-            root.setLevel(min(console_level, file_level))
-        except Exception as exc:
-            logger.warning("Could not initialize file logging to '%s': %s", log_dir, exc)
-            root.setLevel(console_level)
-    else:
+        # Root logger allows records through to the most verbose handler
+        root.setLevel(min(console_level, file_level))
+
+    except Exception as exc:
+        logger.warning("Could not initialize file logging to '%s': %s", log_dir, exc)
         root.setLevel(console_level)
 
     # Keep vibe aligned with hyvis

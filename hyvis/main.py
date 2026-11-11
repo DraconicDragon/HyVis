@@ -78,7 +78,6 @@ async def main() -> int:
     effective_log_level = args.log_level or cfg.hyvis.log_level
     log_file_path = setup_logging(
         effective_log_level,
-        log_to_file=cfg.hyvis.log_to_file,
         log_dir=cfg.hyvis.log_dir,
         max_log_files=cfg.hyvis.max_log_files,
         config_path=args.config,
@@ -298,7 +297,7 @@ async def main() -> int:
     no_path_count = sum(1 for fi in file_infos if not fi.local_path)
     if no_path_count:
         # todo: print the hashes (newline separated) that have no path associated with them, generally this shouldnt even show up(?) if they were correctly deleted in hydrus
-        # files that are deleted dont(?) show up in a query's results 
+        # files that are deleted dont(?) show up in a query's results
         print(f"  {_c(f'Warning: {no_path_count} files have no local path (will be skipped)', YELLOW)}")
         logger.warning("%d files have no local path on disk and will be skipped.", no_path_count)
 
