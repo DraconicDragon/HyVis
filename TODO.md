@@ -1,12 +1,16 @@
 # TODO
 
-- [ ] Save logs to files with rotation so logs don't fill up space too much
-  - Logs in terminal fight for space with the progress printing during inference
-
-- option to not add the tag(s) from add_tags option if there were no tags emitted
-  - avoids situations where a file gets like "ai:tagged" but then there are no tags added because all are below threshold (likely if only allowing subset of tags to be emitted/outputted)
-
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
+
+- Database
+  - cache rework, separate DB file?
+  - rework failed push attempts stuff
+  - rework to be more robust across the board, especially for multi model configurations to be safe for resuming
+    - add/remove tags' "only push if tags emitted" relies on intermediate tag data like this, currently its in memory which is not good for multi model runs(?) (reminder to myself that models can also be cancelled)
+      - requires cache rework probably, since its part of cache and i dont want to keep the json cache we have right now
+
+- move add/remove tags to output filter?
+  - also move model specific destination tag services there since it kinda doesnt fit to models page
 
 - Character IP mapping support
   - (vibe) also find out how to make my own or if i just need full metadata for that and have the math done on full post metadata to see how often series tags are together with what character tags, maybe some of the e6 people already have some process open source
