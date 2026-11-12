@@ -301,6 +301,14 @@ QLabel[textRole="success"]   {{ color: {t.status_success}; }}
 QLabel[textRole="warning"]   {{ color: {t.status_warning}; }}
 QLabel[textRole="danger"]    {{ color: {t.status_danger}; }}
 QLabel[textRole="info"]      {{ color: {t.status_info}; }}
+
+QCheckBox[textRole="secondary"] {{ color: {t.text_secondary}; }}
+QCheckBox[textRole="muted"]     {{ color: {t.text_muted}; }}
+QCheckBox[textRole="accent"]    {{ color: {t.accent}; }}
+QCheckBox[textRole="success"]   {{ color: {t.status_success}; }}
+QCheckBox[textRole="warning"]   {{ color: {t.status_warning}; }}
+QCheckBox[textRole="danger"]    {{ color: {t.status_danger}; }}
+QCheckBox[textRole="info"]      {{ color: {t.status_info}; }}
 """
 
 
