@@ -86,8 +86,7 @@ async def main() -> int:
         logger.debug("Session logging active at: %s", log_file_path)
     # endregion
 
-    from hyvis.db import Database
-    from hyvis.dry_run import DryRunDatabase
+    from hyvis.db import Database, DryRunDatabase
     from hyvis.extra_hashes import load_extra_hashes
 
     # Resolve CLI vs. TOML precedence (CLI flag overrides TOML setting)

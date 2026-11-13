@@ -11,7 +11,7 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
-from hyvis.db import _DEFAULT_MIN_CACHE_SCORE, _SCHEMA_SQL, Database, FileStatus, PushAction
+from hyvis.db.hyvis_db import _DEFAULT_MIN_CACHE_SCORE, _SCHEMA_SQL, Database, FileStatus, PushAction
 
 logger = logging.getLogger(__name__)
 

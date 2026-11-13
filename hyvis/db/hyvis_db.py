@@ -99,7 +99,7 @@ class Database:
         self._conn.executescript(_SCHEMA_SQL)
 
         # Apply sequential versioned migrations
-        from hyvis.db_migrations import LATEST_VERSION, apply_migrations
+        from hyvis.db.migrations import LATEST_VERSION, apply_migrations
 
         if is_new_db:
             # New installation: schema is already current, stamp version directly

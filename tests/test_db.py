@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from hyvis.db import Database
-from hyvis.db_migrations import LATEST_VERSION, apply_migrations
+from hyvis.db.migrations import LATEST_VERSION, apply_migrations
 
 # region Queue Consolidation Tests
 
