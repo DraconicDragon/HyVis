@@ -354,7 +354,7 @@ class CacheDatabase:
 
             vocab_rows: list[tuple[int, int, str, str, float | None]] = []
             for lbl in catalog.labels:
-                cat = lbl.category.value if hasattr(lbl.category, "value") else str(lbl.category)
+                cat = str(lbl.category.value if hasattr(lbl.category, "value") else lbl.category)
                 raw_cal = (
                     calibrated_thresholds.get(lbl.name, lbl.threshold)
                     if calibrated_thresholds is not None
