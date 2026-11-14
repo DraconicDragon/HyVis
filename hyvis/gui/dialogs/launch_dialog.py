@@ -1,6 +1,7 @@
 """
 launch_dialog.py — Preflight verification and launch dialog.
-Checks Hydrus connectivity, candidate & rejected counts, and dual preview pages before spawning terminal.
+Checks for interrupted runs, Hydrus connectivity, candidate & rejected counts,
+and dual preview pages before spawning terminal.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -24,12 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig
+from hyvis.db import ActiveRunInspection, RunMode, inspect_active_run_readonly
 from hyvis.gui.base_widgets import Divider
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
-from hyvis.gui.theme import ThemeSubscriberMixin
+from hyvis.gui.theme import CardTheme, ThemeSubscriberMixin
 from hyvis.gui.widgets import SectionCard
 from hyvis.hydrus import HydrusClient, HydrusError
-from hyvis.preflight import PreflightResult, run_preflight
+from hyvis.preflight import PreflightResult, inspect_preview_page, run_preflight
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,52 @@ class _PreflightWorker(QRunnable):
             self.signals.error.emit(str(exc))
 
 
+class _ResumeCheckSignals(QObject):
+    success = Signal(object)  # PreflightResult (connection + preview check only)
+    error = Signal(str)
+
+
+class _ResumeCheckWorker(QRunnable):
+    """Lightweight worker for resume mode: verifies Hydrus & preview pages without running search queries."""
+
+    def __init__(self, cfg: AppConfig, active: ActiveRunInspection) -> None:
+        super().__init__()
+        self.cfg = cfg
+        self.active = active
+        self.signals = _ResumeCheckSignals()
+
+    def run(self) -> None:
+        try:
+            client = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
+            client.verify_connection()
+            v_info = client.get_version_info()
+            v_str = str(
+                v_info.get("hydrus_version") or v_info.get("client_version") or v_info.get("version") or "unknown"
+            )
+            api_str = str(v_info.get("api_version") or v_info.get("version") or "unknown")
+
+            p = self.cfg.hydrus.preview
+            cp = inspect_preview_page(client, p.page_name, p.page_index) if p and p.page_name else None
+            rp = (
+                inspect_preview_page(client, p.rejected_page_name, p.rejected_page_index)
+                if p and p.rejected_page_name
+                else None
+            )
+
+            res = PreflightResult(
+                hydrus_version=v_str,
+                api_version=api_str,
+                candidate_hashes=list(self.active.pending_hashes),
+                rejected_hashes=list(self.active.rejected_hashes),
+                rejected_mimes=set(self.active.rejected_mimes),
+                candidate_preview=cp,
+                rejected_preview=rp,
+            )
+            self.signals.success.emit(res)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
+
+
 def _parse_hydrus_version_num(v_str: str) -> int | None:
     """Extract numeric version from strings like '676', 'v676', or '676.1'."""
     clean = str(v_str).strip().lstrip("vV")
@@ -83,9 +132,6 @@ class _PreviewCheckWorker(QRunnable):
         self.signals = _PreviewCheckSignals()
 
     def run(self) -> None:
-        from hyvis.hydrus import HydrusClient
-        from hyvis.preflight import inspect_preview_page
-
         try:
             client = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
             p = self.cfg.hydrus.preview
@@ -113,23 +159,47 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.cfg = config
         self.config_path = config_path
 
+        raw_db = Path(self.cfg.database.path)
+        self._db_path = raw_db if raw_db.is_absolute() else (Path.cwd() / raw_db)
+        self._active_run: ActiveRunInspection | None = inspect_active_run_readonly(self._db_path)
+
+        self._fresh_result: PreflightResult | None = None
+        self._resume_result: PreflightResult | None = None
         self._result: PreflightResult | None = None
+        self._conn_error_msg: str | None = None
         self._candidate_preview_sent = False
         self._rejected_preview_sent = False
 
         self.setWindowTitle("Launch HyVis")
-        self.resize(570, 610)
+        self.resize(570, 650 if self._active_run else 610)
         self.setMinimumWidth(505)
         self.setModal(True)
 
         self._setup_ui()
-        self._run_preflight()
+
+        if self._active_run is not None:
+            self._run_resume_check()
+        else:
+            self._run_preflight()
 
     def refresh_theme(self) -> None:
         """Automatically called by ThemeSubscriberMixin when theme changes."""
         self._sync_theme_labels()
         if self._result:
             self._update_preview_ui()
+
+    def _active_run_action(self) -> str:
+        if self._active_run is None or not hasattr(self, "active_run_action_combo"):
+            return "fresh"
+        return str(self.active_run_action_combo.currentData() or "resume")
+
+    def _effective_cfg_for_preview(self) -> AppConfig:
+        if self._active_run is not None and self._active_run_action() == "resume":
+            try:
+                return AppConfig.from_toml_string(self._active_run.run.config_toml)
+            except Exception:
+                pass
+        return self.cfg
 
     def _setup_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -144,7 +214,6 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
 
         # 2. Main Scroll Area for Cards and Options
         from hyvis.gui.base_widgets import AutoResizingTextEdit, SmoothScrollArea
-        from hyvis.gui.theme import CardTheme
 
         scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
         scroll.setWidgetResizable(True)
@@ -160,6 +229,51 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 12, 0, 12)
         layout.setSpacing(12)
+
+        # 0. Interrupted Active Run Card (Shown only when hyvis.db contains active_run)
+        if self._active_run is not None:
+            self.active_run_card = SectionCard(
+                "⚠ Interrupted Run Detected",
+                theme=CardTheme.WARNING_VIVID,
+                parent=container,
+            )
+            ar_layout = QVBoxLayout()
+            ar_layout.setContentsMargins(0, 0, 0, 0)
+            ar_layout.setSpacing(8)
+
+            run_info = self._active_run.run
+            orig_cfg_str = Path(run_info.config_path).name if run_info.config_path else "(embedded snapshot)"
+            pending_n = len(self._active_run.pending_hashes)
+            done_n = self._active_run.done_count
+            rej_n = len(self._active_run.rejected_hashes)
+
+            ar_details = QLabel(
+                f"<b>Database:</b> {self.cfg.database.path}<br>"
+                f"<b>Started:</b> {run_info.started_at} &nbsp;│&nbsp; <b>Config:</b> {orig_cfg_str}<br>"
+                f"<b>Progress:</b> {done_n} done, <b>{pending_n} pending</b>, {rej_n} rejected",
+                self.active_run_card,
+            )
+            ar_details.setWordWrap(True)
+            ar_details.setStyleSheet("border: none; background: transparent;")
+            ar_layout.addWidget(ar_details)
+
+            action_row = QHBoxLayout()
+            action_row.setSpacing(8)
+            action_lbl = QLabel("<b>Action:</b>", self.active_run_card)
+            action_lbl.setStyleSheet("border: none; background: transparent;")
+            action_row.addWidget(action_lbl)
+
+            self.active_run_action_combo = QComboBox(self.active_run_card)
+            self.active_run_action_combo.addItem("▶ Resume Interrupted Run (--resume)", userData="resume")
+            self.active_run_action_combo.addItem(
+                "🗑 Discard Interrupted Run & Start New (--discard-run)", userData="discard"
+            )
+            self.active_run_action_combo.currentIndexChanged.connect(self._on_active_run_action_changed)
+            action_row.addWidget(self.active_run_action_combo, stretch=1)
+
+            ar_layout.addLayout(action_row)
+            self.active_run_card.setContentLayout(ar_layout)
+            layout.addWidget(self.active_run_card)
 
         # Candidate Files SectionCard
         self.files_card = SectionCard("Candidate Files", parent=container)
@@ -332,17 +446,44 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self._sync_command_text()
 
     def _sync_theme_labels(self) -> None:
-        if not self._result:
+        if self._conn_error_msg is not None:
+            self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_danger};")
+        elif not self._result:
             self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
         else:
             self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_success};")
 
+    def _build_launch_target(self) -> tuple[Path | None, list[str]]:
+        args = self._build_effective_args()
+        if self._active_run is not None:
+            action = self._active_run_action()
+            if action == "resume":
+                return None, ["--resume", "--db", str(self.cfg.database.path), *args]
+            if action == "discard":
+                return self.config_path, ["--discard-run", *args]
+        return self.config_path, args
+
     def _sync_command_text(self) -> None:
         """Update command text from current settings when not in manual edit mode."""
         if not self.manual_cmd_chk.isChecked():
-            extra_args = self._build_effective_args()
-            cmd_str = format_cli_command_str(self.config_path, extra_args)
+            target_cfg, extra_args = self._build_launch_target()
+            cmd_str = format_cli_command_str(target_cfg, extra_args)
             self.cmd_edit.setPlainText(cmd_str)
+
+    def _on_active_run_action_changed(self) -> None:
+        self._sync_command_text()
+        action = self._active_run_action()
+
+        if action == "resume":
+            if self._resume_result is not None:
+                self._apply_preflight_result(self._resume_result, is_resume=True)
+            else:
+                self._run_resume_check()
+        else:
+            if self._fresh_result is not None:
+                self._apply_preflight_result(self._fresh_result, is_resume=False)
+            else:
+                self._run_preflight()
 
     def _on_prompt_chk_toggled(self, checked: bool) -> None:
         del checked
@@ -357,8 +498,10 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             self.cmd_edit.setFocus()
 
     def _run_preflight(self) -> None:
+        self._conn_error_msg = None
         self.conn_label.setText("◌ Connecting to Hydrus...")
         self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
+        self.files_label.setText("Checking queries...")
         self.launch_btn.setEnabled(False)
         self.recheck_btn.setEnabled(False)
 
@@ -373,7 +516,51 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         worker.signals.error.connect(self._on_preflight_error)
         QThreadPool.globalInstance().start(worker)
 
+    def _run_resume_check(self) -> None:
+        assert self._active_run is not None
+        self._conn_error_msg = None
+        self.conn_label.setText("◌ Checking Hydrus connection for resume...")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
+        self._render_resume_files_summary()
+        self.launch_btn.setEnabled(False)
+        self.recheck_btn.setEnabled(False)
+
+        if hasattr(self, "send_cand_btn"):
+            self.send_cand_btn.setEnabled(False)
+        if hasattr(self, "send_rej_btn"):
+            self.send_rej_btn.setEnabled(False)
+
+        worker = _ResumeCheckWorker(self._effective_cfg_for_preview(), self._active_run)
+        worker.signals.success.connect(self._on_resume_check_success)
+        worker.signals.error.connect(self._on_resume_check_error)
+        QThreadPool.globalInstance().start(worker)
+
+    def _render_resume_files_summary(self) -> None:
+        if self._active_run is None:
+            return
+        cand_count = len(self._active_run.pending_hashes)
+        done_count = self._active_run.done_count
+        rej_count = len(self._active_run.rejected_hashes)
+        msg_lines = [
+            (
+                f"Resuming interrupted run: <b>{cand_count}</b> pending file{'s' if cand_count != 1 else ''} remaining "
+                f"({done_count} already done)."
+            )
+        ]
+        if rej_count > 0:
+            mimes_str = (
+                ", ".join(sorted(self._active_run.rejected_mimes))
+                if self._active_run.rejected_mimes
+                else "unsupported MIME"
+            )
+            msg_lines.append(
+                f"<span style='color: {self.tokens.text_secondary};'>{rej_count} rejected file(s) recorded ({mimes_str}).</span>"
+            )
+        self.files_label.setText("<br>".join(msg_lines))
+
     def _on_preflight_progress(self, msg: str, cur: Any, tot: Any) -> None:
+        if self._active_run_action() == "resume":
+            return
         if tot is not None and cur is not None:
             self.conn_label.setText(f"◌ {msg} ({cur}/{tot})")
         else:
@@ -381,9 +568,20 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_warning};")
 
     def _on_preflight_success(self, result: PreflightResult) -> None:
+        self._fresh_result = result
+        if self._active_run_action() != "resume":
+            self._apply_preflight_result(result, is_resume=False)
+
+    def _on_resume_check_success(self, result: PreflightResult) -> None:
+        self._resume_result = result
+        if self._active_run_action() == "resume":
+            self._apply_preflight_result(result, is_resume=True)
+
+    def _apply_preflight_result(self, result: PreflightResult, *, is_resume: bool) -> None:
         self._result = result
+        self._conn_error_msg = None
         v_str = result.hydrus_version
-        url = self.cfg.hydrus.api_url
+        url = self._effective_cfg_for_preview().hydrus.api_url
         cand_count = len(result.candidate_hashes)
         rej_count = len(result.rejected_hashes)
 
@@ -392,7 +590,13 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_success};")
         self.recheck_btn.setEnabled(True)
 
-        # Candidate and Rejected Files summary
+        if is_resume:
+            self._render_resume_files_summary()
+            self._update_preview_ui()
+            self.launch_btn.setEnabled(cand_count > 0)
+            return
+
+        # Candidate and Rejected Files summary (fresh run)
         if cand_count == 0 and rej_count == 0:
             self.files_label.setText(
                 f"<span style='color: {self.tokens.status_warning};'>No candidate files matched your queries. Nothing to process.</span>"
@@ -408,16 +612,33 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             )
         self.files_label.setText("<br>".join(msg_lines))
 
-        # Update preview cards with version-aware creation checks
         self._update_preview_ui()
         self.launch_btn.setEnabled(cand_count > 0)
 
     def _on_preflight_error(self, err_msg: str) -> None:
+        if self._active_run_action() == "resume":
+            return
+        self._conn_error_msg = err_msg
         self.conn_label.setText("▲ Could not reach Hydrus Client API")
         self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_danger};")
         self.files_label.setText(f"<span style='color: {self.tokens.status_danger};'>{err_msg}</span>")
         self.launch_btn.setEnabled(False)
         self.recheck_btn.setEnabled(True)
+
+    def _on_resume_check_error(self, err_msg: str) -> None:
+        if self._active_run_action() != "resume":
+            return
+        self._conn_error_msg = err_msg
+        is_infer_only = self._active_run is not None and self._active_run.run.mode == RunMode.INFER_ONLY
+        self.conn_label.setText("▲ Could not reach Hydrus Client API")
+        self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_danger};")
+        self.recheck_btn.setEnabled(True)
+
+        # Resuming an --infer-only run can proceed offline using cached file paths
+        if is_infer_only and self._active_run and self._active_run.pending_hashes:
+            self.launch_btn.setEnabled(True)
+        else:
+            self.launch_btn.setEnabled(False)
 
     def _update_preview_ui(self) -> None:
         """Render candidate and rejected preview status labels and buttons."""
@@ -500,7 +721,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.recheck_btn.setEnabled(False)
         self.recheck_btn.setText("Checking...")
 
-        worker = _PreviewCheckWorker(self.cfg)
+        worker = _PreviewCheckWorker(self._effective_cfg_for_preview())
         worker.signals.success.connect(self._on_preview_check_success)
         worker.signals.error.connect(self._on_preview_check_error)
         QThreadPool.globalInstance().start(worker)
@@ -526,7 +747,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         QMessageBox.warning(self, "Preview Check Failed", f"Could not check preview pages:\n\n{err_msg}")
 
     def _on_send_candidate_clicked(self) -> None:
-        p = self.cfg.hydrus.preview
+        eff_cfg = self._effective_cfg_for_preview()
+        p = eff_cfg.hydrus.preview
         if not p or not p.page_name or not self._result or not self._result.candidate_hashes:
             return
 
@@ -535,7 +757,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.send_cand_btn.setText("Sending...")
 
         try:
-            hydrus = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
+            hydrus = HydrusClient(eff_cfg.hydrus.api_url, eff_cfg.hydrus.api_key)
             hydrus.setup_preview_page(p.page_name, self._result.candidate_hashes, p.page_index, focus=True)
             self._candidate_preview_sent = True
             self.cand_status_label.setText(
@@ -550,7 +772,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             self.send_cand_btn.setEnabled(True)
 
     def _on_send_rejected_clicked(self) -> None:
-        p = self.cfg.hydrus.preview
+        eff_cfg = self._effective_cfg_for_preview()
+        p = eff_cfg.hydrus.preview
         if not p or not p.rejected_page_name or not self._result or not self._result.rejected_hashes:
             return
 
@@ -559,7 +782,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.send_rej_btn.setText("Sending...")
 
         try:
-            hydrus = HydrusClient(self.cfg.hydrus.api_url, self.cfg.hydrus.api_key)
+            hydrus = HydrusClient(eff_cfg.hydrus.api_url, eff_cfg.hydrus.api_key)
             hydrus.setup_preview_page(
                 p.rejected_page_name, self._result.rejected_hashes, p.rejected_page_index, focus=True
             )
@@ -591,6 +814,20 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         QTimer.singleShot(1800, lambda: self.copy_cmd_btn.setText("Copy Command"))
 
     def _on_launch_clicked(self) -> None:
+        # Confirm before abandoning an interrupted run
+        if self._active_run is not None and self._active_run_action() == "discard":
+            pending_n = len(self._active_run.pending_hashes)
+            ans = QMessageBox.warning(
+                self,
+                "Confirm Discard Interrupted Run",
+                f"Are you sure you want to discard the interrupted run from {self._active_run.run.started_at}?\n\n"
+                f"This will abandon {pending_n} pending file(s) from that run and start a fresh run with your current configuration.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
         from hyvis.gui.settings import get_gui_settings, save_gui_settings
 
         settings = get_gui_settings()
@@ -634,8 +871,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
 
             ok = launch_in_external_terminal(raw_command=cmd_parts)
         else:
-            extra_args = self._build_effective_args()
-            ok = launch_in_external_terminal(self.config_path, extra_args)
+            target_cfg, extra_args = self._build_launch_target()
+            ok = launch_in_external_terminal(target_cfg, extra_args)
 
         if ok:
             self.accept()

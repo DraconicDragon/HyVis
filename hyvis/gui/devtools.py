@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QWidget
 
+from hyvis.db import ActiveRunInfo, ActiveRunInspection, RunMode
 from hyvis.gui.theme import BUILTIN_THEMES, theme_manager
 
 
@@ -43,6 +44,12 @@ class DevToolsStrip(QWidget):
         self.launch_button = self._add_button(layout, "Launch dialog", self._on_launch_clicked)
         self.launch_button.setToolTip(
             "Open using the current editor config. Unsaved configs use config.toml in the command preview."
+        )
+        self.launch_active_button = self._add_button(
+            layout, "Launch (Active Run)", self._on_launch_mock_active_run_clicked
+        )
+        self.launch_active_button.setToolTip(
+            "Open launch dialog simulating an interrupted active run (to test warning card and Resume/Discard UI)."
         )
         self.unsaved_button = self._add_button(layout, "Unsaved changes", self._on_unsaved_changes_clicked)
 
@@ -138,6 +145,42 @@ class DevToolsStrip(QWidget):
         config_path = state.current_path or Path("config.toml")
         dialog_class = self._reload_dialog_class("launch_dialog", "LaunchDialog")
         dialog_class(state.config, config_path, window).exec()
+
+    def _on_launch_mock_active_run_clicked(self) -> None:
+        """Open launch dialog simulating an active_run in hyvis.db without disk side-effects."""
+        window = self._window_for(self._open_launch)
+        state = getattr(window, "state", None)
+        if window is None or state is None:
+            self._open_launch()
+            return
+
+        config_path = state.current_path or Path("config.toml")
+        dialog_class = self._reload_dialog_class("launch_dialog", "LaunchDialog")
+
+        # Mock an interrupted run with 38 pending, 12 done, and 3 rejected files
+        mock_inspection = ActiveRunInspection(
+            run=ActiveRunInfo(
+                config_toml=state.config.model_dump_json(),
+                config_path=str(config_path),
+                mode=RunMode.DEFAULT,
+                force_mode=False,
+                hyvis_version="v0.1.0-dev",
+                started_at="2026-11-14 22:30:00 UTC",
+            ),
+            pending_hashes=[f"{i:064x}" for i in range(1, 39)],
+            done_count=12,
+            rejected_hashes=[f"{i:064x}" for i in range(100, 103)],
+            rejected_mimes={"video/mp4", "image/gif"},
+        )
+
+        import hyvis.gui.dialogs.launch_dialog as ld_mod
+
+        orig_fn = ld_mod.inspect_active_run_readonly
+        ld_mod.inspect_active_run_readonly = lambda _path: mock_inspection
+        try:
+            dialog_class(state.config, config_path, window).exec()
+        finally:
+            ld_mod.inspect_active_run_readonly = orig_fn
 
     def _on_preferences_clicked(self) -> None:
         window = self._window_for(self._open_preferences)
