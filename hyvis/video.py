@@ -1,5 +1,5 @@
 """
-video.py Frame extraction for video files.
+video.py Frame extraction for video and animated GIF files.
 
 Frames are sampled evenly across the content duration (the strategy ported
 from the standalone reference script reference.py), with padding around
@@ -123,8 +123,150 @@ def extract_frames(
         cap.release()
 
     if low_interest is not None and low_interest.enabled:
-        frames = _filter_low_interest_frames(cv2, frames, low_interest)
+        frames = _filter_low_interest_frames(frames, low_interest)
     return frames
+
+
+def extract_gif_frames(
+    gif_path: str | Path,
+    *,
+    max_frames: int = 11,
+    max_frames_at_seconds: float = 60.0,
+    include_edges: bool = True,
+    fades: FadeFilterConfig | None = None,
+    low_interest: LowInterestFilterConfig | None = None,
+    dedupe: bool = True,
+    dedupe_threshold: float = 0.03,
+    dedupe_change_level: int = 25,
+    dedupe_max_changed_fraction: float = 0.01,
+) -> tuple["Image.Image", ...]:
+    """Extract frames from an animated GIF using the video sampling strategy.
+
+    A GIF has no frame rate clock, so each frame's display duration from the
+    GIF metadata defines the total animation duration. The same uniform
+    timestamp distribution as videos is then applied: content padding,
+    optional first/last frames, fade replacement, low-interest filtering and
+    near-duplicate removal. Returns the sampled frames as PIL Images in RGB
+    mode. Raises ValueError if the file cannot be opened or has no frames.
+    """
+    from PIL import Image, ImageSequence
+
+    try:
+        gif = Image.open(gif_path)
+    except Exception as exc:
+        raise ValueError(f"Cannot open GIF: {gif_path}") from exc
+
+    with gif:
+        durations: list[float] = []
+        for frame in ImageSequence.Iterator(gif):
+            duration_ms = float(frame.info.get("duration", 0) or 0)
+            durations.append(duration_ms / 1000.0 if duration_ms > 0 else 0.1)
+
+        total_frame_count = len(durations)
+        if total_frame_count == 0:
+            raise ValueError(f"GIF has no frames: {gif_path}")
+
+        total_duration = sum(durations)
+        fps = total_frame_count / total_duration
+
+        padding_duration, content_start, content_end = _content_window(
+            total_duration, fps, max_frames_at_seconds
+        )
+        content_duration = content_end - content_start
+        num_frames_to_extract = _sample_count(content_duration, max_frames, max_frames_at_seconds)
+
+        timestamps = _uniform_timestamps(
+            total_duration=total_duration,
+            fps=fps,
+            num_frames_to_extract=num_frames_to_extract,
+            padding_duration=padding_duration,
+            content_duration=content_duration,
+            include_edges=include_edges,
+        )
+
+        logger.debug(
+            "extract_gif_frames frames=%s duration=%.2f samples=%s",
+            total_frame_count,
+            total_duration,
+            len(timestamps),
+        )
+
+        selected = [max(0, min(total_frame_count - 1, int(timestamp * fps))) for timestamp in timestamps]
+
+        if fades is not None:
+            stats_cache: dict[int, tuple[float, float] | None] = {}
+
+            def get_stats(idx: int) -> tuple[float, float] | None:
+                if idx not in stats_cache:
+                    stats_cache[idx] = _gif_luminance_stats(gif, idx)
+                return stats_cache[idx]
+
+            selected = _filter_fade_frames(
+                selected,
+                get_stats=get_stats,
+                fps=fps,
+                total_frame_count=total_frame_count,
+                fades=fades,
+            )
+
+        frames: list[Image.Image] = []
+        for frame_idx in sorted(set(selected)):
+            gif.seek(frame_idx)
+            frames.append(gif.convert("RGB").copy())
+
+    if dedupe:
+        frames = list(
+            _dedupe_loaded_frames(
+                frames,
+                threshold=dedupe_threshold,
+                change_level=dedupe_change_level,
+                max_fraction=dedupe_max_changed_fraction,
+            )
+        )
+
+    if low_interest is not None and low_interest.enabled:
+        frames = list(_filter_low_interest_frames(frames, low_interest))
+
+    return tuple(frames)
+
+
+def _gif_luminance_stats(
+    gif: "Image.Image",
+    frame_idx: int,
+) -> tuple[float, float] | None:
+    """Return (mean, std) of luminance (0-1) for a GIF frame, or None."""
+    import numpy as np
+
+    try:
+        gif.seek(frame_idx)
+    except (EOFError, OSError, ValueError):
+        return None
+
+    arr = _pil_gray(gif, _FADE_ANALYSIS_SCALE).astype(np.float32)
+    return float(arr.mean() / 255.0), float(arr.std() / 255.0)
+
+
+def _dedupe_loaded_frames(
+    frames: Sequence["Image.Image"],
+    *,
+    threshold: float,
+    change_level: int,
+    max_fraction: float,
+) -> tuple["Image.Image", ...]:
+    """Greedy near-duplicate removal for already-decoded frames.
+
+    Same policy as `_dedupe_near_duplicates`: the first occurrence of a
+    near-identical group is kept and later ones dropped.
+    """
+    accepted: list["Image.Image"] = []
+    accepted_grays: list[Any] = []
+    for frame in frames:
+        gray = _pil_gray(frame, _FADE_ANALYSIS_SCALE)
+        if _is_near_duplicate(gray, accepted_grays, threshold, change_level, max_fraction):
+            continue
+        accepted.append(frame)
+        accepted_grays.append(gray)
+    return tuple(accepted)
 
 
 # region Shared helpers
@@ -240,8 +382,27 @@ def _is_fade_frame(
     return _fade_stats_test(mean, std, dark=dark, light=light, uniformity=uniformity)
 
 
+def _pil_gray(frame: "Image.Image", max_dim: int) -> Any:
+    """Return a downscaled grayscale array of a PIL frame.
+
+    Cheap, cv2-free downscale used for luminance and near-duplicate
+    comparisons on already-decoded frames (GIF sampling).
+    """
+    import numpy as np
+    from PIL import Image
+
+    gray = frame.convert("L")
+    width, height = gray.size
+    if max(width, height) > max_dim:
+        scale = max_dim / max(width, height)
+        gray = gray.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            resample=Image.Resampling.BOX,
+        )
+    return np.asarray(gray)
+
+
 def _filter_low_interest_frames(
-    cv2: Any,
     frames: Sequence["Image.Image"],
     cfg: LowInterestFilterConfig,
 ) -> tuple["Image.Image", ...]:
@@ -255,18 +416,9 @@ def _filter_low_interest_frames(
     frames are not replaced - the output simply has fewer frames.
     """
     kept: list["Image.Image"] = []
-    import numpy as np
 
     for frame in frames:
-        arr = np.asarray(frame.convert("L"), np.float32)
-        h, w = arr.shape
-        if max(h, w) > 96:
-            scale = 96 / max(h, w)
-            arr = cv2.resize(
-                arr,
-                (max(1, int(w * scale)), max(1, int(h * scale))),
-                interpolation=cv2.INTER_AREA,
-            )
+        arr = _pil_gray(frame, 96).astype("float32")
         mean = float(arr.mean() / 255.0)
         std = float(arr.std() / 255.0)
         if mean < cfg.min_luminance and std < cfg.min_std:
@@ -452,6 +604,56 @@ def _filter_fade_frames(
 # region Uniform sampling (reference strategy)
 
 
+def _sample_count(content_duration: float, max_frames: int, max_frames_at_seconds: float) -> int:
+    """Number of content samples for a duration, based on the content window."""
+    if content_duration < max_frames_at_seconds:
+        return int(content_duration / max_frames_at_seconds * max_frames)  # can be 0
+    return max_frames  # assumes sane padding values
+
+
+def _uniform_timestamps(
+    *,
+    total_duration: float,
+    fps: float,
+    num_frames_to_extract: int,
+    padding_duration: float,
+    content_duration: float,
+    include_edges: bool,
+) -> tuple[float, ...]:
+    """Generate timestamps to extract frames at.
+
+    Rough format: (first frame, after padding, content, before padding, last frame).
+
+    When content duration < minimum interval, paddings are skipped and
+    content is a single frame at duration / 2.
+    """
+    start: list[float] = []
+    end: list[float] = []
+    content: list[float] = []
+
+    first_frame = 0.0
+    middle_frame = total_duration / 2 - 1 / fps
+    last_frame: float = total_duration - 1 / fps
+
+    num_of_slices = num_frames_to_extract + 1
+    slice_duration = content_duration / num_of_slices
+
+    if num_frames_to_extract <= 1:  # content_duration < min interval * 2
+        content = [middle_frame]
+    else:
+        content = [padding_duration + float((slice_duration) * c) for c in range(1, num_of_slices)]
+
+    if include_edges:
+        start = [first_frame] + start
+        end = end + [last_frame]
+
+    if padding_duration * 2 < content_duration and num_frames_to_extract > 1:
+        start = start + [padding_duration]
+        end = [total_duration - padding_duration] + end
+
+    return tuple(start + content + end)
+
+
 def _extract_uniform(
     cap: Any,
     *,
@@ -474,53 +676,16 @@ def _extract_uniform(
     )
     content_duration = content_end - content_start
 
-    # Number of samples based on content duration, NOT total duration.
-    if content_duration < max_frames_at_seconds:
-        num_frames_to_extract: int = int(  # can be 0, we handle this later
-            content_duration / max_frames_at_seconds * max_frames
-        )
-    else:
-        num_frames_to_extract = max_frames  # assumes sane padding values
+    num_frames_to_extract = _sample_count(content_duration, max_frames, max_frames_at_seconds)
 
-    def generate_timestamps() -> tuple[float, ...]:
-        """Generate timestamps to extract frames.
-
-        Rough format: (first frame, after padding, content, before padding, last frame).
-
-        When content duration < minimum interval, paddings are skipped and
-        content is a single frame at duration / 2.
-        """
-        start: list[float] = []
-        end: list[float] = []
-        content: list[float] = []
-
-        first_frame = 0.0
-        middle_frame = total_duration / 2 - 1 / fps
-        last_frame: float = total_duration - 1 / fps
-
-        num_of_slices = num_frames_to_extract + 1
-        slice_duration = content_duration / num_of_slices
-
-        if num_frames_to_extract <= 1:  # content_duration < min interval * 2
-            content = [middle_frame]
-        else:
-            content = [
-                padding_duration + float((slice_duration) * c)
-                for c in range(1, num_of_slices)
-            ]
-
-        if include_edges:
-            start = [first_frame] + start
-            end = end + [last_frame]
-
-        if padding_duration * 2 < content_duration and num_frames_to_extract > 1:
-            start = start + [padding_duration]
-            end = [total_duration - padding_duration] + end
-
-        timestamps = start + content + end
-        return tuple(timestamps)
-
-    timestamps = generate_timestamps()
+    timestamps = _uniform_timestamps(
+        total_duration=total_duration,
+        fps=fps,
+        num_frames_to_extract=num_frames_to_extract,
+        padding_duration=padding_duration,
+        content_duration=content_duration,
+        include_edges=include_edges,
+    )
 
     logger.debug(
         "extract_frames(uniform) fps=%s frames=%s duration=%.2f samples=%s",
@@ -579,7 +744,6 @@ def _extract_uniform(
 
 
 def _is_near_duplicate(
-    cv2: Any,
     gray: Any,
     accepted_grays: list[Any],
     threshold: float,
@@ -601,10 +765,12 @@ def _is_near_duplicate(
     not O(n^2). A max_fraction <= 0 disables dedupe (no frame ever counts
     as a duplicate).
     """
+    import numpy as np
+
     if max_fraction <= 0:
         return False
     for other_gray in accepted_grays:
-        diff = cv2.absdiff(gray, other_gray)
+        diff = np.abs(gray.astype(np.int16) - other_gray.astype(np.int16))
         if float(diff.mean()) / 255.0 >= threshold:
             continue
         changed = float((diff > change_level).mean())
@@ -643,7 +809,7 @@ def _dedupe_near_duplicates(
         if frame is None:
             continue
         gray = _downscale_gray(cv2, frame, scale)
-        if _is_near_duplicate(cv2, gray, accepted_grays, threshold, change_level, max_fraction):
+        if _is_near_duplicate(gray, accepted_grays, threshold, change_level, max_fraction):
             continue
         accepted.append(idx)
         accepted_grays.append(gray)

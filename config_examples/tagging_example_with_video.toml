@@ -1,7 +1,7 @@
 # *** EXAMPLE CONFIGURATION FILE ***
-# This is an example config for tagging files in hydrus, including videos.
-# Videos are tagged by sampling frames and merging the per-frame results.
-# See CONFIGURATION.md#video for all video options.
+# This is an example config for tagging files in hydrus, including videos
+# and animated GIFs. Videos and animations are tagged by sampling frames and
+# merging the per-frame results. See CONFIGURATION.md#video for all options.
 
 [hydrus]
 api_url = "http://127.0.0.1:45869"
@@ -24,7 +24,7 @@ default_threshold = 0.35
 
 # *** Output selection ***
 
-output_categories = [
+allowed_categories = [
     "rating",
     "general",
     #"artist",
@@ -67,12 +67,13 @@ path = "data/hyvis.db"
 
 # *** Video support ***
 
-# Videos are tagged by sampling frames and merging the per-frame results.
-# Requires opencv-python-headless (installed automatically with HyVis).
+# Videos and animated GIFs are tagged by sampling frames and merging the
+# per-frame results. Requires opencv-python-headless for videos (installed
+# automatically with HyVis); GIFs are decoded with Pillow.
 # See CONFIGURATION.md#video for details.
 [video]
-enabled = true                    # false to keep rejecting video files
-max_frames = 16                   # max sample frames per video; shorter videos sample proportionally less
+enabled = true                    # false to keep rejecting video files (GIFs then use their first frame)
+max_frames = 16                   # max sample frames per video or GIF; shorter files sample proportionally less
 max_frames_at_seconds = 64.0      # duration (seconds) at which the full max_frames is used
 include_edges = true              # include the first and last frame (may be deduped if near-identical)
 dedupe = true                     # drop near-duplicate sampled frames (loops, static segments)

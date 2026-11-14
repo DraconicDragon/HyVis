@@ -523,12 +523,19 @@ async def infer_files(
     output_services = config.resolved_output_tag_services(model_cfg)
     configured_model_ids = [m.model_id for m in config.inference.models]
 
-    from hyvis.config import is_video_mime
+    from hyvis.config import is_animated_mime, is_video_mime
 
-    # Images go through the batch inference stream; videos are sampled frame
-    # by frame in a separate phase below.
-    image_files = [fi for fi in valid_process if not is_video_mime(fi.mime)]
-    video_files = [fi for fi in valid_process if is_video_mime(fi.mime)]
+    # Images go through the batch inference stream; videos and animated GIFs
+    # are sampled frame by frame in a separate phase below. Animated images
+    # only take that path while [video] frame sampling is enabled.
+    video_cfg = config.video
+    sequence_files = [
+        fi
+        for fi in valid_process
+        if is_video_mime(fi.mime) or (video_cfg.enabled and is_animated_mime(fi.mime))
+    ]
+    sequence_hashes = {fi.file_hash for fi in sequence_files}
+    image_files = [fi for fi in valid_process if fi.file_hash not in sequence_hashes]
     inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in image_files}
 
     load_kwargs: dict[str, Any] = {
@@ -740,16 +747,15 @@ async def infer_files(
 
             # endregion
 
-            # region Video inference (sample frames, infer, merge)
+            # region Video / animation inference (sample frames, infer, merge)
 
-            if video_files and not stats.aborted_early:
-                from hyvis.video import dump_frames, extract_frames
+            if sequence_files and not stats.aborted_early:
+                from hyvis.video import dump_frames, extract_frames, extract_gif_frames
 
-                video_cfg = config.video
-                print(f"  Tagging {len(video_files)} video(s) by sampling frames...")
+                print(f"  Tagging {len(sequence_files)} video/animation file(s) by sampling frames...")
                 print()
 
-                for fi in video_files:
+                for fi in sequence_files:
                     file_hash = fi.file_hash
 
                     if session.is_cancellation_requested():
@@ -758,7 +764,8 @@ async def infer_files(
                         break
 
                     try:
-                        frames = extract_frames(
+                        extractor = extract_frames if is_video_mime(fi.mime) else extract_gif_frames
+                        frames = extractor(
                             fi.local_path,
                             max_frames=video_cfg.max_frames,
                             max_frames_at_seconds=video_cfg.max_frames_at_seconds,
@@ -771,7 +778,7 @@ async def infer_files(
                             dedupe_max_changed_fraction=video_cfg.dedupe_max_changed_fraction,
                         )
                         if not frames:
-                            raise RuntimeError("No usable frames could be sampled from the video")
+                            raise RuntimeError("No usable frames could be sampled from the file")
 
                         if video_cfg.write_frames:
                             out_dir = dump_frames(frames, file_hash=file_hash)

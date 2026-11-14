@@ -59,17 +59,27 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
         "image/jxl",
         "image/avif",
         "image/heif",
-        # "image/gif",
+        "image/gif",
+        # Photoshop files are tagged from their saved flattened composite.
+        "image/vnd.adobe.photoshop",
     }
 )
 
 #: Any MIME starting with this prefix is treated as a video when video support is enabled.
 VIDEO_MIME_PREFIX = "video/"
 
+#: Image MIME types that can hold an animation and are sampled frame by frame.
+ANIMATED_MIMES: frozenset[str] = frozenset({"image/gif"})
+
 
 def is_video_mime(mime: str | None) -> bool:
     """Return True if the given Hydrus MIME type identifies a video file."""
     return bool(mime and mime.startswith(VIDEO_MIME_PREFIX))
+
+
+def is_animated_mime(mime: str | None) -> bool:
+    """Return True if the given MIME type may contain an animation (e.g. GIF)."""
+    return bool(mime and mime in ANIMATED_MIMES)
 
 
 def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
@@ -732,20 +742,24 @@ class HyvisConfig(StrictBaseModel):
 
 class VideoConfig(StrictBaseModel):
     """
-    Settings for tagging video files by sampling frames.
+    Settings for tagging video files and animated GIFs by sampling frames.
 
     enabled                Accept video/* MIME types and tag them. When false,
-                           videos are rejected exactly like before this feature.
-    max_frames             Maximum number of sample frames extracted per video.
-                           Shorter videos are sampled proportionally less.
+                           videos are rejected exactly like before this feature;
+                           animated GIFs still load as images and are tagged
+                           from their first frame.
+    max_frames             Maximum number of sample frames extracted per video
+                           or animated GIF. Shorter files are sampled
+                           proportionally less.
     max_frames_at_seconds  Duration (seconds) at which the full max_frames is
-                           used; videos shorter than this are sampled less,
+                           used; files shorter than this are sampled less,
                            and the sampling interval never exceeds
                            max_frames_at_seconds / max_frames.
-    include_edges          Include the first and last frame of the video. With
-                           dedupe enabled they may still be dropped if
-                           near-identical to another sampled frame (e.g. a
-                           loop's end frame duplicating its start).
+    include_edges          Include the first and last frame of the video or
+                           animation. With dedupe enabled they may still be
+                           dropped if near-identical to another sampled
+                           frame (e.g. a loop's end frame duplicating its
+                           start).
     write_frames           Debug aid: save the sampled frames as PNGs under
                            frames/<file_hash>/ so you can inspect exactly what
                            is being inferred. Defaults to false.
@@ -764,8 +778,8 @@ class VideoConfig(StrictBaseModel):
                            already-chosen frame. This is the main defence
                            against looping animations (the same loop phase
                            sampled at different times) and static segments
-                           wasting the max_frames budget. Applies to both
-                           sampling modes. Defaults to true.
+                           wasting the max_frames budget. Applies to videos
+                           and animated GIFs. Defaults to true.
     dedupe_threshold       Normalized mean frame difference (0-1) below which
                            two sampled frames count as duplicates. Lower =
                            stricter (only near-identical frames dropped).

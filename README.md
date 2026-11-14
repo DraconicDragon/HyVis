@@ -33,7 +33,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 - **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying `--extra-hash-file` (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
 - **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
 - **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
-- **Video Support**: Tag video files by [sampling frames](CONFIGURATION.md#video) across the video duration and merging the per-frame results
+- **Video and GIF Support**: Tag video files and animated GIFs by [sampling frames](CONFIGURATION.md#video) across their duration and merging the per-frame results
 - **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
 
 ### Showcase
@@ -224,7 +224,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - [`tagging_example.toml`](config_examples/tagging_example.toml) - Generic example config for general tagging of files using a model with basic default settings - *likely a good starting point for most users*
 
-- [`tagging_example_with_video.toml`](config_examples/tagging_example_with_video.toml) - Same as `tagging_example.toml`, but with video tagging enabled (uniform sampling with near-duplicate removal and the fade/low-interest frame filters) - a good starting point if you also tag videos
+- [`tagging_example_with_video.toml`](config_examples/tagging_example_with_video.toml) - Same as `tagging_example.toml`, but with video and animated GIF tagging enabled (uniform sampling with near-duplicate removal and the fade/low-interest frame filters) - a good starting point if you also tag videos
 
 - [`dan_rating_only.toml`](config_examples/dan_rating_only.toml) - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
 
@@ -282,4 +282,4 @@ Q: Can I try models before starting a run/outside of HyVis as like a model previ
 A: No. I have something like a separate model preview module in mind for which I can add a button to hyvis-gui's models page, but that's about it. It may also be GUI only (no CLI/TUI), at first at least
 
 Q: Video/Animation support?  
-A: soon™, perhaps. I have ideas and a rough plan for it
+A: Yes. Video files and animated GIFs are tagged by [sampling frames](CONFIGURATION.md#video) across their duration and merging the per-frame results. PSD files (and any other image format Pillow can decode) are tagged from their saved flattened composite

@@ -534,16 +534,18 @@ min_cache_score = 0.01
 
 ## `[video]`
 
-Settings for tagging video files by sampling frames.
+Settings for tagging video files and animated GIFs by sampling frames.
 
 When `enabled` is `true`, files with a `video/*` MIME type are accepted alongside images. For each video, a set of frames is sampled (evenly distributed across the content duration, with padding around fade-ins/fade-outs and optional first/last frames), every frame is run through the configured models, and the per-frame results are merged into one result per file: a tag is kept if it appears in any sampled frame, using its highest score across frames. Everything downstream (thresholds, output filter, tag services, preview, push) behaves exactly like it does for images.
 
-Requires `opencv-python-headless`, which is installed automatically with HyVis.
+Animated GIFs are always accepted as images; while `enabled` is `true` they are sampled like videos instead of only using their first frame. A GIF has no frame rate clock, so each frame's display duration from the GIF metadata defines the animation timeline, and the same uniform sampling, fade, low-interest and near-duplicate filters apply. Because the sampling density rules are shared with videos, a short animation (well under `max_frames_at_seconds`) is sampled proportionally less, typically ending up with its first, middle and last frame.
+
+Requires `opencv-python-headless` for video files, which is installed automatically with HyVis (GIF sampling itself only uses Pillow).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `enabled` | Boolean | No | Accept and tag video files. Set to `false` to keep rejecting videos like before this feature existed. <br> Defaults to `true`. |
-| `max_frames` | Integer | No | Maximum number of sample frames extracted per video. Videos shorter than `max_frames_at_seconds` are sampled proportionally less. <br> Defaults to `11`. |
+| `enabled` | Boolean | No | Accept and tag video files, and sample animated GIFs frame by frame. Set to `false` to keep rejecting videos like before this feature existed; GIFs are then tagged from their first frame only. <br> Defaults to `true`. |
+| `max_frames` | Integer | No | Maximum number of sample frames extracted per video or animated GIF. Files shorter than `max_frames_at_seconds` are sampled proportionally less. <br> Defaults to `11`. |
 | `max_frames_at_seconds` | Number | No | Duration (seconds) at which the full `max_frames` is used. In `uniform` mode the interval between samples never exceeds `max_frames_at_seconds / max_frames` seconds. <br> Defaults to `60.0`. |
 | `include_edges` | Boolean | No | Include the first and last frame of the video. With dedupe enabled they may still be dropped if near-identical to another sampled frame (e.g. a loop's end frame duplicating its start). <br> Defaults to `true`. |
 | `dedupe` | Boolean | No | Drop sampled frames that are near-duplicates of an already-chosen frame. The main defence against looping animations (the same loop phase sampled at different timestamps) and long static segments wasting the `max_frames` budget. <br> Defaults to `true`. |
