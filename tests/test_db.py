@@ -194,8 +194,8 @@ def test_migration_v0_to_latest_folds_unpushed_queue(tmp_path: Path) -> None:
         assert p2["svc_model"]["delete"] == ["temp:tag"]
 
 
-def test_migration_v1_to_v2_preserves_inference_history_and_drops_json_cache(tmp_path: Path) -> None:
-    """Verify v1 -> v2 migrates inference_cache completions into inference_log and drops legacy table."""
+def test_migration_v1_to_v2_drops_json_cache_and_creates_new_tables(tmp_path: Path) -> None:
+    """Verify v1 -> v2 drops legacy inference_cache and creates inference_log + active_run tables."""
     db_file = tmp_path / "v1.db"
 
     with sqlite3.connect(db_file) as conn:
@@ -227,22 +227,19 @@ def test_migration_v1_to_v2_preserves_inference_history_and_drops_json_cache(tmp
         )
         conn.execute("INSERT INTO known_files VALUES ('h1', '/a.png', 'image/png', 'active', '2026-01-01')")
         conn.execute("INSERT INTO inference_cache VALUES ('h1', 'wd-swinv2-v3', '{}', '2026-01-01')")
-        # Orphan row without matching known_files entry should be safely ignored
-        conn.execute("INSERT INTO inference_cache VALUES ('orphan', 'wd-swinv2-v3', '{}', '2026-01-01')")
 
     with Database(db_file) as db:
         ver = db.conn.execute("PRAGMA user_version").fetchone()[0]
         assert ver == LATEST_VERSION
 
-        # Legacy table dropped
         old_tbl = db.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inference_cache'"
         ).fetchone()
         assert old_tbl is None
 
-        # Completion preserved with legacy sentinel filter hash
-        hashes = db.get_inference_filter_hashes(["h1", "orphan"], "wd-swinv2-v3")
-        assert hashes == {"h1": "__v1_legacy__"}
+        known_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(known_files)").fetchall()}
+        assert "num_frames" in known_cols
+        assert db.get_active_run() is None
 
 
 def test_new_database_stamps_latest_version_without_backup(tmp_path: Path) -> None:
