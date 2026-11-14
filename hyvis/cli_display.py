@@ -110,6 +110,9 @@ def print_confirmation(
     page_query_counts: list[int],
     mime_rejected: int = 0,
     rejected_mimes: set[str] | None = None,
+    *,
+    is_resume: bool = False,
+    model_plans: list[Any] | None = None,
 ) -> None:
     inf = config.inference
     hydrus = config.hydrus
@@ -119,6 +122,9 @@ def print_confirmation(
         "infer_only": "Infer only  (Hydrus push skipped)",
         "dry_run": "Dry Run  (Inference active - no DB writes, Hydrus push skipped)",
     }.get(mode, mode)
+
+    if is_resume:
+        mode_label = f"{mode_label}  [RESUMING INTERRUPTED RUN]"
 
     print()
     print(_c("  ═══ HyVis | Operation Confirmation ════════════════════════════════", BOLD, CYAN))
@@ -136,53 +142,56 @@ def print_confirmation(
     print()
 
     # Hydrus
-    print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", BOLD))
-    print(f"    URL        {_c(hydrus.api_url, CYAN)}")
-    print(f"    Boot time  {_c(boot_time, GREEN)}")
+    if hydrus_version != "offline":
+        print(_c(f"  Hydrus v{hydrus_version} | API v{api_version}", BOLD))
+        print(f"    URL        {_c(hydrus.api_url, CYAN)}")
+        print(f"    Boot time  {_c(boot_time, GREEN)}")
+    else:
+        print(_c("  Hydrus (Resuming offline from cached paths)", BOLD))
     print()
 
     # region Tag / Page Queries
-    # Tag Queries
-    if hydrus.tag_queries:
-        print(_c("  Tag Queries", BOLD))
-        for idx, q in enumerate(hydrus.tag_queries):
-            count = tag_query_counts[idx] if idx < len(tag_query_counts) else 0
-            count_str = _c(f"[{count} files]", DIM)
+    if not is_resume:
+        # Tag Queries
+        if hydrus.tag_queries:
+            print(_c("  Tag Queries", BOLD))
+            for idx, q in enumerate(hydrus.tag_queries):
+                count = tag_query_counts[idx] if idx < len(tag_query_counts) else 0
+                count_str = _c(f"[{count} files]", DIM)
 
-            if q.tag_service_keys:
-                names = []
-                for key in q.tag_service_keys:
-                    name = service_name_by_key.get(key, "(unknown service)")
-                    names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
-                svc = ", ".join(names)
-            else:
-                svc = _c("(all known tags)", DIM)
-            print(f"    service  {svc} {count_str}")
-
-            def _format_tag(t: Any) -> str:
-                if isinstance(t, list):
-                    return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
-                return str(t)
-
-            for tag in q.tags:
-                if isinstance(tag, list):
-                    # Top-level nested list; no need for outer parentheses
-                    separator = f"{_c(' OR ', BOLD)}"
-                    joined_tags = separator.join(_format_tag(sub) for sub in tag)
-                    print(f"      tag    {joined_tags}")
+                if q.tag_service_keys:
+                    names = []
+                    for key in q.tag_service_keys:
+                        name = service_name_by_key.get(key, "(unknown service)")
+                        names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
+                    svc = ", ".join(names)
                 else:
-                    print(f"      tag    {tag}")
-        print()
+                    svc = _c("(all known tags)", DIM)
+                print(f"    service  {svc} {count_str}")
 
-    # Page Queries
-    if hydrus.page_queries:
-        print(_c("  Page Queries", BOLD))
-        for idx, pq in enumerate(hydrus.page_queries):
-            count = page_query_counts[idx] if idx < len(page_query_counts) else 0
-            count_str = _c(f"[{count} files]", DIM)
-            idx_str = f" (index: {pq.index})" if pq.index is not None else ""
-            print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
-        print()
+                def _format_tag(t: Any) -> str:
+                    if isinstance(t, list):
+                        return "(" + _c(" OR ", BOLD) + "".join(_format_tag(sub) for sub in t) + ")"
+                    return str(t)
+
+                for tag in q.tags:
+                    if isinstance(tag, list):
+                        separator = f"{_c(' OR ', BOLD)}"
+                        joined_tags = separator.join(_format_tag(sub) for sub in tag)
+                        print(f"      tag    {joined_tags}")
+                    else:
+                        print(f"      tag    {tag}")
+            print()
+
+        # Page Queries
+        if hydrus.page_queries:
+            print(_c("  Page Queries", BOLD))
+            for idx, pq in enumerate(hydrus.page_queries):
+                count = page_query_counts[idx] if idx < len(page_query_counts) else 0
+                count_str = _c(f"[{count} files]", DIM)
+                idx_str = f" (index: {pq.index})" if pq.index is not None else ""
+                print(f"    page     {_c(pq.name, BOLD, CYAN)}{_c(idx_str, DIM)} {count_str}")
+            print()
 
     # Add tags
     if hydrus.add_tags and mode == "default":
@@ -193,8 +202,9 @@ def print_confirmation(
                 name = service_name_by_key.get(key, "(unknown service)")
                 names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
             svc = ", ".join(names) if names else _c("(none)", DIM)
+            cond_note = _c(" [only if tags emitted]", DIM) if a.only_if_tags_emitted else ""
 
-            print(f"    service  {svc}")
+            print(f"    service  {svc}{cond_note}")
             for tag in a.tags:
                 print(f"      tag    {_c(tag, GREEN)}")
         print()
@@ -208,8 +218,9 @@ def print_confirmation(
                 name = service_name_by_key.get(key, "(unknown service)")
                 names.append(f"{_c(name, BOLD, CYAN)} {_c(key, DIM)}")
             svc = ", ".join(names) if names else _c("(none)", DIM)
+            cond_note = _c(" [only if tags emitted]", DIM) if r.only_if_tags_emitted else ""
 
-            print(f"    service  {svc}")
+            print(f"    service  {svc}{cond_note}")
             for tag in r.tags:
                 print(f"      tag    {_c(tag, RED)}")
         print()
@@ -248,6 +259,16 @@ def print_confirmation(
         print(
             f"                        backend={m.backend or 'auto'}  device={m.device}  precision={m.precision}  batch={m.batch_size}"
         )
+        if model_plans and (i - 1) < len(model_plans):
+            plan = model_plans[i - 1]
+            gpu_n = len(plan.gpu_files)
+            cpu_n = len(plan.refilter_files)
+            skip_n = len(plan.skip_hashes)
+            print(
+                f"       work plan        {_c(f'{gpu_n} GPU', YELLOW if gpu_n else DIM)}  │  "
+                f"{_c(f'{cpu_n} CPU re-filter', CYAN if cpu_n else DIM)}  │  "
+                f"{_c(f'{skip_n} skipped', DIM)}"
+            )
         # Only show output services if explicitly configured per-model
         if m.output_tag_services is not None:
             eff_svcs = config.resolved_output_tag_services(m)
@@ -350,12 +371,17 @@ def print_run_summary(
     total_push_err: int,
     total_zero_tags: int = 0,
     total_files_with_tags: int = 0,
+    total_refiltered: int = 0,
 ) -> None:
-    total_processed = total_infer_ok + total_skipped
+    del run_id # todo: remove
+    total_processed = total_infer_ok + total_refiltered + total_skipped
     print()
     print(_c("  ══ Run Complete ══════════════════════════════", BOLD))
     print(f"  Status    : {_c(run_status, GREEN if run_status == 'done' else YELLOW)}")
-    print(f"  Files     : {total_processed} processed ({total_infer_ok} inferred, {total_skipped} from cache)")
+    print(
+        f"  Files     : {total_processed} total "
+        f"({total_infer_ok} GPU inferred, {total_refiltered} CPU re-filtered, {total_skipped} skipped)"
+    )
     if total_infer_err > 0:
         print(f"  Errors    : {_c(str(total_infer_err), RED)}")
     print(f"  Output    : {total_files_with_tags} with tags, {total_zero_tags} with zero tags")
@@ -379,7 +405,7 @@ def print_run_summary(
         "=== HyVis Run Summary ===\n"
         "  Status:    %s\n"
         "  Mode:      %s\n"
-        "  Processed: %d files (%d newly inferred, %d cached)\n"
+        "  Processed: %d total (%d GPU inferred, %d CPU re-filtered, %d skipped)\n"
         "  Output:    %d files with tags, %d zero-tag files\n"
         "  Errors:    %d inference errors\n"
         "  Push:      %s\n"
@@ -388,6 +414,7 @@ def print_run_summary(
         mode,
         total_processed,
         total_infer_ok,
+        total_refiltered,
         total_skipped,
         total_files_with_tags,
         total_zero_tags,
