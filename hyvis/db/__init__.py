@@ -11,18 +11,21 @@ from hyvis.db.dry_run import DryRunDatabase
 from hyvis.db.hyvis_db import (
     MAX_PUSH_ATTEMPTS,
     ActiveRunInfo,
+    ActiveRunInspection,
     Database,
     FileStatus,
     PushAction,
     RunMode,
     RunTargetState,
     TagActionType,
+    inspect_active_run_readonly,
 )
 
 __all__ = [
     "CACHE_SCHEMA_VERSION",
     "MAX_PUSH_ATTEMPTS",
     "ActiveRunInfo",
+    "ActiveRunInspection",
     "CacheDatabase",
     "CachedVocab",
     "Database",
@@ -33,5 +36,6 @@ __all__ = [
     "RunTargetState",
     "TagActionType",
     "default_cache_path",
+    "inspect_active_run_readonly",
     "quantize_floor",
 ]

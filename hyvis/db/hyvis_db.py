@@ -60,6 +60,17 @@ class ActiveRunInfo:
     started_at: str
 
 
+@dataclass(frozen=True)
+class ActiveRunInspection:
+    """Read-only snapshot of an active/interrupted run and its locked target hashes."""
+
+    run: ActiveRunInfo
+    pending_hashes: list[str]
+    done_count: int
+    rejected_hashes: list[str]
+    rejected_mimes: set[str]
+
+
 # region Schema Definition
 
 _SCHEMA_SQL = """
@@ -691,3 +702,62 @@ class Database:
             yield items[i : i + size]
 
     # endregion
+
+
+def inspect_active_run_readonly(db_path: str | Path) -> ActiveRunInspection | None:
+    """
+    Safely inspect an existing hyvis.db in strict read-only URI mode without
+    creating files on disk or running migrations. Returns None if no active run exists.
+    """
+    path = Path(db_path)
+    if str(path) == ":memory:" or not path.is_file():
+        return None
+
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=2.0)
+        row = conn.execute(
+            "SELECT config_toml, config_path, mode, force_mode, hyvis_version, started_at FROM active_run WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+
+        run_info = ActiveRunInfo(
+            config_toml=row[0],
+            config_path=row[1],
+            mode=RunMode(row[2]),
+            force_mode=bool(row[3]),
+            hyvis_version=row[4],
+            started_at=row[5],
+        )
+
+        target_rows = conn.execute("SELECT file_hash, state, mime FROM run_targets").fetchall()
+        pending_hashes: list[str] = []
+        done_count = 0
+        rejected_hashes: list[str] = []
+        rejected_mimes: set[str] = set()
+
+        for f_hash, state, mime in target_rows:
+            if state == RunTargetState.PENDING.value:
+                pending_hashes.append(f_hash)
+            elif state == RunTargetState.DONE.value:
+                done_count += 1
+            elif state == RunTargetState.REJECTED.value:
+                rejected_hashes.append(f_hash)
+                if mime:
+                    rejected_mimes.add(mime)
+
+        return ActiveRunInspection(
+            run=run_info,
+            pending_hashes=pending_hashes,
+            done_count=done_count,
+            rejected_hashes=rejected_hashes,
+            rejected_mimes=rejected_mimes,
+        )
+    except (sqlite3.Error, ValueError):
+        # Safely handles unmigrated v1 databases or transient read locks
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
