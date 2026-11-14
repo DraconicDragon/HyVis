@@ -60,8 +60,13 @@ def _apply_cli_overrides(cfg: AppConfig, args: Any) -> AppConfig:
         new_hydrus = cfg.hydrus.model_copy(update=hydrus_updates)
         cfg = cfg.model_copy(update={"hydrus": new_hydrus})
 
-    if args.db is not None:
-        new_db = cfg.database.model_copy(update={"path": str(args.db)})
+    if args.db is not None or args.cache_db is not None:
+        db_updates: dict[str, Any] = {}
+        if args.db is not None:
+            db_updates["path"] = str(args.db)
+        if args.cache_db is not None:
+            db_updates["cache_path"] = str(args.cache_db)
+        new_db = cfg.database.model_copy(update=db_updates)
         cfg = cfg.model_copy(update={"database": new_db})
 
     return cfg
@@ -188,7 +193,16 @@ async def main() -> int:
                             return 0
 
     assert cfg is not None
+    explicit_cache_override_note = args.db is not None and args.cache_db is None and bool(cfg.database.cache_path)
     cache_path = _resolve_db_path(cfg.database.cache_path) if cfg.database.cache_path else default_cache_path(db_path)
+    if explicit_cache_override_note:
+        print(
+            _c(
+                f"  Note: --db overrode main DB to '{db_path}', while cache.db remains '{cache_path}' "
+                "from config (pass --cache-db to override).",
+                YELLOW,
+            )
+        )
 
     # region Logging Setup
     effective_log_level = args.log_level or cfg.hyvis.log_level
