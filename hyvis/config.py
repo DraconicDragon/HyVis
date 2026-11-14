@@ -247,12 +247,6 @@ class PageQueryConfig(StrictBaseModel):
         examples=[0, 1],
     )
 
-    @model_validator(mode="after")
-    def _validate_index(self) -> PageQueryConfig:
-        if self.index is not None and self.index < 0:
-            raise ValueError("'index' cannot be negative")
-        return self
-
 
 class PreviewConfig(StrictBaseModel):
     """Target specific open pages for file previewing before inference."""

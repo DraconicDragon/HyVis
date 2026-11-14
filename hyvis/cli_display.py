@@ -1,4 +1,3 @@
-import argparse
 import logging
 import sys
 from typing import Any
@@ -19,7 +18,7 @@ def _parse_version_number(value: str) -> int | None:
 # region Hydrus connection helpers
 
 
-def connect_hydrus(cfg: Any, args: argparse.Namespace) -> tuple[Any, dict[str, str], str, str, str]:
+def connect_hydrus(cfg: Any) -> tuple[Any, dict[str, str], str, str, str]:
     """
     Connect to Hydrus, verify the key, and return:
         (hydrus_client, service_name_by_key, hydrus_version, api_version, boot_time)
@@ -362,7 +361,6 @@ def print_confirmation(
 
 def print_run_summary(
     run_status: str,
-    run_id: str,
     mode: str,
     total_infer_ok: int,
     total_infer_err: int,
@@ -373,7 +371,6 @@ def print_run_summary(
     total_files_with_tags: int = 0,
     total_refiltered: int = 0,
 ) -> None:
-    del run_id # todo: remove
     total_processed = total_infer_ok + total_refiltered + total_skipped
     print()
     print(_c("  ══ Run Complete ══════════════════════════════", BOLD))

@@ -269,7 +269,7 @@ async def main() -> int:
                 logger.info("Push queue is empty. No operations needed.")
                 return 0
 
-            hydrus, _, _, _, _ = connect_hydrus(cfg, args)
+            hydrus, _, _, _, _ = connect_hydrus(cfg)
 
             print()
             print(_c(f"  Pending push operations: {pending_count}", BOLD, CYAN))
@@ -330,7 +330,7 @@ async def main() -> int:
 
         # Connect to Hydrus if needed for pushing (default mode) or resolving missing paths
         if mode == "default" or missing_paths:
-            hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg, args)
+            hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg)
             logger.info("Connected to Hydrus v%s (API v%s) at %s", hydrus_version, api_version, cfg.hydrus.api_url)
             try:
                 validate_service_keys(cfg, service_name_by_key)
@@ -353,7 +353,7 @@ async def main() -> int:
                             )
 
     else:
-        hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg, args)
+        hydrus, service_name_by_key, hydrus_version, api_version, boot_time = connect_hydrus(cfg)
         logger.info("Connected to Hydrus v%s (API v%s) at %s", hydrus_version, api_version, cfg.hydrus.api_url)
 
         try:
@@ -714,7 +714,7 @@ async def main() -> int:
 
             if pending_count > 0:
                 if hydrus is None:
-                    hydrus, _, _, _, _ = connect_hydrus(cfg, args)
+                    hydrus, _, _, _, _ = connect_hydrus(cfg)
 
                 print()
                 print(_c("  ══ Pushing Results to Hydrus ══════════════════════════════", BOLD, CYAN))
@@ -752,7 +752,6 @@ async def main() -> int:
     total_files_with_tags = max(0, total_active - total_zero_tags)
     print_run_summary(
         run_status=run_status,
-        run_id="(queue)",
         mode=mode,
         total_infer_ok=total_infer_ok,
         total_infer_err=total_infer_err,

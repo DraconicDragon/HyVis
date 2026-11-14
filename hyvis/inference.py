@@ -39,8 +39,9 @@ from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c
 if TYPE_CHECKING:
     from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig
     from hyvis.db import Database
-    from hyvis.hydrus import FileInfo, HydrusClient
+    from hyvis.hydrus import FileInfo
     from hyvis.progress import Progress
+
 
 logger = logging.getLogger(__name__)
 
@@ -551,16 +552,7 @@ class PhaseStats:
     skipped: int = 0
     aborted_early: bool = False
     abort_reason: str = ""
-
-    # inference-specific
-    total_tags_cached: int = 0
     total_tags_enqueued: int = 0
-
-    # push-specific (preserved for API compatibility with CLI summary)
-    push_ok: int = 0
-    total_tags_pushed: int = 0
-    push_errors: int = 0
-    hydrus_suspended: bool = False
 
 
 # endregion
@@ -650,8 +642,6 @@ async def infer_files(
     plan: ModelPassPlan | None = None,
     last_active_model_for_file: Mapping[str, str] | None = None,
     model_meta_by_id: dict[str, tuple[str, str, str]] | None = None,
-    run_id: str | None = None,
-    hydrus: HydrusClient | None = None,
 ) -> PhaseStats:
     """
     Execute one model pass:
@@ -660,7 +650,6 @@ async def infer_files(
       3. Run GPU inference on remaining files, storing packed binary scores in cache.db.
       4. Stage or atomically commit completed files into push_queue + inference_log.
     """
-    del run_id, hydrus  # Retained in signature for compatibility; pushing handled via push_queue
     stats = PhaseStats(model_id=model_cfg.model_id)
 
     if model_meta_by_id is None:
@@ -854,7 +843,6 @@ async def infer_files(
             vocab_hash = catalog.vocab_hash
             model_meta_by_id[model_cfg.model_id] = (resolved_variant, vocab_hash, plan.filter_hash)
 
-            total_model_tags = len(catalog.labels)
             cache_raw_enabled = config.database.cache_raw_predictions
             min_cache_score = config.database.min_cache_score
 
@@ -936,7 +924,6 @@ async def infer_files(
 
                         consecutive_errors = 0
                         stats.ok += 1
-                        stats.total_tags_cached += total_model_tags
                         stats.total_tags_enqueued += len(prefixed_tags)
                         batch_processed += 1
                         last_file_hash = file_hash
