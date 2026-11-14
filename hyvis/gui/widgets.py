@@ -1858,6 +1858,7 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
             cond_row = QHBoxLayout()
             self.only_if_tags_chk = QCheckBox("Only apply if model emits tags (skip if zero tags)", self)
             self.only_if_tags_chk.setObjectName("only_if_tags_emitted")
+            self.only_if_tags_chk.setProperty(ThemeProperty.TEXT_ROLE, TextRole.SECONDARY)
             self.only_if_tags_chk.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.only_if_tags_chk.setToolTip(
                 "When enabled, this rule is only executed if at least one tag was emitted by the model(s) "
