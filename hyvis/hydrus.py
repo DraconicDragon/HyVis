@@ -170,7 +170,7 @@ def _handle_hydrus_errors(func: F) -> F:
 class FileInfo:
     """Minimal resolved metadata for one file."""
 
-    __slots__ = ("file_hash", "local_path", "mime", "size")
+    __slots__ = ("file_hash", "local_path", "mime", "num_frames", "size")
 
     def __init__(
         self,
@@ -178,11 +178,13 @@ class FileInfo:
         mime: str,
         size: int,
         local_path: str | None = None,
+        num_frames: int | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.mime = mime
         self.size = size
         self.local_path = local_path  # filled in by resolve_paths()
+        self.num_frames = num_frames
 
 
 # region HydrusClient
@@ -396,11 +398,19 @@ class HydrusClient:
                     rejected_hashes.append(meta["hash"])
                     logger.debug("Skipping %s: unsupported MIME %s", meta.get("hash", "?"), mime)
                     continue
+
+                raw_frames = meta.get("num_frames")
+                num_frames = (
+                    int(raw_frames)
+                    if not isinstance(raw_frames, bool) and isinstance(raw_frames, int) and raw_frames > 0
+                    else None
+                )
                 accepted.append(
                     FileInfo(
                         file_hash=meta["hash"],
                         mime=mime,
                         size=meta.get("size", 0),
+                        num_frames=num_frames,
                     )
                 )
 

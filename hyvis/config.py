@@ -322,6 +322,14 @@ class AddTagConfig(StrictBaseModel):
         description="Hydrus tag service keys to write the added tags to.",
         json_schema_extra=field_meta(source="hydrus:tag_services"),
     )
+    only_if_tags_emitted: bool = Field(
+        default=False,
+        title="Only If Tags Emitted",
+        description=(
+            "If True, this rule is only applied if at least one tag was emitted by the model(s) "
+            "during this run. If all predictions fall below threshold (zero tags), this rule is skipped."
+        ),
+    )
 
 
 class RemoveTagConfig(StrictBaseModel):
@@ -340,6 +348,14 @@ class RemoveTagConfig(StrictBaseModel):
         title="Target Service Keys",
         description="Hydrus tag service keys to remove the tags from.",
         json_schema_extra=field_meta(source="hydrus:tag_services"),
+    )
+    only_if_tags_emitted: bool = Field(
+        default=False,
+        title="Only If Tags Emitted",
+        description=(
+            "If True, this rule is only applied if at least one tag was emitted by the model(s) "
+            "during this run. If all predictions fall below threshold (zero tags), this rule is skipped."
+        ),
     )
 
 
@@ -669,17 +685,23 @@ class DatabaseConfig(StrictBaseModel):
         examples=["data/hyvis.db"],
     )
     cache_raw_predictions: bool = Field(
-        default=False,
+        default=True,
         title="Cache Raw Predictions",
-        description="Save un-culled model predictions in the database to allow instant re-filtering without re-running inference.",
+        description=(
+            "Save un-culled model predictions in a separate disposable cache database (cache.db) "
+            "to enable instant CPU re-filtering when output_filter settings change."
+        ),
     )
     min_cache_score: float = Field(
-        default=0.01,
+        default=0.005,
         ge=0.0,
-        le=1.0,
+        le=0.1,
         title="Min. Raw Cache Score",
-        description="Minimum confidence score stored in raw cache. The default of 0.01 prunes zero-confidence noise to save disk space. Values below 0.01 may increase database size significantly.",
-        examples=[0.01],
+        description=(
+            "Minimum confidence score stored in cache.db. The default of 0.005 prunes low-confidence "
+            "noise while preserving plenty of headroom for re-filtering."
+        ),
+        examples=[0.005],
     )
 
 
