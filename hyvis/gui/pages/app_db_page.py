@@ -94,6 +94,24 @@ class AppDbPage(BaseConfigPage):
 
         add_form_row(db_layout, db_fields, "path", path_box)
 
+        # Cache DB Path Row
+        cache_path_box = QWidget(container)
+        cache_path_row = QHBoxLayout(cache_path_box)
+        cache_path_row.setContentsMargins(0, 0, 0, 0)
+        cache_path_row.setSpacing(6)
+
+        self.cache_path_edit = QLineEdit(cache_path_box)
+        bind_field_metadata(self.cache_path_edit, db_fields["cache_path"], set_placeholder=False)
+        self.cache_path_edit.setPlaceholderText("Auto (alongside database path as cache.db)")
+        self.cache_path_edit.textChanged.connect(lambda _: self._on_field_changed())
+        cache_path_row.addWidget(self.cache_path_edit, stretch=1)
+
+        self.browse_cache_db_btn = QPushButton("Browse...", cache_path_box)
+        self.browse_cache_db_btn.clicked.connect(self._on_browse_cache_db)
+        cache_path_row.addWidget(self.browse_cache_db_btn)
+
+        add_form_row(db_layout, db_fields, "cache_path", cache_path_box)
+
         # Cache raw predictions checkbox
         self.cache_raw_chk = QCheckBox(db_fields["cache_raw_predictions"].title, container)
         self.cache_raw_chk.setObjectName("cache_raw_predictions")
@@ -108,9 +126,6 @@ class AppDbPage(BaseConfigPage):
         self.min_score_spin.setValue(0.005)
         self.min_score_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(db_layout, db_fields, "min_cache_score", self.min_score_spin)
-
-        self.db_card.setContentLayout(db_layout)
-        layout.addWidget(self.db_card)
 
         # 2. HyVis Application Settings Card
         hy_title = app_fields["hyvis"].title or "Application Settings"
@@ -173,6 +188,7 @@ class AppDbPage(BaseConfigPage):
         self._is_loading_ui = True
         try:
             self.db_path_edit.setText(cfg.database.path)
+            self.cache_path_edit.setText(cfg.database.cache_path or "")
             self.cache_raw_chk.setChecked(cfg.database.cache_raw_predictions)
             self.min_score_spin.setValue(cfg.database.min_cache_score)
 
@@ -186,6 +202,7 @@ class AppDbPage(BaseConfigPage):
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         db_dict: dict[str, Any] = data.setdefault("database", {})
         db_dict["path"] = self.db_path_edit.text().strip() or "data/hyvis.db"
+        db_dict["cache_path"] = self.cache_path_edit.text().strip() or None
         db_dict["cache_raw_predictions"] = self.cache_raw_chk.isChecked()
         db_dict["min_cache_score"] = float(self.min_score_spin.value())
 
@@ -201,6 +218,14 @@ class AppDbPage(BaseConfigPage):
         )
         if path:
             self.db_path_edit.setText(path)
+            self._on_field_changed()
+
+    def _on_browse_cache_db(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Select Cache Database File", "cache.db", "SQLite DB (*.db);;All Files (*)"
+        )
+        if path:
+            self.cache_path_edit.setText(path)
             self._on_field_changed()
 
     def _on_browse_log_dir(self) -> None:
