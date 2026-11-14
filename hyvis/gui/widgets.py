@@ -1786,9 +1786,9 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
     """
     A single card mapping tags to a specific Hydrus service key.
     Used for:
-      - [[hydrus.tag_queries]] (allow_search_all=True, theme=CardTheme.INFO)
-      - [[hydrus.add_tags]] (allow_search_all=False, theme=CardTheme.SUCCESS)
-      - [[hydrus.remove_tags]] (allow_search_all=False, theme=CardTheme.DANGER)
+      - [[hydrus.tag_queries]] (allow_search_all=True, show_condition=False, theme=CardTheme.INFO)
+      - [[hydrus.add_tags]] (allow_search_all=False, show_condition=True, theme=CardTheme.SUCCESS)
+      - [[hydrus.remove_tags]] (allow_search_all=False, show_condition=True, theme=CardTheme.DANGER)
     """
 
     changed = Signal()
@@ -1801,6 +1801,7 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
         tags_label: str = "Tags:",
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
+        show_condition: bool = False,
         theme: CardTheme = CardTheme.DEFAULT,
         parent: QWidget | None = None,
     ) -> None:
@@ -1809,6 +1810,7 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
         self._index = index
         self._title_prefix = title_prefix
         self._allow_search_all = allow_search_all
+        self._show_condition = show_condition
         self._theme = theme
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -1851,7 +1853,23 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
 
         card_layout.addLayout(svc_row)
 
-        # 3. Tags list editor
+        # 3. Optional Condition Checkbox (strictly for add_tags / remove_tags; never tag_queries)
+        if self._show_condition:
+            cond_row = QHBoxLayout()
+            self.only_if_tags_chk = QCheckBox("Only apply if model emits tags (skip if zero tags)", self)
+            self.only_if_tags_chk.setObjectName("only_if_tags_emitted")
+            self.only_if_tags_chk.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.only_if_tags_chk.setToolTip(
+                "When enabled, this rule is only executed if at least one tag was emitted by the model(s) "
+                "during this run.\n"
+                "If all predictions fall below threshold (zero tags), this rule is skipped.\n\n"
+                "When disabled, this rule is always applied after processing."
+            )
+            self.only_if_tags_chk.toggled.connect(lambda _: self.changed.emit())
+            cond_row.addWidget(self.only_if_tags_chk)
+            card_layout.addLayout(cond_row)
+
+        # 4. Tags list editor
         t_label = SemanticLabel(tags_label, TextRole.SECONDARY, self)
         card_layout.addWidget(t_label)
 
@@ -1944,12 +1962,22 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
         tags = self.tags_editor.get_items()
         selected_key = str(self.service_combo.currentData() or "").strip()
         service_keys = [selected_key] if selected_key else []
-        return {"tags": tags, "tag_service_keys": service_keys}
+        rule: dict[str, Any] = {"tags": tags, "tag_service_keys": service_keys}
+        if self._show_condition and hasattr(self, "only_if_tags_chk"):
+            rule["only_if_tags_emitted"] = self.only_if_tags_chk.isChecked()
+        return rule
 
-    def set_rule(self, tags: Sequence[Any], service_keys: Sequence[str]) -> None:
+    def set_rule(
+        self,
+        tags: Sequence[Any],
+        service_keys: Sequence[str],
+        only_if_tags_emitted: bool = False,
+    ) -> None:
         self.tags_editor.set_items([str(t) for t in tags])
         key = service_keys[0] if service_keys else ""
         self._repopulate_services(selected_key=key)
+        if self._show_condition and hasattr(self, "only_if_tags_chk"):
+            self.only_if_tags_chk.setChecked(bool(only_if_tags_emitted))
 
 
 class TagRuleListEditor(QWidget):
@@ -1966,6 +1994,7 @@ class TagRuleListEditor(QWidget):
         tags_label: str = "Tags:",
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
+        show_condition: bool = False,
         theme: CardTheme = CardTheme.DEFAULT,
         add_btn_text: str = "+ Add Rule",
         empty_text: str = "(No rules configured — click button below)",
@@ -1978,6 +2007,7 @@ class TagRuleListEditor(QWidget):
         self._tags_label = tags_label
         self._placeholder = placeholder
         self._allow_search_all = allow_search_all
+        self._show_condition = show_condition
         self._theme = theme
 
         self._root_layout = QVBoxLayout(self)
@@ -2025,7 +2055,12 @@ class TagRuleListEditor(QWidget):
         for idx, r in enumerate(rules, start=1):
             tags = getattr(r, "tags", None) or (r.get("tags") if isinstance(r, dict) else [])
             keys = getattr(r, "tag_service_keys", None) or (r.get("tag_service_keys") if isinstance(r, dict) else [])
-            self._add_card(tags, keys, idx)
+            cond = (
+                getattr(r, "only_if_tags_emitted", False)
+                if hasattr(r, "only_if_tags_emitted")
+                else (r.get("only_if_tags_emitted", False) if isinstance(r, dict) else False)
+            )
+            self._add_card(tags, keys, idx, only_if_tags_emitted=cond)
         self._update_empty_state()
         self.blockSignals(False)
 
@@ -2040,6 +2075,7 @@ class TagRuleListEditor(QWidget):
         tags: Sequence[Any] | None = None,
         keys: Sequence[str] | None = None,
         index: int | None = None,
+        only_if_tags_emitted: bool = False,
     ) -> TagRuleCard:
         idx = index or (len(self._cards) + 1)
         card = TagRuleCard(
@@ -2048,14 +2084,15 @@ class TagRuleListEditor(QWidget):
             tags_label=self._tags_label,
             placeholder=self._placeholder,
             allow_search_all=self._allow_search_all,
+            show_condition=self._show_condition,
             theme=self._theme,
             parent=self._cards_widget,
         )
         card.set_available_services(self._available_services)
         if tags is not None:
-            card.set_rule(tags, keys or [])
+            card.set_rule(tags, keys or [], only_if_tags_emitted=only_if_tags_emitted)
         else:
-            card.set_rule([], [])
+            card.set_rule([], [], only_if_tags_emitted=only_if_tags_emitted)
 
         card.changed.connect(self.changed.emit)
         card.delete_requested.connect(lambda: self._on_delete_card(card))
