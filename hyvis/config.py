@@ -680,9 +680,19 @@ class DatabaseConfig(StrictBaseModel):
     path: str = Field(
         default="data/hyvis.db",
         title="Database File Path",
-        description="Desired path to the SQLite database for HyVis to use.",
+        description="Desired path to the SQLite operational database (hyvis.db) for HyVis to use.",
         json_schema_extra=field_meta(picker="file"),
         examples=["data/hyvis.db"],
+    )
+    cache_path: str | None = Field(
+        default=None,
+        title="Cache Database File Path",
+        description=(
+            "Optional path to the disposable raw prediction cache database (cache.db). "
+            "Leave empty to automatically store cache.db alongside the main database file."
+        ),
+        json_schema_extra=field_meta(picker="file"),
+        examples=["data/cache.db"],
     )
     cache_raw_predictions: bool = Field(
         default=True,

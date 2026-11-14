@@ -188,7 +188,7 @@ async def main() -> int:
                             return 0
 
     assert cfg is not None
-    cache_path = default_cache_path(db_path)
+    cache_path = _resolve_db_path(cfg.database.cache_path) if cfg.database.cache_path else default_cache_path(db_path)
 
     # region Logging Setup
     effective_log_level = args.log_level or cfg.hyvis.log_level
