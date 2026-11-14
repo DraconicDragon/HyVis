@@ -230,10 +230,10 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         layout.setContentsMargins(0, 12, 0, 12)
         layout.setSpacing(12)
 
-        # 0. Interrupted Active Run Card (Shown only when hyvis.db contains active_run)
+        # 0. Unfinished Active Run Card (Shown only when hyvis.db contains active_run)
         if self._active_run is not None:
             self.active_run_card = SectionCard(
-                "⚠ Interrupted Run Detected",
+                "⚠ Unfinished Run Detected",
                 theme=CardTheme.WARNING_VIVID,
                 parent=container,
             )
@@ -250,7 +250,10 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             ar_details = QLabel(
                 f"<b>Database:</b> {self.cfg.database.path}<br>"
                 f"<b>Started:</b> {run_info.started_at} &nbsp;│&nbsp; <b>Config:</b> {orig_cfg_str}<br>"
-                f"<b>Progress:</b> {done_n} done, <b>{pending_n} pending</b>, {rej_n} rejected",
+                f"<b>Inference:</b> {done_n} queued, <b>{pending_n} remaining</b>, {rej_n} rejected<br>"
+                f"<span style='color: {self.tokens.text_secondary};'>"
+                "If HyVis is currently running in another terminal, wait for it to finish before launching here."
+                "</span>",
                 self.active_run_card,
             )
             ar_details.setWordWrap(True)
@@ -264,9 +267,9 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             action_row.addWidget(action_lbl)
 
             self.active_run_action_combo = QComboBox(self.active_run_card)
-            self.active_run_action_combo.addItem("▶ Resume Interrupted Run (--resume)", userData="resume")
+            self.active_run_action_combo.addItem("▶ Resume Unfinished Run (--resume)", userData="resume")
             self.active_run_action_combo.addItem(
-                "🗑 Discard Interrupted Run & Start New (--discard-run)", userData="discard"
+                "🗑 Discard Unfinished Run & Start New (--discard-run)", userData="discard"
             )
             self.active_run_action_combo.currentIndexChanged.connect(self._on_active_run_action_changed)
             action_row.addWidget(self.active_run_action_combo, stretch=1)
@@ -543,8 +546,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         rej_count = len(self._active_run.rejected_hashes)
         msg_lines = [
             (
-                f"Resuming interrupted run: <b>{cand_count}</b> pending file{'s' if cand_count != 1 else ''} remaining "
-                f"({done_count} already done)."
+                f"Resuming unfinished run: <b>{cand_count}</b> file{'s' if cand_count != 1 else ''} remaining "
+                f"({done_count} already inferred & queued)."
             )
         ]
         if rej_count > 0:
@@ -814,14 +817,17 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         QTimer.singleShot(1800, lambda: self.copy_cmd_btn.setText("Copy Command"))
 
     def _on_launch_clicked(self) -> None:
-        # Confirm before abandoning an interrupted run
+        # Confirm before clearing an unfinished run
         if self._active_run is not None and self._active_run_action() == "discard":
             pending_n = len(self._active_run.pending_hashes)
+            done_n = self._active_run.done_count
             ans = QMessageBox.warning(
                 self,
-                "Confirm Discard Interrupted Run",
-                f"Are you sure you want to discard the interrupted run from {self._active_run.run.started_at}?\n\n"
-                f"This will abandon {pending_n} pending file(s) from that run and start a fresh run with your current configuration.",
+                "Confirm Discard Unfinished Run",
+                f"Are you sure you want to discard the unfinished run from {self._active_run.run.started_at}?\n\n"
+                f"{pending_n} file(s) had not finished inference yet ({done_n} already-inferred file(s) remain logged/queued). "
+                "Only proceed if no HyVis process is currently running in another terminal.\n\n"
+                "This will clear the unfinished run state and start a fresh run with your current configuration.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
