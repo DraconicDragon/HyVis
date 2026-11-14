@@ -136,8 +136,7 @@ def _now_iso() -> str:
 class Database:
     """Resilient SQLite database manager designed for high file counts."""
 
-    def __init__(self, path: str | Path, *, min_cache_score: float = 0.005) -> None:
-        del min_cache_score  # Now managed by disposable CacheDatabase
+    def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._conn: sqlite3.Connection | None = None
         self._batch_uncommitted = 0

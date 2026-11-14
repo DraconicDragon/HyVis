@@ -1,8 +1,9 @@
 """
 inference.py Inference orchestration.
 
-infer_files()             Run a model against files, store raw results in DB cache,
-                          apply transforms, and enqueue tags into push_queue.
+infer_files()             Run a model against files (via CPU cache re-filtering and/or GPU inference),
+                          save raw results in disposable cache.db, stage multi-model outputs in hyvis.db,
+                          and atomically enqueue tags into push_queue.
                           Does NOT require Hydrus to be reachable during inference.
 
 FileSource abstraction
@@ -15,9 +16,12 @@ dropped in without touching the inference loop.  See FileSource below.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import sys
 import threading
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -29,6 +33,7 @@ from vibe_result_transforms import (
     TransformPipeline,
 )
 
+from hyvis.db import CacheDatabase, CachedVocab, FileStatus, quantize_floor
 from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c
 
 if TYPE_CHECKING:
@@ -284,16 +289,17 @@ def extract_tags(
 # region Processor chain
 
 
-def resolve_effective_thresholds(
-    session: vibe.ModelSession,
+def _resolve_effective_thresholds_from_items(
+    label_items: Iterable[tuple[str, str]],
+    calibrated_values: Mapping[str, float] | None,
     output_filter: OutputFilterConfig,
 ) -> tuple[dict[str, float], float]:
     """
     Resolve exact, unambiguous per-tag thresholds honoring precedence,
     relative offsets, override_tlt, and category/tag-level fallbacks.
     """
-    use_tlt = output_filter.prefer_tag_level_thresholds and TagLevelThresholds.is_supported(session)
-    base_calibrated = dict(session.tagger.thresholds.values) if (use_tlt and session.tagger.thresholds) else {}
+    use_tlt = output_filter.prefer_tag_level_thresholds and bool(calibrated_values)
+    base_calibrated = dict(calibrated_values) if (use_tlt and calibrated_values) else {}
 
     rel_scale = 1.0 + output_filter.tag_level_threshold_relative_offset
 
@@ -303,37 +309,53 @@ def resolve_effective_thresholds(
 
     final_map: dict[str, float] = {}
 
-    if session.tagger.catalog:
-        for info in session.tagger.catalog.labels:
-            raw_name = info.name
-            norm_name = _norm(raw_name)
-            cat_name = info.category
+    for raw_name, cat_name in label_items:
+        norm_name = _norm(raw_name)
+        tag_cfg = tag_overrides.get(norm_name)
+        cat_cfg = cat_overrides.get(cat_name)
 
-            tag_cfg = tag_overrides.get(norm_name)
-            cat_cfg = cat_overrides.get(cat_name)
-
-            # Case A: Tag has a model-calibrated threshold
-            if raw_name in base_calibrated:
-                if tag_cfg and tag_cfg.override_tlt:
-                    thresh = tag_cfg.threshold  # User tag override (unscaled)
-                elif cat_cfg and cat_cfg.override_tlt:
-                    thresh = cat_cfg.threshold  # User category override (unscaled)
-                else:
-                    thresh = base_calibrated[raw_name] * rel_scale  # Calibrated model value (scaled)
-
-            # Case B: Tag has NO calibrated threshold (fallback path)
+        # Case A: Tag has a model-calibrated threshold
+        if raw_name in base_calibrated:
+            if tag_cfg and tag_cfg.override_tlt:
+                thresh = tag_cfg.threshold  # User tag override (unscaled)
+            elif cat_cfg and cat_cfg.override_tlt:
+                thresh = cat_cfg.threshold  # User category override (unscaled)
             else:
-                if tag_cfg:
-                    thresh = tag_cfg.threshold  # Tag-specific fallback
-                elif cat_cfg:
-                    thresh = cat_cfg.threshold  # Category-specific fallback
-                else:
-                    thresh = output_filter.default_threshold  # Global fallback
+                thresh = base_calibrated[raw_name] * rel_scale  # Calibrated model value (scaled)
 
-            final_map[raw_name] = thresh
-            final_map[norm_name] = thresh
+        # Case B: Tag has NO calibrated threshold (fallback path)
+        else:
+            if tag_cfg:
+                thresh = tag_cfg.threshold  # Tag-specific fallback
+            elif cat_cfg:
+                thresh = cat_cfg.threshold  # Category-specific fallback
+            else:
+                thresh = output_filter.default_threshold  # Global fallback
+
+        final_map[raw_name] = thresh
+        final_map[norm_name] = thresh
 
     return final_map, output_filter.default_threshold
+
+
+def resolve_effective_thresholds(
+    session: vibe.ModelSession,
+    output_filter: OutputFilterConfig,
+) -> tuple[dict[str, float], float]:
+    """Resolve effective per-tag thresholds from an active vibe ModelSession."""
+    label_items = (
+        (
+            info.name,
+            info.category.value if hasattr(info.category, "value") else str(info.category),
+        )
+        for info in (session.tagger.catalog.labels if session.tagger.catalog else ())
+    )
+    calibrated = (
+        session.tagger.thresholds.values
+        if (TagLevelThresholds.is_supported(session) and session.tagger.thresholds)
+        else None
+    )
+    return _resolve_effective_thresholds_from_items(label_items, calibrated, output_filter)
 
 
 def build_transform_pipeline(
@@ -357,6 +379,160 @@ def build_transform_pipeline(
     return TransformPipeline(transforms)
 
 
+def build_transform_pipeline_from_vocab(
+    vocab: CachedVocab,
+    output_filter: OutputFilterConfig,
+) -> TransformPipeline:
+    """
+    Build the TransformPipeline directly from cache.db CachedVocab without loading GPU weights.
+    """
+    label_items = ((vocab.idx_to_tag[idx], vocab.idx_to_category[idx]) for idx in vocab.idx_to_tag)
+    calibrated = vocab.calibrated_thresholds or None
+    threshold_map, global_fallback = _resolve_effective_thresholds_from_items(
+        label_items,
+        calibrated,
+        output_filter,
+    )
+    return TransformPipeline(
+        [
+            TagLevelThresholds(
+                threshold_map=threshold_map,
+                fallback=global_fallback,
+            ),
+            CleanTags(),
+        ]
+    )
+
+
+# endregion
+
+
+# region Planning & Filter Fingerprinting
+
+
+def compute_filter_hash(config: AppConfig, model_cfg: ModelConfig) -> str:
+    """
+    Compute a deterministic 16-char SHA-256 fingerprint of all settings that affect
+    tag output or destination routing for `model_cfg`.
+    """
+    payload = {
+        "output_filter": config.resolved_output_filter(model_cfg).model_dump(mode="json"),
+        "output_tag_services": config.resolved_output_tag_services(model_cfg),
+        "add_tags": [a.model_dump(mode="json") for a in config.hydrus.add_tags],
+        "remove_tags": [r.model_dump(mode="json") for r in config.hydrus.remove_tags],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def resolve_model_variant_id(model_cfg: ModelConfig) -> str:
+    """Dry-run variant resolver returning the exact variant_id vibe will select without loading weights."""
+    try:
+        from vibe.registry import model_registry
+
+        model_registry.ensure_discovered()
+        plugin_cls = model_registry.get(model_cfg.model_id)
+        resolved = vibe.resolve_variant(
+            plugin_cls,
+            backend=model_cfg.backend,
+            variant=model_cfg.variant_id,
+            device=model_cfg.device,
+        )
+        return resolved.variant_id or ""
+    except Exception:
+        return model_cfg.variant_id or ""
+
+
+@dataclass
+class ModelPassPlan:
+    """Pre-computed routing buckets for one model pass."""
+
+    model_cfg: ModelConfig
+    filter_hash: str
+    resolved_variant_id: str
+    cache_model_row: int | None
+    skip_hashes: set[str]
+    refilter_files: list[FileInfo]
+    gpu_files: list[FileInfo]
+
+
+def plan_model_pass(
+    model_cfg: ModelConfig,
+    file_infos: list[FileInfo],
+    *,
+    config: AppConfig,
+    db: Database,
+    cache_db: CacheDatabase,
+    force: bool,
+    is_resume: bool = False,
+) -> ModelPassPlan:
+    """
+    Classify all target files into:
+      - skip_hashes: Already completed with identical filter_hash (or staged on resume).
+      - refilter_files: Needs filtering, raw scores available in cache.db at deep enough floor_q (CPU).
+      - gpu_files: Needs GPU inference (not in cache.db, too shallow floor_q, or --force).
+    """
+    filter_hash = compute_filter_hash(config, model_cfg)
+    resolved_variant = resolve_model_variant_id(model_cfg)
+
+    staged_hashes = db.get_staged_hashes_for_model(model_cfg.model_id) if is_resume else set()
+    logged = db.get_inference_filter_hashes([fi.file_hash for fi in file_infos], model_cfg.model_id)
+
+    skip_hashes: set[str] = set()
+    need_work: list[FileInfo] = []
+
+    for fi in file_infos:
+        if fi.file_hash in staged_hashes or not force and logged.get(fi.file_hash) == filter_hash:
+            skip_hashes.add(fi.file_hash)
+        else:
+            need_work.append(fi)
+
+    if force or not need_work:
+        return ModelPassPlan(
+            model_cfg=model_cfg,
+            filter_hash=filter_hash,
+            resolved_variant_id=resolved_variant,
+            cache_model_row=None,
+            skip_hashes=skip_hashes,
+            refilter_files=[],
+            gpu_files=need_work,
+        )
+
+    # Check cache.db for CPU re-filter candidates
+    candidate_rows = cache_db.find_model_rows(model_cfg.model_id, resolved_variant)
+    if not candidate_rows:
+        return ModelPassPlan(
+            model_cfg=model_cfg,
+            filter_hash=filter_hash,
+            resolved_variant_id=resolved_variant,
+            cache_model_row=None,
+            skip_hashes=skip_hashes,
+            refilter_files=[],
+            gpu_files=need_work,
+        )
+
+    target_model_row = candidate_rows[0]
+    max_floor_q = quantize_floor(config.database.min_cache_score)
+    cached_ok = cache_db.filter_cached_hashes(
+        target_model_row,
+        [fi.file_hash for fi in need_work],
+        max_floor_q=max_floor_q,
+    )
+
+    refilter_files = [fi for fi in need_work if fi.file_hash in cached_ok]
+    gpu_files = [fi for fi in need_work if fi.file_hash not in cached_ok]
+
+    return ModelPassPlan(
+        model_cfg=model_cfg,
+        filter_hash=filter_hash,
+        resolved_variant_id=resolved_variant,
+        cache_model_row=target_model_row if refilter_files else None,
+        skip_hashes=skip_hashes,
+        refilter_files=refilter_files,
+        gpu_files=gpu_files,
+    )
+
+
 # endregion
 
 
@@ -365,11 +541,12 @@ def build_transform_pipeline(
 
 @dataclass
 class PhaseStats:
-    """Counters for one phase (infer or push) of one model."""
+    """Counters for one model pass."""
 
     model_id: str
-    ok: int = 0
-    zero_tags: int = 0  # Number of files where inference succeeded, but 0 tags passed filter
+    ok: int = 0  # Newly inferred on GPU
+    refiltered: int = 0  # Re-filtered on CPU from cache.db
+    zero_tags: int = 0  # Number of files where inference/refilter succeeded, but 0 tags passed filter
     errors: int = 0
     skipped: int = 0
     aborted_early: bool = False
@@ -389,7 +566,76 @@ class PhaseStats:
 # endregion
 
 
-# region Inference
+# region Inference & Re-Filtering
+
+
+def _finalize_file(
+    *,
+    file_hash: str,
+    model_cfg: ModelConfig,
+    variant_id: str,
+    vocab_hash: str,
+    filter_hash: str,
+    prefixed_tags: list[str],
+    output_services: list[str],
+    config: AppConfig,
+    db: Database,
+    last_active_model_for_file: Mapping[str, str] | None,
+    model_meta_by_id: Mapping[str, tuple[str, str, str]],
+) -> None:
+    """Stage intermediate tags in run_progress, or commit atomically if this is the final active model."""
+    my_service_tags: dict[str, list[str]] = (
+        {svc_key: list(prefixed_tags) for svc_key in output_services} if prefixed_tags else {}
+    )
+
+    is_final = last_active_model_for_file is None or last_active_model_for_file.get(file_hash) == model_cfg.model_id
+
+    if not is_final:
+        db.stage_model_progress(file_hash, model_cfg.model_id, my_service_tags)
+        return
+
+    # Final active model for this file: merge any staged payloads + current tags
+    staged = db.get_staged_progress(file_hash)
+    add_by_service: dict[str, list[str]] = {}
+    delete_by_service: dict[str, list[str]] = {}
+
+    for staged_svc_map in staged.values():
+        for svc_key, tags in staged_svc_map.items():
+            if tags:
+                add_by_service.setdefault(svc_key, []).extend(tags)
+
+    for svc_key, tags in my_service_tags.items():
+        if tags:
+            add_by_service.setdefault(svc_key, []).extend(tags)
+
+    any_tags_emitted = any(bool(tags) for tags in add_by_service.values())
+
+    for a_cfg in config.hydrus.add_tags:
+        if a_cfg.only_if_tags_emitted and not any_tags_emitted:
+            continue
+        for svc_key in a_cfg.tag_service_keys:
+            add_by_service.setdefault(svc_key, []).extend(a_cfg.tags)
+
+    for r_cfg in config.hydrus.remove_tags:
+        if r_cfg.only_if_tags_emitted and not any_tags_emitted:
+            continue
+        for svc_key in r_cfg.tag_service_keys:
+            delete_by_service.setdefault(svc_key, []).extend(r_cfg.tags)
+
+    completed_models: list[tuple[str, str, str, str]] = []
+    for staged_m_id in staged:
+        if staged_m_id == model_cfg.model_id:
+            continue
+        v_id, vh, fh = model_meta_by_id.get(staged_m_id, ("", "", ""))
+        completed_models.append((staged_m_id, v_id, vh, fh))
+    completed_models.append((model_cfg.model_id, variant_id, vocab_hash, filter_hash))
+
+    db.commit_file_completion(
+        file_hash,
+        completed_models=completed_models,
+        add_by_service=add_by_service,
+        delete_by_service=delete_by_service,
+    )
 
 
 async def infer_files(
@@ -398,49 +644,143 @@ async def infer_files(
     *,
     config: AppConfig,
     db: Database,
+    cache_db: CacheDatabase,
     progress: Progress,
     force: bool,
+    plan: ModelPassPlan | None = None,
+    last_active_model_for_file: Mapping[str, str] | None = None,
+    model_meta_by_id: dict[str, tuple[str, str, str]] | None = None,
     run_id: str | None = None,
     hydrus: HydrusClient | None = None,
 ) -> PhaseStats:
     """
-    Run inference for one model against all eligible files.
-
-    Saves raw predictions to inference_cache in the database and enqueues
-    the resulting tags into push_queue for asynchronous or trailing pushing.
+    Execute one model pass:
+      1. Skip files already completed under identical filter_hash.
+      2. Re-filter files present in disposable cache.db on CPU (0 GPU load).
+      3. Run GPU inference on remaining files, storing packed binary scores in cache.db.
+      4. Stage or atomically commit completed files into push_queue + inference_log.
     """
-    del run_id, hydrus  # Retained in signature for compatibility; pushing is handled via push_queue
+    del run_id, hydrus  # Retained in signature for compatibility; pushing handled via push_queue
     stats = PhaseStats(model_id=model_cfg.model_id)
 
-    # Build file source from the pre-resolved local paths.
-    source = LocalFileSource(file_infos)
+    if model_meta_by_id is None:
+        model_meta_by_id = {}
 
-    # Determine which files to process.
-    all_hashes = [fi.file_hash for fi in file_infos]
-    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in file_infos}
-
-    if force:
-        to_process = list(file_infos)
-        logger.info("--force: re-inferring all %d files for %s", len(to_process), model_cfg.model_id)
-    else:
-        already_inferred = db.bulk_already_inferred(all_hashes, model_cfg.model_id)
-        to_process = [fi for fi in file_infos if fi.file_hash not in already_inferred]
-        stats.skipped = len(already_inferred)
-        if already_inferred:
-            progress.tick(skipped=len(already_inferred))
-        logger.info(
-            "Model %s: %d to infer, %d skipped (already cached)",
-            model_cfg.model_id,
-            len(to_process),
-            stats.skipped,
+    if plan is None:
+        plan = plan_model_pass(
+            model_cfg,
+            file_infos,
+            config=config,
+            db=db,
+            cache_db=cache_db,
+            force=force,
+            is_resume=False,
         )
 
-    # Drop files with no local path or missing files
+    stats.skipped = len(plan.skip_hashes)
+    if stats.skipped:
+        progress.tick(skipped=stats.skipped)
+
+    logger.info(
+        "Model %s plan: %d GPU, %d CPU re-filter, %d skipped",
+        model_cfg.model_id,
+        len(plan.gpu_files),
+        len(plan.refilter_files),
+        stats.skipped,
+    )
+
+    if not plan.refilter_files and not plan.gpu_files:
+        return stats
+
+    eff_filter = config.resolved_output_filter(model_cfg)
+    output_services = config.resolved_output_tag_services(model_cfg)
+    compiled_filter = compile_output_filter(eff_filter)
+
+    # region Pass A: CPU Re-filter from cache.db (zero GPU/vibe weight loading)
+    if plan.refilter_files and plan.cache_model_row is not None:
+        vocab = cache_db.get_vocab(plan.cache_model_row)
+        if vocab is None:
+            # Defensive fallback: move to GPU pass if vocab row disappeared unexpectedly
+            plan.gpu_files.extend(plan.refilter_files)
+            plan.refilter_files.clear()
+        else:
+            model_meta_by_id[model_cfg.model_id] = (vocab.variant_id, vocab.vocab_hash, plan.filter_hash)
+            cpu_pipeline = build_transform_pipeline_from_vocab(vocab, eff_filter)
+
+            print(_c(f"  Re-filtering {len(plan.refilter_files)} cached item(s) on CPU (cache.db)...", GREEN))
+            print()
+            progress.reset_start_time()
+
+            for idx, fi in enumerate(plan.refilter_files):
+                try:
+                    cached_pred = cache_db.get_prediction(plan.cache_model_row, fi.file_hash)
+                    if cached_pred is None:
+                        plan.gpu_files.append(fi)
+                        continue
+
+                    indices, scores, _ = cached_pred
+                    raw_result = CacheDatabase.reconstruct_tag_result(vocab, indices, scores)
+                    filtered_result = cpu_pipeline(raw_result)
+                    tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
+                    prefixed_tags = [tr.prefixed_tag for tr in tag_records]
+
+                    # Ensure known_files row exists to satisfy inference_log FK
+                    db.upsert_file(
+                        fi.file_hash,
+                        file_path=fi.local_path,
+                        mime=fi.mime,
+                        num_frames=fi.num_frames,
+                        status=FileStatus.ACTIVE,
+                    )
+
+                    if not prefixed_tags:
+                        stats.zero_tags += 1
+
+                    _finalize_file(
+                        file_hash=fi.file_hash,
+                        model_cfg=model_cfg,
+                        variant_id=vocab.variant_id,
+                        vocab_hash=vocab.vocab_hash,
+                        filter_hash=plan.filter_hash,
+                        prefixed_tags=prefixed_tags,
+                        output_services=output_services,
+                        config=config,
+                        db=db,
+                        last_active_model_for_file=last_active_model_for_file,
+                        model_meta_by_id=model_meta_by_id,
+                    )
+
+                    stats.refiltered += 1
+                    stats.total_tags_enqueued += len(prefixed_tags)
+
+                    if idx % 25 == 0 or idx == len(plan.refilter_files) - 1:
+                        progress.set_last_file_info(fi.file_hash, model_cfg.model_id, len(prefixed_tags))
+                    progress.tick(processed=1)
+
+                except Exception as exc:
+                    _handle_infer_error(exc=exc, file_hash=fi.file_hash, fi=fi, db=db, stats=stats)
+                    progress.tick(errors=1)
+
+            db.commit()
+
+    # region Pass B: GPU Inference (only if files still need neural net inference)
+    if not plan.gpu_files:
+        return stats
+
+    source = LocalFileSource(plan.gpu_files)
+    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.gpu_files}
+
     valid_process: list[FileInfo] = []
-    for fi in to_process:
+    for fi in plan.gpu_files:
         if not source.has_path(fi.file_hash):
             logger.warning("Model %s: %s has no local path, marking missing", model_cfg.model_id, fi.file_hash[:8])
-            db.upsert_file(fi.file_hash, mime=fi.mime, file_path=None, status="missing_on_disk")
+            db.upsert_file(
+                fi.file_hash,
+                mime=fi.mime,
+                num_frames=fi.num_frames,
+                file_path=None,
+                status=FileStatus.MISSING_ON_DISK,
+            )
             progress.tick(errors=1)
             stats.errors += 1
         else:
@@ -453,14 +793,9 @@ async def infer_files(
     print(_c("  Press 'q' to cancel current model", MAGENTA, BOLD))
     print()
     if stats.skipped != 0:
-        print(f"  {stats.skipped} items already cached")
+        print(f"  {stats.skipped} items skipped (up-to-date)")
         print()
 
-    eff_filter = config.resolved_output_filter(model_cfg)
-    output_services = config.resolved_output_tag_services(model_cfg)
-    configured_model_ids = [m.model_id for m in config.inference.models]
-
-    # Build inputs as (path, file_hash) tuples for inference backend.
     inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in valid_process}
 
     load_kwargs: dict[str, Any] = {
@@ -488,7 +823,6 @@ async def infer_files(
                 compute_dt = prec.get("compute_dtype", "unknown")
                 autocast = " (autocast)" if prec.get("autocast_enabled") else ""
 
-                # Device formatting: e.g. cuda:0 (NVIDIA GeForce RTX 3060)
                 device_str = str(runtime.get("device", "unknown"))
                 try:
                     import torch
@@ -504,19 +838,7 @@ async def infer_files(
             elif session.backend == vibe.Backend.ONNX:
                 providers = runtime.get("providers", [])
                 active_ep = providers[0] if providers else "unknown"
-
-                # If running on CUDA EP, optionally show the GPU name
-                # ep_extra = ""
-                # if "cuda" in active_ep.lower():
-                #     try:
-                #         import torch
-                #         if torch.cuda.is_available():
-                #             ep_extra = f" ({torch.cuda.get_device_name()})"
-                #     except Exception:
-                #         pass
-
                 runtime_str = f"ONNX on {active_ep}"
-
             else:
                 runtime_str = f"{session.backend}"
 
@@ -527,11 +849,28 @@ async def infer_files(
             progress.reset_start_time()
             pipeline = build_transform_pipeline(session, eff_filter)
 
-            # Pre-calculate once per model so the inner loop does zero allocations:
-            compiled_filter = compile_output_filter(eff_filter)
-            total_model_tags = len(session.tagger.catalog.labels) if session.tagger.catalog else 0
+            catalog = session.tagger.catalog
+            resolved_variant = session.variant or ""
+            vocab_hash = catalog.vocab_hash
+            model_meta_by_id[model_cfg.model_id] = (resolved_variant, vocab_hash, plan.filter_hash)
+
+            total_model_tags = len(catalog.labels)
             cache_raw_enabled = config.database.cache_raw_predictions
             min_cache_score = config.database.min_cache_score
+
+            cache_model_row = -1
+            if cache_raw_enabled:
+                calibrated = (
+                    session.tagger.thresholds.values
+                    if (TagLevelThresholds.is_supported(session) and session.tagger.thresholds)
+                    else None
+                )
+                cache_model_row = cache_db.register_model(
+                    model_cfg.model_id,
+                    resolved_variant,
+                    catalog,
+                    calibrated_thresholds=calibrated,
+                )
 
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
 
@@ -550,56 +889,50 @@ async def infer_files(
                         if not isinstance(raw_result, TagResult):
                             raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
 
-                        # 1. Upsert known_file FIRST to satisfy foreign key constraint!
-                        db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
-
-                        # 2. Save un-culled raw predictions to SQLite cache (ONLY if enabled)
-                        if cache_raw_enabled:
-                            cache_result = raw_result.filter(lambda _tag, score, _cat, ms=min_cache_score: score >= ms)
-                            raw_cache_payload = cache_result.as_category_score_dict()
-                        else:
-                            raw_cache_payload = {}
-
-                        db.save_raw_cache(
+                        # 1. Upsert known_files FIRST to satisfy FK constraints
+                        db.upsert_file(
                             file_hash,
-                            model_cfg.model_id,
-                            raw_cache_payload,
-                            enabled=cache_raw_enabled,
+                            file_path=fi.local_path,
+                            mime=fi.mime,
+                            num_frames=fi.num_frames,
+                            status=FileStatus.ACTIVE,
                         )
 
-                        # 3. Apply VRT transform pipeline on the full, un-culled raw result
+                        # 2. Save packed sparse predictions into disposable cache.db
+                        if cache_raw_enabled and cache_model_row >= 0:
+                            indices, scores = raw_result.to_indexed_scores(catalog, min_score=min_cache_score)
+                            cache_db.save_prediction(
+                                cache_model_row,
+                                file_hash,
+                                indices,
+                                scores,
+                                min_cache_score=min_cache_score,
+                            )
+
+                        # 3. Apply VRT transform pipeline on the full raw result
                         filtered_result = pipeline(raw_result)
 
                         # 4. Extract final tags using the pre-compiled filter
                         tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
-                        # 5. Track zero-tag files or enqueue tags into push_queue for each configured service (merges tags automatically)
                         if not prefixed_tags:
                             stats.zero_tags += 1
-                        else:
-                            for svc_key in output_services:
-                                db.enqueue_push(file_hash, svc_key, prefixed_tags, action="add_tags")
 
-                        # 6. Check if all models configured for this file are complete using has_raw_cache
-                        all_models_cached = True
-                        for m_id in configured_model_ids:
-                            if m_id == model_cfg.model_id:
-                                continue
-                            if not db.has_raw_cache(file_hash, m_id):
-                                all_models_cached = False
-                                break
-
-                        if all_models_cached:
-                            for a_cfg in config.hydrus.add_tags:
-                                for svc_key in a_cfg.tag_service_keys:
-                                    db.enqueue_push(file_hash, svc_key, a_cfg.tags, action="add_tags")
-                            for r_cfg in config.hydrus.remove_tags:
-                                for svc_key in r_cfg.tag_service_keys:
-                                    db.enqueue_push(file_hash, svc_key, r_cfg.tags, action="delete_tags")
-
-                        # Periodic commit to prevent disk sync thrashing
-                        db.batch_tick(batch_size=50)
+                        # 5. Stage in run_progress or atomically commit to push_queue + inference_log
+                        _finalize_file(
+                            file_hash=file_hash,
+                            model_cfg=model_cfg,
+                            variant_id=resolved_variant,
+                            vocab_hash=vocab_hash,
+                            filter_hash=plan.filter_hash,
+                            prefixed_tags=prefixed_tags,
+                            output_services=output_services,
+                            config=config,
+                            db=db,
+                            last_active_model_for_file=last_active_model_for_file,
+                            model_meta_by_id=model_meta_by_id,
+                        )
 
                         consecutive_errors = 0
                         stats.ok += 1
@@ -630,8 +963,8 @@ async def infer_files(
                 if batch_processed or batch_errors:
                     progress.tick(processed=batch_processed, errors=batch_errors)
 
-            # Flush any uncommitted transactions from this run
             db.commit()
+            cache_db.commit()
 
     except InferenceCancelled:
         stats.aborted_early = True
@@ -653,16 +986,16 @@ async def infer_files(
         if listener is not None:
             listener.join(timeout=1.0)
         db.commit()
+        cache_db.commit()
 
     logger.info(
-        "Model '%s' pass finished: processed=%d (inferred=%d, cached=%d) | with_tags=%d (enqueued=%d tags) | zero_tags=%d | errors=%d",
+        "Model '%s' pass finished: gpu=%d, refiltered=%d, skipped=%d | zero_tags=%d, enqueued=%d tags | errors=%d",
         model_cfg.model_id,
-        stats.ok + stats.skipped,
         stats.ok,
+        stats.refiltered,
         stats.skipped,
-        (stats.ok + stats.skipped) - stats.zero_tags,
-        stats.total_tags_enqueued,
         stats.zero_tags,
+        stats.total_tags_enqueued,
         stats.errors,
     )
     return stats
@@ -688,7 +1021,13 @@ def _handle_infer_error(
     sys.stdout.flush()
     logger.error("Inference error for %s: %s", file_hash[:8], msg)
     try:
-        db.upsert_file(file_hash, mime=fi.mime, file_path=fi.local_path, status="error")
+        db.upsert_file(
+            file_hash,
+            mime=fi.mime,
+            num_frames=fi.num_frames,
+            file_path=fi.local_path,
+            status=FileStatus.ERROR,
+        )
         db.batch_tick(batch_size=10)
     except Exception as db_exc:
         logger.error("Failed to update status for %s in DB: %s", file_hash[:8], db_exc)

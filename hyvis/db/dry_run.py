@@ -29,8 +29,8 @@ class DryRunDatabase(Database):
     Reads existing state without modification and tracks simulated outputs in memory.
     """
 
-    def __init__(self, path: str | Path, *, min_cache_score: float = 0.005) -> None:
-        super().__init__(path, min_cache_score=min_cache_score)
+    def __init__(self, path: str | Path) -> None:
+        super().__init__(path)
         # In-memory overlay: {(file_hash, model_id): filter_hash}
         self._dry_run_inferred: dict[tuple[str, str], str] = {}
         # In-memory staging overlay: {file_hash: {model_id: {svc_key: [tags]}}}
