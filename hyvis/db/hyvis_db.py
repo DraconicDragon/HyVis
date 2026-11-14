@@ -1,10 +1,11 @@
 """
-db.py — High-scale, resilient SQLite persistence for HyVis.
+hyvis_db.py — High-scale, resilient SQLite operational state for HyVis (`hyvis.db`).
 
 Features:
   - WAL mode with atomic batching (prevents disk thrashing on 100k+ files).
-  - Raw un-culled inference cache with configurable noise pruning.
-  - Dedicated push queue with tag merging and retry counters (resilient to Hydrus downtime, restarts, and missing files).
+  - Permanent file tracking & completion ledger (`known_files`, `inference_log`) decoupled from disposable cache.db.
+  - Active-run scratchpad (`active_run`, `run_targets`, `run_progress`) for crash-proof multi-model staging and `--resume`.
+  - Dedicated push queue with tag merging and retry counters (resilient to Hydrus downtime and missing files).
 """
 
 from __future__ import annotations
@@ -12,38 +13,74 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, Self
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MIN_CACHE_SCORE = 0.01
+MAX_PUSH_ATTEMPTS = 3
 
-FileStatus = Literal["active", "missing_on_disk", "deleted_from_hydrus", "error"]
+
+class FileStatus(StrEnum):
+    ACTIVE = "active"
+    MISSING_ON_DISK = "missing_on_disk"
+    DELETED_FROM_HYDRUS = "deleted_from_hydrus"
+    ERROR = "error"
+
+
+class RunTargetState(StrEnum):
+    PENDING = "pending"
+    DONE = "done"
+    REJECTED = "rejected"
+
+
+class RunMode(StrEnum):
+    DEFAULT = "default"
+    INFER_ONLY = "infer_only"
+
+
 TagActionType = Literal["add", "delete"]
 PushAction = Literal["add_tags", "delete_tags"]
+
+
+@dataclass(frozen=True)
+class ActiveRunInfo:
+    """Snapshot metadata for an active or interrupted inference run."""
+
+    config_toml: str
+    config_path: str | None
+    mode: RunMode
+    force_mode: bool
+    hyvis_version: str
+    started_at: str
 
 
 # region Schema Definition
 
 _SCHEMA_SQL = """
--- 1. Tracked Files: Stores physical paths and status
+-- 1. Tracked Files: Stores physical paths, frame counts, and health status
 CREATE TABLE IF NOT EXISTS known_files (
     file_hash       TEXT PRIMARY KEY,
     file_path       TEXT,
     mime            TEXT,
-    status          TEXT NOT NULL DEFAULT 'active', -- 'active', 'missing_on_disk', 'deleted_from_hydrus'
+    num_frames      INTEGER,
+    status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'missing_on_disk', 'deleted_from_hydrus', 'error')),
     last_seen_at    TEXT NOT NULL
 );
 
--- 2. Raw Inference Cache: Stores un-culled model tag predictions (pruned to min_score)
-CREATE TABLE IF NOT EXISTS inference_cache (
+-- 2. Permanent Completion Ledger: Decoupled from disposable cache.db
+CREATE TABLE IF NOT EXISTS inference_log (
     file_hash       TEXT NOT NULL,
     model_id        TEXT NOT NULL,
-    raw_json        TEXT NOT NULL,
+    variant_id      TEXT NOT NULL DEFAULT '',
+    vocab_hash      TEXT NOT NULL DEFAULT '',
+    filter_hash     TEXT NOT NULL DEFAULT '',
     inferred_at     TEXT NOT NULL,
     PRIMARY KEY (file_hash, model_id),
     FOREIGN KEY (file_hash) REFERENCES known_files(file_hash) ON DELETE CASCADE
@@ -58,8 +95,35 @@ CREATE TABLE IF NOT EXISTS push_queue (
     created_at      TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_cache_lookup
-    ON inference_cache(model_id, file_hash);
+-- 4. Active Run Metadata (0 rows when idle, max 1 row while in-flight / interrupted)
+CREATE TABLE IF NOT EXISTS active_run (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    config_toml     TEXT NOT NULL,
+    config_path     TEXT,
+    mode            TEXT NOT NULL CHECK (mode IN ('default', 'infer_only')),
+    force_mode      INTEGER NOT NULL DEFAULT 0 CHECK (force_mode IN (0, 1)),
+    hyvis_version   TEXT NOT NULL,
+    started_at      TEXT NOT NULL
+);
+
+-- 5. Active Run Targets: Locked preflight candidate & rejected file hashes (0 rows when idle)
+CREATE TABLE IF NOT EXISTS run_targets (
+    file_hash       TEXT PRIMARY KEY,
+    state           TEXT NOT NULL CHECK (state IN ('pending', 'done', 'rejected')),
+    mime            TEXT
+);
+
+-- 6. Active Run Staging: Intermediate multi-model tag payloads before atomic commit (0 rows when idle)
+CREATE TABLE IF NOT EXISTS run_progress (
+    file_hash            TEXT NOT NULL,
+    model_id             TEXT NOT NULL,
+    staged_payload_json  TEXT NOT NULL, -- JSON object: {"<service_key>": ["tag1", ...]}
+    PRIMARY KEY (file_hash, model_id),
+    FOREIGN KEY (file_hash) REFERENCES run_targets(file_hash) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_inference_log_model
+    ON inference_log(model_id, file_hash);
 """
 
 # endregion
@@ -72,9 +136,9 @@ def _now_iso() -> str:
 class Database:
     """Resilient SQLite database manager designed for high file counts."""
 
-    def __init__(self, path: str | Path, *, min_cache_score: float = _DEFAULT_MIN_CACHE_SCORE) -> None:
+    def __init__(self, path: str | Path, *, min_cache_score: float = 0.005) -> None:
+        del min_cache_score  # Now managed by disposable CacheDatabase
         self._path = Path(path)
-        self._min_cache_score = max(0.0, float(min_cache_score))
         self._conn: sqlite3.Connection | None = None
         self._batch_uncommitted = 0
 
@@ -84,9 +148,11 @@ class Database:
         if self._conn is not None:
             return
 
-        is_new_db = not self._path.exists()
+        is_new_db = str(self._path) == ":memory:" or not self._path.exists()
 
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        if str(self._path) != ":memory:":
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+
         self._conn = sqlite3.connect(
             str(self._path),
             check_same_thread=False,
@@ -96,20 +162,19 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")  # Fast & completely safe in WAL mode
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA cache_size = -65536")  # 64MiB
-        self._conn.executescript(_SCHEMA_SQL)
 
-        # Apply sequential versioned migrations
+        # Apply sequential versioned migrations BEFORE executing _SCHEMA_SQL on existing DBs
         from hyvis.db.migrations import LATEST_VERSION, apply_migrations
 
         if is_new_db:
-            # New installation: schema is already current, stamp version directly
+            self._conn.executescript(_SCHEMA_SQL)
             self._conn.execute(f"PRAGMA user_version = {LATEST_VERSION}")
         else:
-            # Existing database: inspect user_version and upgrade if older
             apply_migrations(self._conn, db_path=self._path)
+            self._conn.executescript(_SCHEMA_SQL)
 
         self._conn.commit()
-        logger.debug("HyVis database opened at %s (WAL mode, min_cache_score=%.3f)", self._path, self._min_cache_score)
+        logger.debug("HyVis database opened at %s (WAL mode)", self._path)
 
     def close(self) -> None:
         if self._conn is not None:
@@ -153,28 +218,32 @@ class Database:
         *,
         file_path: str | None = None,
         mime: str | None = None,
-        status: FileStatus = "active",
+        num_frames: int | None = None,
+        status: FileStatus | str = FileStatus.ACTIVE,
     ) -> None:
         """Record or update known file metadata."""
+        status_val = status.value if isinstance(status, FileStatus) else str(status)
         self.conn.execute(
             """
-            INSERT INTO known_files (file_hash, file_path, mime, status, last_seen_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO known_files (file_hash, file_path, mime, num_frames, status, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(file_hash) DO UPDATE SET
                 file_path    = COALESCE(excluded.file_path, known_files.file_path),
                 mime         = COALESCE(excluded.mime, known_files.mime),
+                num_frames   = COALESCE(excluded.num_frames, known_files.num_frames),
                 status       = excluded.status,
                 last_seen_at = excluded.last_seen_at
             """,
-            (file_hash, file_path, mime, status, _now_iso()),
+            (file_hash, file_path, mime, num_frames, status_val, _now_iso()),
         )
         self.batch_tick()
 
-    def mark_file_status(self, file_hash: str, status: FileStatus) -> None:
+    def mark_file_status(self, file_hash: str, status: FileStatus | str) -> None:
         """Update file status (e.g. 'missing_on_disk' or 'deleted_from_hydrus')."""
+        status_val = status.value if isinstance(status, FileStatus) else str(status)
         self.conn.execute(
             "UPDATE known_files SET status = ? WHERE file_hash = ?",
-            (status, file_hash),
+            (status_val, file_hash),
         )
         self.batch_tick(batch_size=10)
 
@@ -206,108 +275,293 @@ class Database:
                     results[h] = p
         return results
 
+    def get_all_known_hashes(self) -> list[str]:
+        """Return all file hashes tracked in known_files (used for orphan cache purging)."""
+        rows = self.conn.execute("SELECT file_hash FROM known_files").fetchall()
+        return [r[0] for r in rows]
+
     # endregion
 
-    # region Raw Inference Caching
+    # region Inference Completion Ledger
 
-    def save_raw_cache(
+    def record_inference(
         self,
         file_hash: str,
         model_id: str,
-        category_scores: dict[str, dict[str, float]],
         *,
-        enabled: bool = True,
+        variant_id: str = "",
+        vocab_hash: str = "",
+        filter_hash: str = "",
     ) -> None:
-        """
-        Store raw un-culled tag predictions in the cache.
-        If enabled is False, stores empty '{}' to record completion without retaining predictions.
-        Prunes zero-confidence tags below min_cache_score to keep the DB size minimal.
-        """
-        if not enabled:
-            json_payload = "{}"
-        else:
-            # NOTE: as of writing, only usage of this function already pre-filters to min cache score, so this is just here as fallback, or if its called somewhere else i guess
-            pruned_categories: dict[str, dict[str, float]] = {}
-            for cat, tag_map in category_scores.items():
-                filtered = {tag: round(score, 4) for tag, score in tag_map.items() if score >= self._min_cache_score}
-                if filtered:
-                    pruned_categories[cat] = filtered
-
-            json_payload = json.dumps(pruned_categories, separators=(",", ":"))
-
+        """Record completion of a (file_hash, model_id) pair in the permanent ledger."""
         self.conn.execute(
             """
-            INSERT INTO inference_cache (file_hash, model_id, raw_json, inferred_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO inference_log (file_hash, model_id, variant_id, vocab_hash, filter_hash, inferred_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(file_hash, model_id) DO UPDATE SET
-                raw_json    = excluded.raw_json,
+                variant_id  = excluded.variant_id,
+                vocab_hash  = excluded.vocab_hash,
+                filter_hash = excluded.filter_hash,
                 inferred_at = excluded.inferred_at
             """,
-            (file_hash, model_id, json_payload, _now_iso()),
+            (file_hash, model_id, variant_id, vocab_hash, filter_hash, _now_iso()),
         )
         self.batch_tick()
 
-    def get_raw_cache(self, file_hash: str, model_id: str) -> dict[str, dict[str, float]] | None:
-        """Retrieve the pruned raw tag predictions for a file/model pair."""
-        row = self.conn.execute(
-            "SELECT raw_json FROM inference_cache WHERE file_hash = ? AND model_id = ?",
-            (file_hash, model_id),
-        ).fetchone()
-        if not row:
-            return None
-        try:
-            return json.loads(row[0])
-        except Exception:
-            return None
-
-    def has_raw_cache(self, file_hash: str, model_id: str) -> bool:
-        """Return True if an inference cache entry exists (even if empty {})."""
-        row = self.conn.execute(
-            "SELECT 1 FROM inference_cache WHERE file_hash = ? AND model_id = ?",
-            (file_hash, model_id),
-        ).fetchone()
-        return row is not None
-
-    def bulk_already_inferred(self, file_hashes: Sequence[str], model_id: str) -> set[str]:
-        """Return the subset of file_hashes that already have cached inference for this model."""
+    def get_inference_filter_hashes(
+        self,
+        file_hashes: Sequence[str],
+        model_id: str,
+    ) -> dict[str, str]:
+        """
+        Return {file_hash: filter_hash} for files already recorded for `model_id`.
+        Files missing from the returned dict have never been processed by `model_id`.
+        """
         if not file_hashes:
-            return set()
+            return {}
 
-        done: set[str] = set()
+        results: dict[str, str] = {}
         for chunk in self._chunk_list(file_hashes, 900):
             placeholders = ",".join("?" * len(chunk))
             rows = self.conn.execute(
                 f"""
-                SELECT file_hash FROM inference_cache
+                SELECT file_hash, filter_hash FROM inference_log
                 WHERE model_id = ? AND file_hash IN ({placeholders})
                 """,
                 [model_id, *chunk],
             ).fetchall()
-            done.update(r[0] for r in rows)
-        return done
+            for f_hash, f_filt in rows:
+                results[f_hash] = f_filt
+        return results
 
-    def clear_raw_cache(self) -> int:
-        """Delete all rows from inference_cache and run VACUUM to reclaim disk space."""
-        count_row = self.conn.execute("SELECT COUNT(*) FROM inference_cache").fetchone()
-        count = count_row[0] if count_row else 0
-        self.conn.execute("DELETE FROM inference_cache")
-        self.commit()
+    # endregion
 
-        # NOTE: Currently supporting python 3.11+, if was 3.12+ we could use autocommit here
+    # region Active Run Scratchpad & Staging
 
-        # Temporarily switch to autocommit mode to allow VACUUM to run
-        old_isolation = self.conn.isolation_level
-        try:
-            self.conn.isolation_level = None
-            self.conn.execute("VACUUM")
-        finally:
-            self.conn.isolation_level = old_isolation
+    def get_active_run(self) -> ActiveRunInfo | None:
+        """Return the active/interrupted run metadata if one exists, else None."""
+        row = self.conn.execute(
+            "SELECT config_toml, config_path, mode, force_mode, hyvis_version, started_at FROM active_run WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
 
-        return count
+        return ActiveRunInfo(
+            config_toml=row[0],
+            config_path=row[1],
+            mode=RunMode(row[2]),
+            force_mode=bool(row[3]),
+            hyvis_version=row[4],
+            started_at=row[5],
+        )
+
+    def start_active_run(
+        self,
+        config_toml: str,
+        *,
+        config_path: str | None = None,
+        mode: RunMode | str = RunMode.DEFAULT,
+        force_mode: bool = False,
+        hyvis_version: str,
+        candidate_files: Sequence[tuple[str, str | None]],
+        rejected_files: Sequence[tuple[str, str | None]] = (),
+    ) -> None:
+        """
+        Atomically initialize a new active run, replacing any discarded scratchpad state.
+        `candidate_files` and `rejected_files` are sequences of (file_hash, mime).
+        """
+        mode_val = mode.value if isinstance(mode, RunMode) else str(mode)
+        with self.transaction():
+            self.conn.execute("DELETE FROM run_progress")
+            self.conn.execute("DELETE FROM run_targets")
+            self.conn.execute("DELETE FROM active_run")
+
+            self.conn.execute(
+                """
+                INSERT INTO active_run (id, config_toml, config_path, mode, force_mode, hyvis_version, started_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+                """,
+                (config_toml, config_path, mode_val, int(bool(force_mode)), hyvis_version, _now_iso()),
+            )
+
+            target_rows: list[tuple[str, str, str | None]] = [
+                (h, RunTargetState.PENDING.value, mime) for h, mime in candidate_files
+            ]
+            target_rows.extend((h, RunTargetState.REJECTED.value, mime) for h, mime in rejected_files)
+
+            if target_rows:
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO run_targets (file_hash, state, mime) VALUES (?, ?, ?)",
+                    target_rows,
+                )
+
+    def get_run_targets(
+        self,
+        state: RunTargetState | str | None = None,
+    ) -> list[tuple[str, str, str | None]]:
+        """
+        Retrieve target files for the active run.
+        Returns: list of (file_hash, state, mime).
+        """
+        if state is not None:
+            state_val = state.value if isinstance(state, RunTargetState) else str(state)
+            rows = self.conn.execute(
+                "SELECT file_hash, state, mime FROM run_targets WHERE state = ?",
+                (state_val,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute("SELECT file_hash, state, mime FROM run_targets").fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def stage_model_progress(
+        self,
+        file_hash: str,
+        model_id: str,
+        staged_payload: Mapping[str, Sequence[str]],
+    ) -> None:
+        """
+        Stage one model's filtered tags (`{service_key: [tags...]}`) in `run_progress`
+        while waiting for remaining models in a multi-model run.
+        """
+        clean_payload = {k: list(v) for k, v in staged_payload.items() if v}
+        self.conn.execute(
+            """
+            INSERT INTO run_progress (file_hash, model_id, staged_payload_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(file_hash, model_id) DO UPDATE SET
+                staged_payload_json = excluded.staged_payload_json
+            """,
+            (file_hash, model_id, json.dumps(clean_payload, separators=(",", ":"))),
+        )
+        self.batch_tick()
+
+    def get_staged_hashes_for_model(self, model_id: str) -> set[str]:
+        """Return file hashes already staged in `run_progress` for `model_id` (used on resume)."""
+        rows = self.conn.execute(
+            "SELECT file_hash FROM run_progress WHERE model_id = ?",
+            (model_id,),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def get_staged_progress(self, file_hash: str) -> dict[str, dict[str, list[str]]]:
+        """Return all staged model payloads for `file_hash`: `{model_id: {svc_key: [tags]}}`."""
+        rows = self.conn.execute(
+            "SELECT model_id, staged_payload_json FROM run_progress WHERE file_hash = ?",
+            (file_hash,),
+        ).fetchall()
+        result: dict[str, dict[str, list[str]]] = {}
+        for m_id, payload_json in rows:
+            try:
+                result[m_id] = json.loads(payload_json)
+            except Exception:
+                result[m_id] = {}
+        return result
+
+    def commit_file_completion(
+        self,
+        file_hash: str,
+        *,
+        completed_models: Sequence[tuple[str, str, str, str]],
+        add_by_service: Mapping[str, Sequence[str]] | None = None,
+        delete_by_service: Mapping[str, Sequence[str]] | None = None,
+    ) -> None:
+        """
+        Atomically finalize a file once all remaining models in the run have finished it:
+          1. Enqueue merged add/delete tag payloads into `push_queue` (if any).
+          2. Record each completed `(model_id, variant_id, vocab_hash, filter_hash)` in `inference_log`.
+          3. Mark `run_targets.state = 'done'` and delete staging rows from `run_progress`.
+        """
+        if add_by_service or delete_by_service:
+            self._upsert_push_payload(
+                file_hash,
+                add_by_service=add_by_service or {},
+                delete_by_service=delete_by_service or {},
+            )
+
+        now_str = _now_iso()
+        for model_id, variant_id, vocab_hash, filter_hash in completed_models:
+            self.conn.execute(
+                """
+                INSERT INTO inference_log (file_hash, model_id, variant_id, vocab_hash, filter_hash, inferred_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(file_hash, model_id) DO UPDATE SET
+                    variant_id  = excluded.variant_id,
+                    vocab_hash  = excluded.vocab_hash,
+                    filter_hash = excluded.filter_hash,
+                    inferred_at = excluded.inferred_at
+                """,
+                (file_hash, model_id, variant_id, vocab_hash, filter_hash, now_str),
+            )
+
+        self.conn.execute(
+            "UPDATE run_targets SET state = ? WHERE file_hash = ?",
+            (RunTargetState.DONE.value, file_hash),
+        )
+        self.conn.execute("DELETE FROM run_progress WHERE file_hash = ?", (file_hash,))
+        self.batch_tick()
+
+    def clear_active_run(self) -> None:
+        """Wipe active-run scratchpad tables (`active_run`, `run_targets`, `run_progress`)."""
+        with self.transaction():
+            self.conn.execute("DELETE FROM run_progress")
+            self.conn.execute("DELETE FROM run_targets")
+            self.conn.execute("DELETE FROM active_run")
 
     # endregion
 
     # region Push Queue (The Hydrus To-Do List)
+
+    def _upsert_push_payload(
+        self,
+        file_hash: str,
+        *,
+        add_by_service: Mapping[str, Sequence[str]],
+        delete_by_service: Mapping[str, Sequence[str]],
+    ) -> None:
+        """Merge service-grouped add and delete tag lists into `push_queue` for one file."""
+        has_any = any(add_by_service.values()) or any(delete_by_service.values())
+        if not has_any:
+            return
+
+        row = self.conn.execute(
+            "SELECT payload_json FROM push_queue WHERE file_hash = ?",
+            (file_hash,),
+        ).fetchone()
+
+        if row:
+            try:
+                payload = json.loads(row[0])
+            except Exception:
+                payload = {}
+        else:
+            payload = {}
+
+        for svc_key, tags in add_by_service.items():
+            if not tags:
+                continue
+            svc_entry = payload.setdefault(svc_key, {})
+            existing = svc_entry.get("add", [])
+            svc_entry["add"] = list(dict.fromkeys(existing + [str(t) for t in tags]))
+
+        for svc_key, tags in delete_by_service.items():
+            if not tags:
+                continue
+            svc_entry = payload.setdefault(svc_key, {})
+            existing = svc_entry.get("delete", [])
+            svc_entry["delete"] = list(dict.fromkeys(existing + [str(t) for t in tags]))
+
+        self.conn.execute(
+            """
+            INSERT INTO push_queue (file_hash, payload_json, attempts, last_error, created_at)
+            VALUES (?, ?, 0, NULL, ?)
+            ON CONFLICT(file_hash) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                attempts     = 0,
+                last_error   = NULL,
+                created_at   = excluded.created_at
+            """,
+            (file_hash, json.dumps(payload), _now_iso()),
+        )
 
     def enqueue_push(
         self,
@@ -323,54 +577,40 @@ class Database:
         if not tags:
             return
 
-        act_key: TagActionType = "delete" if action == "delete_tags" else "add"
-
-        row = self.conn.execute(
-            "SELECT payload_json FROM push_queue WHERE file_hash = ?",
-            (file_hash,),
-        ).fetchone()
-
-        if row:
-            try:
-                payload = json.loads(row[0])
-            except Exception:
-                payload = {}
+        if action == "delete_tags":
+            self._upsert_push_payload(file_hash, add_by_service={}, delete_by_service={service_key: tags})
         else:
-            payload = {}
-
-        svc_entry = payload.setdefault(service_key, {})
-        existing = svc_entry.get(act_key, [])
-        merged = list(dict.fromkeys(existing + [str(t) for t in tags]))
-        svc_entry[act_key] = merged
-
-        self.conn.execute(
-            """
-            INSERT INTO push_queue (file_hash, payload_json, attempts, last_error, created_at)
-            VALUES (?, ?, 0, NULL, ?)
-            ON CONFLICT(file_hash) DO UPDATE SET
-                payload_json = excluded.payload_json,
-                attempts     = 0,
-                last_error   = NULL,
-                created_at   = excluded.created_at
-            """,
-            (file_hash, json.dumps(payload), _now_iso()),
-        )
+            self._upsert_push_payload(file_hash, add_by_service={service_key: tags}, delete_by_service={})
         self.batch_tick()
 
     def has_pending_pushes(self) -> bool:
         """Check if any actionable files remain in the push queue."""
-        row = self.conn.execute("SELECT 1 FROM push_queue WHERE attempts < 3 LIMIT 1").fetchone()
+        row = self.conn.execute(
+            "SELECT 1 FROM push_queue WHERE attempts < ? LIMIT 1",
+            (MAX_PUSH_ATTEMPTS,),
+        ).fetchone()
         return row is not None
 
     def get_pending_push_count(self) -> int:
         """Return the total count of actionable files in the push queue."""
-        row = self.conn.execute("SELECT COUNT(*) FROM push_queue WHERE attempts < 3").fetchone()
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM push_queue WHERE attempts < ?",
+            (MAX_PUSH_ATTEMPTS,),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_failed_push_count(self) -> int:
+        """Return the count of dead-letter files that exceeded max push attempts."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM push_queue WHERE attempts >= ?",
+            (MAX_PUSH_ATTEMPTS,),
+        ).fetchone()
         return row[0] if row else 0
 
     def fetch_push_batch(
         self,
         limit: int = 50,
-        max_attempts: int = 3,
+        max_attempts: int = MAX_PUSH_ATTEMPTS,
     ) -> list[tuple[str, dict[str, dict[TagActionType, list[str]]]]]:
         """
         Fetch a batch of pending file payloads that have not exceeded max_attempts.

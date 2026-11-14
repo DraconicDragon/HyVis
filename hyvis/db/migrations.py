@@ -1,6 +1,6 @@
 """
 migrations.py — Sequential, transactional schema migrations using PRAGMA user_version.
-Keeps db.py clean and ensures existing databases seamlessly upgrade without data loss.
+Keeps hyvis_db.py clean and ensures existing databases seamlessly upgrade without data loss.
 """
 
 from __future__ import annotations
@@ -137,10 +137,91 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
 # endregion
 
 
+# region To v2
+
+
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """
+    Migration v1 -> v2:
+      - Adds nullable 'num_frames' column to 'known_files' for multi-frame / animation tracking.
+      - Creates 'inference_log' and drops legacy JSON 'inference_cache' table (now moved to cache.db).
+      - Creates active-run scratchpad tables: 'active_run', 'run_targets', 'run_progress'.
+    """
+    # 1. Ensure known_files has 'num_frames'
+    cursor = conn.execute("PRAGMA table_info(known_files)")
+    known_cols = {row[1] for row in cursor.fetchall()}
+    if known_cols and "num_frames" not in known_cols:
+        logger.info("Adding 'num_frames' column to known_files table...")
+        conn.execute("ALTER TABLE known_files ADD COLUMN num_frames INTEGER")
+
+    # 2. Create inference_log and drop legacy JSON inference_cache
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inference_log (
+            file_hash       TEXT NOT NULL,
+            model_id        TEXT NOT NULL,
+            variant_id      TEXT NOT NULL DEFAULT '',
+            vocab_hash      TEXT NOT NULL DEFAULT '',
+            filter_hash     TEXT NOT NULL DEFAULT '',
+            inferred_at     TEXT NOT NULL,
+            PRIMARY KEY (file_hash, model_id),
+            FOREIGN KEY (file_hash) REFERENCES known_files(file_hash) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_inference_log_model
+            ON inference_log(model_id, file_hash)
+        """
+    )
+    conn.execute("DROP INDEX IF EXISTS idx_cache_lookup")
+    conn.execute("DROP TABLE IF EXISTS inference_cache")
+
+    # 3. Create active-run scratchpad tables
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS active_run (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            config_toml     TEXT NOT NULL,
+            config_path     TEXT,
+            mode            TEXT NOT NULL CHECK (mode IN ('default', 'infer_only')),
+            force_mode      INTEGER NOT NULL DEFAULT 0 CHECK (force_mode IN (0, 1)),
+            hyvis_version   TEXT NOT NULL,
+            started_at      TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_targets (
+            file_hash       TEXT PRIMARY KEY,
+            state           TEXT NOT NULL CHECK (state IN ('pending', 'done', 'rejected')),
+            mime            TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_progress (
+            file_hash            TEXT NOT NULL,
+            model_id             TEXT NOT NULL,
+            staged_payload_json  TEXT NOT NULL,
+            PRIMARY KEY (file_hash, model_id),
+            FOREIGN KEY (file_hash) REFERENCES run_targets(file_hash) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+# endregion
+
+
 # region Migration Runner
 
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migrate_to_v1,
+    _migrate_to_v2,
 ]
 
 LATEST_VERSION: int = len(MIGRATIONS)
@@ -163,6 +244,8 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
     if db_path:
         _backup_database(conn, Path(db_path), current_version)
 
+    dropped_legacy_cache = current_version < 2 <= LATEST_VERSION
+
     for idx in range(current_version, LATEST_VERSION):
         target_version = idx + 1
         migration_fn = MIGRATIONS[idx]
@@ -181,6 +264,18 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
             conn.execute("ROLLBACK")
             logger.exception("Migration %d -> %d failed; rolled back all changes.", idx, target_version)
             raise
+        finally:
+            conn.isolation_level = old_isolation
+
+    # Reclaim space outside transaction if legacy JSON cache was dropped
+    if dropped_legacy_cache and str(db_path or "") not in (":memory:", ""):
+        old_isolation = conn.isolation_level
+        try:
+            conn.isolation_level = None
+            logger.info("Reclaiming disk space after legacy cache removal (VACUUM)...")
+            conn.execute("VACUUM")
+        except Exception as exc:
+            logger.warning("Post-migration VACUUM skipped: %s", exc)
         finally:
             conn.isolation_level = old_isolation
 
