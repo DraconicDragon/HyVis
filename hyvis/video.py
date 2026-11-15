@@ -984,6 +984,7 @@ def _select_scan_frames(
     """
     kept: list[Image.Image] = []
     accepted_grays: list[Any] = []
+    brightern: tuple[float, Image.Image] | None = None
     for idx in candidates:
         if loop_detected and idx in (0, total_frame_count - 1):
             continue
@@ -994,6 +995,10 @@ def _select_scan_frames(
         mean, std = cv2.meanStdDev(gray)
         mean = float(mean[0][0]) / 255.0
         std = float(std[0][0]) / 255.0
+        if brightern is None or mean > brightern[0]:
+            # Fallback so a clip whose every probed frame is dead still yields
+            # one frame instead of failing the file outright.
+            brightern = (mean, _to_pil(cv2, frame))
         if fades is not None and _fade_stats_test(
             mean,
             std,
@@ -1023,6 +1028,9 @@ def _select_scan_frames(
         accepted_grays.append(gray)
         if len(kept) >= max_frames:
             break
+    if not kept and brightern is not None:
+        logger.debug("scan: every probed frame was filtered, keeping the brightest")
+        kept.append(brightern[1])
     return kept
 
 
@@ -1195,6 +1203,7 @@ def _extract_gif_scan(
 
     kept: list[Image.Image] = []
     accepted_grays: list[Any] = []
+    brightern: tuple[float, Image.Image] | None = None
     for idx in candidates:
         if loop_detected and idx in (0, total_frame_count - 1):
             continue
@@ -1207,6 +1216,8 @@ def _extract_gif_scan(
         arr = gray.astype("float32")
         mean = float(arr.mean() / 255.0)
         std = float(arr.std() / 255.0)
+        if brightern is None or mean > brightern[0]:
+            brightern = (mean, frame.copy())
         if fades is not None and _fade_stats_test(
             mean,
             std,
@@ -1234,6 +1245,9 @@ def _extract_gif_scan(
         accepted_grays.append(gray)
         if len(kept) >= keep_budget:
             break
+    if not kept and brightern is not None:
+        logger.debug("scan: every probed GIF frame was filtered, keeping the brightest")
+        kept.append(brightern[1])
 
     logger.debug(
         "extract_gif_frames(scan) frames=%s duration=%.2f probes=%s kept=%s loop=%s",
