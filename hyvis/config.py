@@ -769,6 +769,14 @@ class VideoConfig(StrictBaseModel):
                            of the same motion. Shorter clips keep the
                            edges. Set to 0 to disable this rule.
                            Defaults to 0 (disabled).
+    single_frame_below_seconds
+                           Assume clips shorter than this many seconds are
+                           loops: nothing meaningful can be conveyed in that
+                           time, so a single centered frame is inferred
+                           instead of the usual three (first/middle/last).
+                           Skips edge sampling, fade replacement and dedupe
+                           for these clips. Set to 0 to disable this rule.
+                           Defaults to 1.0.
     detect_loops           Loop detection by picture: compare the first and
                            last frame; when they match (using the dedupe
                            thresholds) the clip is treated as a loop, so
@@ -822,6 +830,7 @@ class VideoConfig(StrictBaseModel):
     max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
     include_edges: bool = True
     include_edges_max_seconds: float = Field(default=0.0, ge=0.0)
+    single_frame_below_seconds: float = Field(default=1.0, ge=0.0)
     detect_loops: bool = True
     write_frames: bool = False
     exclude_fades: bool = False

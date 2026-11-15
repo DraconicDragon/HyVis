@@ -66,6 +66,7 @@ def extract_frames(
     max_frames_at_seconds: float = 60.0,
     include_edges: bool = True,
     include_edges_max_seconds: float = 0.0,
+    single_frame_below_seconds: float = 1.0,
     detect_loops: bool = True,
     fades: FadeFilterConfig | None = None,
     low_interest: LowInterestFilterConfig | None = None,
@@ -81,6 +82,10 @@ def extract_frames(
     frame. When ``include_edges_max_seconds`` is non-zero and the clip is
     longer than that, it is assumed to be a loop: edges are skipped and
     sampling starts at the center of the content window and works outward.
+
+    Clips shorter than ``single_frame_below_seconds`` are assumed to be
+    loops too short to say anything beyond a single frame; one centered
+    frame is returned and the fade/dedupe/low-interest filters are skipped.
 
     If `fades` is given, sampled frames that land inside fade-to-black /
     fade-to-white transitions are replaced by the nearest non-fade frame
@@ -110,6 +115,15 @@ def extract_frames(
         )
 
     total_duration: float = total_frame_count / fps
+    if 0 < single_frame_below_seconds and total_duration < single_frame_below_seconds:
+        center_frame = _read_center_frame(cv2, cap, total_frame_count)
+        if center_frame is not None:
+            cap.release()
+            logger.debug(
+                "extract_frames: %.2fs is below single_frame_below_seconds, using one frame",
+                total_duration,
+            )
+            return (_to_pil(cv2, center_frame),)
     use_edges, center_out = _resolve_edges(
         total_duration, include_edges, include_edges_max_seconds
     )
@@ -158,6 +172,7 @@ def extract_gif_frames(
     max_frames_at_seconds: float = 60.0,
     include_edges: bool = True,
     include_edges_max_seconds: float = 0.0,
+    single_frame_below_seconds: float = 1.0,
     detect_loops: bool = True,
     fades: FadeFilterConfig | None = None,
     low_interest: LowInterestFilterConfig | None = None,
@@ -175,8 +190,11 @@ def extract_gif_frames(
     near-duplicate removal. When ``include_edges_max_seconds`` is non-zero and
     the animation is longer than that, it is assumed to be a loop: edges are
     skipped and sampling starts at the center of the content window and works
-    outward. Returns the sampled frames as PIL Images in RGB mode. Raises
-    ValueError if the file cannot be opened or has no frames.
+    outward. Animations shorter than ``single_frame_below_seconds`` are assumed
+    to be loops too short to say anything beyond a single frame; one centered
+    frame is returned and the filters are skipped. Returns the sampled frames
+    as PIL Images in RGB mode. Raises ValueError if the file cannot be opened
+    or has no frames.
     """
     from PIL import Image, ImageSequence
 
@@ -197,6 +215,13 @@ def extract_gif_frames(
 
         total_duration = sum(durations)
         fps = total_frame_count / total_duration
+        if 0 < single_frame_below_seconds and total_duration < single_frame_below_seconds:
+            gif.seek(max(0, (total_frame_count - 1) // 2))
+            logger.debug(
+                "extract_gif_frames: %.2fs is below single_frame_below_seconds, using one frame",
+                total_duration,
+            )
+            return (gif.convert("RGB").copy(),)
         use_edges, center_out = _resolve_edges(
             total_duration, include_edges, include_edges_max_seconds
         )
@@ -444,6 +469,11 @@ def _to_pil(cv2: Any, frame_bgr: Any) -> "Image.Image":
     from PIL import Image
 
     return Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+
+
+def _read_center_frame(cv2: Any, cap: Any, total_frame_count: int) -> Any | None:
+    """Read the frame at the middle of the clip, or None if it can't be read."""
+    return _read_frame(cv2, cap, max(0, (total_frame_count - 1) // 2))
 
 
 def _downscale_gray(cv2: Any, frame_bgr: Any, max_dim: int) -> Any:
