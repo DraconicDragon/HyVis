@@ -286,6 +286,16 @@ def print_confirmation(
             print(f"       output_filter    (overrides: {', '.join(overrides_strs)})")
     print()
 
+    # region Video & Animation
+    vid = config.video
+    if vid.enabled:
+        print(_c("  Video & Animation", BOLD))
+        print(
+            f"    sampling            k={vid.density_k}  min={vid.min_frames}  max={vid.max_frames}  sparse<{vid.sparse_below_frames}"
+        )
+        print(f"    frame cache         mode={vid.frame_cache_mode}")
+        print()
+
     # region Output Filter
     of = config.output_filter
     print(_c("  Output Filter (global)", BOLD))
