@@ -9,7 +9,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from hyvis.db import Database, RunMode, RunTargetState
+from hyvis.db import Database, RunMode, RunTargetState, hash_api_key
 from hyvis.db.migrations import LATEST_VERSION, apply_migrations
 
 # region Queue Consolidation Tests
@@ -256,3 +256,27 @@ def test_new_database_stamps_latest_version_without_backup(tmp_path: Path) -> No
 
 
 # endregion
+
+
+def test_client_binding_meta_roundtrip(tmp_path: Path) -> None:
+    """Verify db_meta client binding persistence and DryRunDatabase read-only isolation."""
+    db_file = tmp_path / "hyvis.db"
+    key_hash = hash_api_key("my_secret_key")
+
+    with Database(db_file) as db:
+        assert db.get_client_binding() is None
+        db.set_client_binding("http://127.0.0.1:45869/", key_hash, ["svc_b", "svc_a"])
+
+        binding = db.get_client_binding()
+        assert binding is not None
+        assert binding.api_url == "http://127.0.0.1:45869"
+        assert binding.api_key_hash == key_hash
+        assert binding.service_keys == frozenset({"svc_a", "svc_b"})
+
+    from hyvis.db import DryRunDatabase
+
+    with DryRunDatabase(db_file) as dry_db:
+        dry_db.set_client_binding("http://127.0.0.1:99999", "other", ["svc_c"])
+        # Original binding on disk remains untouched
+        loaded = dry_db.get_client_binding()
+        assert loaded is not None and loaded.api_url == "http://127.0.0.1:45869"

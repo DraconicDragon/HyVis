@@ -12,12 +12,14 @@ from hyvis.db.hyvis_db import (
     MAX_PUSH_ATTEMPTS,
     ActiveRunInfo,
     ActiveRunInspection,
+    ClientBinding,
     Database,
     FileStatus,
     PushAction,
     RunMode,
     RunTargetState,
     TagActionType,
+    hash_api_key,
     inspect_active_run_readonly,
 )
 
@@ -28,6 +30,7 @@ __all__ = [
     "ActiveRunInspection",
     "CacheDatabase",
     "CachedVocab",
+    "ClientBinding",
     "Database",
     "DryRunDatabase",
     "FileStatus",
@@ -36,6 +39,7 @@ __all__ = [
     "RunTargetState",
     "TagActionType",
     "default_cache_path",
+    "hash_api_key",
     "inspect_active_run_readonly",
     "quantize_floor",
 ]

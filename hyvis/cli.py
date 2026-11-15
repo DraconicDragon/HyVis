@@ -76,6 +76,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Override cache database path (defaults to config database.cache_path or cache.db alongside main DB).",
     )
+    parser.add_argument(
+        "--update-client-binding",
+        action="store_true",
+        help="Acknowledge and overwrite the stored Hydrus client binding in hyvis.db if URL, key, or services changed.",
+    )
     parser.add_argument("--api-url", default=None, help="Override hydrus.api_url from config.")
     parser.add_argument("--api-key", default=None, help="Override hydrus.api_key from config.")
     parser.add_argument(

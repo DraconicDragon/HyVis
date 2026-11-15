@@ -212,6 +212,14 @@ def _migrate_to_v2(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS db_meta (
+            key             TEXT PRIMARY KEY,
+            value           TEXT NOT NULL
+        )
+        """
+    )
 
 
 # endregion

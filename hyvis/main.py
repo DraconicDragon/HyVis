@@ -25,6 +25,7 @@ from hyvis.db import (
     RunMode,
     RunTargetState,
     default_cache_path,
+    hash_api_key,
 )
 from hyvis.hydrus import FileInfo, HydrusConnectionError, HydrusError, validate_service_keys
 from hyvis.logging_utils import (  # noqa: F401
@@ -84,6 +85,107 @@ def _load_config_or_error(config_path: Path) -> AppConfig | None:
         traceback.print_exc()
         print(_c(f"ERROR: Failed to parse config: {exc}", RED), file=sys.stderr)
         return None
+
+
+def _verify_client_binding(
+    db: Database,
+    cfg: AppConfig,
+    service_name_by_key: dict[str, str],
+    args: Any,
+) -> bool:
+    """
+    Verify that the connected Hydrus client matches the fingerprint stored in `hyvis.db`.
+    Prevents accidentally mixing `inference_log` / `push_queue` across different Hydrus clients.
+    Returns True if safe to proceed, False if aborted/blocked.
+    """
+    cur_url = cfg.hydrus.api_url.strip().rstrip("/")
+    cur_key_hash = hash_api_key(cfg.hydrus.api_key)
+    cur_services = frozenset(service_name_by_key.keys())
+
+    saved = db.get_client_binding()
+    if saved is None:
+        if not args.dry_run:
+            db.set_client_binding(cur_url, cur_key_hash, cur_services)
+        return True
+
+    url_changed = saved.api_url != cur_url
+    key_changed = saved.api_key_hash != cur_key_hash
+    removed_services = saved.service_keys - cur_services
+    added_services = cur_services - saved.service_keys
+
+    # Same URL & API key, and only new services were added -> update seamlessly
+    if not url_changed and not key_changed and not removed_services:
+        if added_services and not args.dry_run:
+            logger.info("Detected %d new Hydrus service(s); updating stored client binding.", len(added_services))
+            db.set_client_binding(cur_url, cur_key_hash, cur_services)
+        return True
+
+    # Mismatch detected: warn before any writes occur
+    print()
+    print(_c("  ⚠ WARNING: Hydrus Client Mismatch Detected", YELLOW, BOLD))
+    print("  This database (hyvis.db) was previously used with a different Hydrus client or configuration:")
+    if url_changed:
+        print(f"    • API URL   : {saved.api_url}  ->  {cur_url}")
+    if key_changed:
+        print("    • API Key   : changed (different Hydrus client or rotated key)")
+    if removed_services or added_services:
+        print(f"    • Services  : {len(removed_services)} missing from client, {len(added_services)} new")
+        for missing_k in sorted(removed_services)[:5]:
+            print(_c(f"        - missing service key: {missing_k}", DIM))
+        if len(removed_services) > 5:
+            print(_c(f"        ... and {len(removed_services) - 5} more", DIM))
+
+    pending_pushes = db.get_pending_push_count()
+    if pending_pushes > 0:
+        print(
+            _c(
+                f"  ⚠ push_queue currently has {pending_pushes} unpushed file(s) from the previous client!",
+                RED,
+                BOLD,
+            )
+        )
+
+    print()
+    print(
+        _c(
+            "  Tip: Sharing one hyvis.db across different Hydrus clients will skip files or fail pushes.\n"
+            "       Use a separate --db path (e.g. '--db data/test.db') while keeping '--cache-db data/cache.db'\n"
+            "       to safely reuse your GPU prediction cache.",
+            CYAN,
+        )
+    )
+    print()
+
+    if args.update_client_binding:
+        if not args.dry_run:
+            db.set_client_binding(cur_url, cur_key_hash, cur_services)
+            logger.info("Updated Hydrus client binding in hyvis.db via --update-client-binding.")
+        return True
+
+    if args.yes or args.dry_run:
+        print(
+            _c(
+                "ERROR: Aborted due to Hydrus client mismatch. "
+                "Use a separate --db path, or pass --update-client-binding if this is the same Hydrus client.",
+                RED,
+            ),
+            file=sys.stderr,
+        )
+        return False
+
+    try:
+        ans = input("  Update stored client binding to this client and continue? [y/N]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print(_c("\nAborted.", YELLOW))
+        return False
+
+    if ans in ("y", "yes"):
+        db.set_client_binding(cur_url, cur_key_hash, cur_services)
+        logger.info("Updated Hydrus client binding in hyvis.db after user confirmation.")
+        return True
+
+    print(_c("\nAborted.", YELLOW))
+    return False
 
 
 # region Main coroutine
@@ -283,7 +385,9 @@ async def main() -> int:
                 logger.info("Push queue is empty. No operations needed.")
                 return 0
 
-            hydrus, _, _, _, _ = connect_hydrus(cfg)
+            hydrus, service_name_by_key, _, _, _ = connect_hydrus(cfg)
+            if not _verify_client_binding(db, cfg, service_name_by_key, args):
+                return 1
 
             print()
             print(_c(f"  Pending push operations: {pending_count}", BOLD, CYAN))
@@ -352,6 +456,10 @@ async def main() -> int:
                 print(_c(f"ERROR: {e}", RED), file=sys.stderr)
                 return 1
 
+            with Database(db_path) as db:
+                if not _verify_client_binding(db, cfg, service_name_by_key, args):
+                    return 1
+
             if missing_paths:
                 assert hydrus is not None
                 hydrus.resolve_paths(
@@ -376,6 +484,10 @@ async def main() -> int:
             print(_c(f"ERROR: {e}", RED), file=sys.stderr)
             logger.error("Service key validation failed: %s", e)
             return 1
+
+        with db_cls(db_path) as db:
+            if not _verify_client_binding(db, cfg, service_name_by_key, args):
+                return 1
 
         if cfg.hydrus.tag_queries and not any(q.tags for q in cfg.hydrus.tag_queries):
             print(

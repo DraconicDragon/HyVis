@@ -10,6 +10,7 @@ import logging
 import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from hyvis.db.hyvis_db import (
     _SCHEMA_SQL,
@@ -81,6 +82,17 @@ class DryRunDatabase(Database):
     def mark_file_status(self, file_hash: str, status: FileStatus | str) -> None:
         """No-op."""
         del file_hash, status
+
+    def set_meta(self, key: str, value: str) -> None:
+        del key, value
+
+    def set_client_binding(
+        self,
+        api_url: str,
+        api_key_hash: str,
+        service_keys: Any,
+    ) -> None:
+        del api_url, api_key_hash, service_keys
 
     # region Inference Log Shadow
 

@@ -10,10 +10,11 @@ Features:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -58,6 +59,20 @@ class ActiveRunInfo:
     force_mode: bool
     hyvis_version: str
     started_at: str
+
+
+@dataclass(frozen=True)
+class ClientBinding:
+    """Recorded Hydrus client fingerprint bound to this operational database."""
+
+    api_url: str
+    api_key_hash: str
+    service_keys: frozenset[str]
+
+
+def hash_api_key(api_key: str) -> str:
+    """Return a short non-reversible fingerprint of the Hydrus API key."""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -131,6 +146,12 @@ CREATE TABLE IF NOT EXISTS run_progress (
     staged_payload_json  TEXT NOT NULL, -- JSON object: {"<service_key>": ["tag1", ...]}
     PRIMARY KEY (file_hash, model_id),
     FOREIGN KEY (file_hash) REFERENCES run_targets(file_hash) ON DELETE CASCADE
+);
+
+-- 7. Database Metadata: Key-value store for client binding and operational metadata
+CREATE TABLE IF NOT EXISTS db_meta (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_inference_log_model
@@ -680,6 +701,70 @@ class Database:
         """Remove a specific file from the queue (e.g. if deleted in Hydrus)."""
         self.conn.execute("DELETE FROM push_queue WHERE file_hash = ?", (file_hash,))
         self.commit()
+
+    # endregion
+
+    # region DB Meta & Client Binding
+
+    def get_meta(self, key: str) -> str | None:
+        """Retrieve a metadata value by key from db_meta."""
+        row = self.conn.execute("SELECT value FROM db_meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Persist a metadata key-value pair into db_meta."""
+        self.conn.execute(
+            """
+            INSERT INTO db_meta (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        self.commit()
+
+    def get_client_binding(self) -> ClientBinding | None:
+        """Return the recorded Hydrus client binding for this DB, or None if unbound."""
+        api_url = self.get_meta("client_api_url")
+        api_key_hash = self.get_meta("client_api_key_hash")
+        services_raw = self.get_meta("client_service_keys")
+
+        if api_url is None or api_key_hash is None or services_raw is None:
+            return None
+
+        try:
+            services_list = json.loads(services_raw)
+            service_keys = frozenset(str(k) for k in services_list)
+        except Exception:
+            return None
+
+        return ClientBinding(
+            api_url=api_url,
+            api_key_hash=api_key_hash,
+            service_keys=service_keys,
+        )
+
+    def set_client_binding(
+        self,
+        api_url: str,
+        api_key_hash: str,
+        service_keys: Iterable[str] | Sequence[str] | set[str] | frozenset[str],
+    ) -> None:
+        """Record or overwrite the Hydrus client binding fingerprint in db_meta."""
+        norm_url = api_url.strip().rstrip("/")
+        sorted_keys = sorted(str(k) for k in service_keys)
+        with self.transaction():
+            for k, v in (
+                ("client_api_url", norm_url),
+                ("client_api_key_hash", api_key_hash),
+                ("client_service_keys", json.dumps(sorted_keys)),
+            ):
+                self.conn.execute(
+                    """
+                    INSERT INTO db_meta (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (k, v),
+                )
 
     # endregion
 
