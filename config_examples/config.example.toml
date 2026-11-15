@@ -161,6 +161,14 @@ exclude_tags = [
 
 # All models are loaded at the same time and run against the same file set.
 
+[inference]
+# Close and reload the model session after this many files, or once its memory
+# growth exceeds session_recycle_rss_growth_mb, to release accumulated memory.
+# The reload resumes from the cache, so nothing is inferred twice. 0 disables
+# the respective limit.
+session_recycle_files = 2000
+session_recycle_rss_growth_mb = 1024
+
 [[inference.models]]
 model_id = "wd-swinv2-v3" # Check SUPPORTED_MODELS.md for supported models and their IDs
 # source   = "" # Local path to folder or omit/leave empty to auto-download from HuggingFace

@@ -443,6 +443,8 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `models` | Array of Tables | **Yes** | Definitions of the model sessions to load and run. |
+| `session_recycle_files` | Integer | No | Close and reload the model session after this many files to release accumulated memory. The run resumes from the cache, so no file is inferred twice. `0` disables the file-count limit. <br> Defaults to `2000`. |
+| `session_recycle_rss_growth_mb` | Integer | No | Close and reload the model session once its memory growth since the session started exceeds this many MiB. `0` disables the memory limit. <br> Defaults to `1024`. |
 
 ### `[[inference.models]]`
 

@@ -623,6 +623,20 @@ class InferenceConfig(StrictBaseModel):
         title="Configured Models",
         description="List of model sessions to load and execute sequentially.",
     )
+    session_recycle_files: int = Field(
+        default=2000,
+        ge=0,
+        title="Session Recycle After Files",
+        description="Close and reload the model session after this many files to release memory. 0 disables the file-count limit.",
+        examples=[1000, 2000, 5000],
+    )
+    session_recycle_rss_growth_mb: int = Field(
+        default=1024,
+        ge=0,
+        title="Session Recycle RSS Growth (MiB)",
+        description="Close and reload the model session once its memory growth exceeds this many MiB. 0 disables the memory limit.",
+        examples=[512, 1024, 2048],
+    )
 
 
 class HydrusConfig(StrictBaseModel):
