@@ -534,21 +534,21 @@ min_cache_score = 0.01
 
 ## `[video]`
 
-Settings for tagging video files and animated GIFs by sampling frames.
+Settings for tagging video files and animated images (GIF, APNG) by sampling frames.
 
 When `enabled` is `true`, files with a `video/*` MIME type are accepted alongside images. For each video a dense grid of candidate frames is probed across the content window (the clip minus padding around its fade-in/fade-out), dead frames are dropped, near-duplicates are removed, and the survivors go through the configured models. Per-frame results are merged into one result per file: a tag is kept if it appears in any sampled frame, using its highest score across frames. Everything downstream (thresholds, output filter, tag services, preview, push) behaves exactly like it does for images.
 
 The probe grid holds `probe_multiplier` times as many candidates as frames that will be kept, capped at `max_probes`. Probing more than you keep is the point: when a candidate is a fade, a black frame or a repeat of an earlier moment, the filter drops it and a different moment takes its place, so the file still ends up with a full set of representative frames instead of a thinner one. Probes are decoded in ascending frame order and the decoder walks forward rather than seeking, because a random seek on WebM re-decodes from the start of the file.
 
-Animated GIFs are always accepted as images; while `enabled` is `true` they are sampled like videos instead of only using their first frame. A GIF has no frame rate clock, so each frame's display duration from the GIF metadata defines the animation timeline and probe timestamps are mapped onto frame indices through that timeline.
+Animated GIFs and APNGs are always accepted as images; while `enabled` is `true` they are sampled like videos instead of only using their first frame. A GIF or APNG has no frame rate clock, so each frame's display duration from the file metadata defines the animation timeline and probe timestamps are mapped onto frame indices through that timeline.
 
 `[video.loop]` holds the assumptions about looping animations: sub-second clips get a single centered frame, clips longer than `edges_max_seconds` skip their edge probes by duration alone, and `detect` compares the first and last frame so a clip that visibly wraps around loses its redundant edge probes. `[video.dedupe]` controls the near-duplicate test that drops one phase of a loop sampled twice. `[video.fades]` and `[video.low_interest]` drop dead probes: fade frames and flat dark frames. No filter replaces a dropped frame; the probe grid supplies the alternative.
 
-Requires `opencv-python-headless` for video files, which is installed automatically with HyVis (GIF sampling itself only uses Pillow).
+Requires `opencv-python-headless` for video files, which is installed automatically with HyVis (GIF and APNG sampling only uses Pillow). If OpenCV cannot decode a video at all, for example an AV1 build that only exposes a hardware decoding path, HyVis falls back to the `ffmpeg` command line when it is installed, so those files are still sampled instead of skipped.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `enabled` | Boolean | No | Accept and tag video files, and sample animated GIFs frame by frame. Set to `false` to keep rejecting videos like before this feature existed; GIFs are then tagged from their first frame only. <br> Defaults to `true`. |
+| `enabled` | Boolean | No | Accept and tag video files, and sample animated GIFs and APNGs frame by frame. Set to `false` to keep rejecting videos like before this feature existed; animated images are then tagged from their first frame only. <br> Defaults to `true`. |
 | `max_frames` | Integer | No | Maximum number of frames per file sent to inference. Clips shorter than `max_frames_at_seconds` keep proportionally fewer. <br> Defaults to `11`. |
 | `max_frames_at_seconds` | Number | No | Duration (seconds) at which the full `max_frames` is kept. Shorter clips scale down; longer clips stay at `max_frames`. <br> Defaults to `60.0`. |
 | `probe_multiplier` | Integer | No | Probe grid size as a multiple of `max_frames`: a multiplier of `3` probes three candidates for every frame that may be kept, so dead and duplicate probes can be replaced by other moments. <br> Defaults to `3`. |

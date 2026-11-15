@@ -1,5 +1,5 @@
 """
-video.py Frame extraction for video and animated GIF files.
+video.py Frame extraction for video and animated image files (GIF, APNG).
 
 The sampler probes a dense grid of candidate frames across the content window
 (duration minus fade-in/fade-out padding) in one forward pass, drops fade
@@ -14,7 +14,10 @@ of the file on every seek).
 from __future__ import annotations
 
 import bisect
+import io
 import logging
+import shutil
+import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -47,6 +50,9 @@ _MAX_FORWARD_GAP = 120
 #: side of a seam are one frame apart, so a high-contrast element moving one
 #: step already flips a few percent of pixels by more than the change level.
 _LOOP_MIN_CHANGED_FRACTION = 0.10
+
+#: Upper bound on one ffmpeg frame grab, so a broken file cannot hang a run.
+_FFMPEG_TIMEOUT = 60.0
 
 #: One probe and its analysis copy, as handed to ``_select_frames``.
 Probe = tuple[int, "Image.Image", Any]
@@ -158,6 +164,24 @@ def extract_frames(
             fades=fades,
             low_interest=low_interest,
         )
+        if not frames:
+            # OpenCV can open the container but not decode it: AV1 builds that
+            # only expose a hardware path fail every read. Try the ffmpeg CLI
+            # before giving up, so the file is still sampled instead of skipped.
+            frames = _sample_video_ffmpeg(
+                video_path,
+                fps=fps,
+                total_frame_count=total_frame_count,
+                max_frames=max_frames,
+                max_frames_at_seconds=max_frames_at_seconds,
+                probe_multiplier=probe_multiplier,
+                max_probes=max_probes,
+                include_edges=include_edges,
+                loop=loop,
+                dedupe=dedupe,
+                fades=fades,
+                low_interest=low_interest,
+            )
     finally:
         cap.release()
 
@@ -177,12 +201,12 @@ def extract_gif_frames(
     fades: FadeFilterConfig | None = None,
     low_interest: LowInterestFilterConfig | None = None,
 ) -> tuple["Image.Image", ...]:
-    """Sample frames from an animated GIF to send to inference.
+    """Sample frames from an animated GIF or APNG to send to inference.
 
     Same probe-and-filter strategy as ``extract_frames``, with one difference:
-    a GIF has no frame rate clock, so each frame's display duration from the
-    GIF metadata defines the animation timeline and probe timestamps are
-    mapped onto frame indices with a cumulative-duration lookup. Returns RGB
+    a GIF or APNG has no frame rate clock, so each frame's display duration
+    from the file metadata defines the animation timeline and probe timestamps
+    are mapped onto frame indices with a cumulative-duration lookup. Returns RGB
     PIL frames in ascending frame order. Raises ValueError if the file cannot
     be opened or has no frames.
     """
@@ -330,6 +354,134 @@ def _sample_video(
         fps,
         total_frame_count,
         total_duration,
+        len(candidates),
+        len(frames),
+        loop_detected,
+    )
+    return tuple(frames)
+
+
+def _ffmpeg_binary() -> str | None:
+    """Path to the ffmpeg CLI, or None when it is not installed."""
+    return shutil.which("ffmpeg")
+
+
+def _ffmpeg_frame(video_path: str | Path, timestamp: float) -> "Image.Image" | None:
+    """Decode one frame at ``timestamp`` through the ffmpeg CLI.
+
+    Only used when OpenCV cannot decode the file. One subprocess per probe
+    keeps this bounded and stateless; probes are at most ``max_probes`` per
+    clip, and clips that reach this path are ones that would otherwise be
+    skipped entirely. Returns an RGB PIL frame, or None when the timestamp
+    cannot be decoded.
+    """
+    from PIL import Image
+
+    ffmpeg = _ffmpeg_binary()
+    if ffmpeg is None:
+        return None
+    command = [
+        ffmpeg,
+        "-v",
+        "error",
+        "-nostdin",
+        "-ss",
+        f"{max(0.0, timestamp):.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-an",
+        "-sn",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "-",
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, timeout=_FFMPEG_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or not completed.stdout:
+        return None
+    try:
+        frame = Image.open(io.BytesIO(completed.stdout))
+        return frame.convert("RGB")
+    except (OSError, ValueError):
+        return None
+
+
+def _sample_video_ffmpeg(
+    video_path: str | Path,
+    *,
+    fps: float,
+    total_frame_count: int,
+    max_frames: int,
+    max_frames_at_seconds: float,
+    probe_multiplier: int,
+    max_probes: int,
+    include_edges: bool,
+    loop: LoopConfig,
+    dedupe: DedupeConfig,
+    fades: FadeFilterConfig | None,
+    low_interest: LowInterestFilterConfig | None,
+) -> tuple["Image.Image", ...]:
+    """Probe and filter a video with the ffmpeg decoder instead of OpenCV."""
+    if _ffmpeg_binary() is None:
+        return ()
+    total_duration = total_frame_count / fps
+    padding_duration, content_start, content_end = _content_window(
+        total_duration, fps, max_frames_at_seconds
+    )
+    content_duration = max(0.0, content_end - content_start)
+    use_edges = _use_edges(loop, total_duration, include_edges)
+    candidates = _probe_indices(
+        total_frame_count=total_frame_count,
+        padding_duration=padding_duration,
+        content_duration=content_duration,
+        count=_probe_count(max_frames, probe_multiplier, max_probes),
+        include_edges=use_edges,
+        frame_at=lambda timestamp: int(timestamp * fps),
+    )
+    keep_budget = _keep_budget(
+        content_duration=content_duration,
+        padding_duration=padding_duration,
+        max_frames=max_frames,
+        max_frames_at_seconds=max_frames_at_seconds,
+        include_edges=use_edges,
+    )
+    cache: dict[int, "Image.Image | None"] = {}
+
+    def grab(frame_idx: int) -> "Image.Image | None":
+        if frame_idx not in cache:
+            cache[frame_idx] = _ffmpeg_frame(video_path, frame_idx / fps)
+        return cache[frame_idx]
+
+    def load_gray(frame_idx: int) -> Any | None:
+        frame = grab(frame_idx)
+        return None if frame is None else _pil_gray(frame, _ANALYSIS_SCALE)
+
+    loop_detected = _detect_loop(
+        load_gray, candidates, use_edges=use_edges, loop=loop, dedupe=dedupe
+    )
+    probes: list[Probe] = []
+    for idx in candidates:
+        if loop_detected and idx in (0, total_frame_count - 1):
+            continue
+        frame = grab(idx)
+        if frame is None:
+            continue
+        probes.append((idx, frame, _pil_gray(frame, _ANALYSIS_SCALE)))
+    frames = _select_frames(
+        probes,
+        keep_budget=keep_budget,
+        fades=fades,
+        low_interest=low_interest,
+        dedupe=dedupe,
+    )
+    logger.debug(
+        "extract_frames: ffmpeg fallback probes=%s kept=%s loop=%s",
         len(candidates),
         len(frames),
         loop_detected,

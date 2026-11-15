@@ -60,6 +60,7 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
         "image/avif",
         "image/heif",
         "image/gif",
+        "image/apng",
         # Photoshop files are tagged from their saved flattened composite.
         "image/vnd.adobe.photoshop",
     }
@@ -69,7 +70,7 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
 VIDEO_MIME_PREFIX = "video/"
 
 #: Image MIME types that can hold an animation and are sampled frame by frame.
-ANIMATED_MIMES: frozenset[str] = frozenset({"image/gif"})
+ANIMATED_MIMES: frozenset[str] = frozenset({"image/gif", "image/apng"})
 
 
 def is_video_mime(mime: str | None) -> bool:
@@ -78,7 +79,7 @@ def is_video_mime(mime: str | None) -> bool:
 
 
 def is_animated_mime(mime: str | None) -> bool:
-    """Return True if the given MIME type may contain an animation (e.g. GIF)."""
+    """Return True if the given MIME type may contain an animation (GIF, APNG)."""
     return bool(mime and mime in ANIMATED_MIMES)
 
 
