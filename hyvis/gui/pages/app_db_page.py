@@ -127,6 +127,9 @@ class AppDbPage(BaseConfigPage):
         self.min_score_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(db_layout, db_fields, "min_cache_score", self.min_score_spin)
 
+        self.db_card.setContentLayout(db_layout)
+        layout.addWidget(self.db_card)
+
         # 2. HyVis Application Settings Card
         hy_title = app_fields["hyvis"].title or "Application Settings"
         self.app_card = SectionCard(
