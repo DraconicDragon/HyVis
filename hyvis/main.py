@@ -51,6 +51,16 @@ def _resolve_db_path(raw_path: str | Path) -> Path:
     return p if p.is_absolute() else (Path.cwd() / p)
 
 
+def _clear_video_frame_cache(cfg: AppConfig, db_path: Path) -> int:
+    """Remove temporary extracted video frames and report how many folders were removed."""
+    from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
+
+    removed = FrameDiskCache(resolve_frame_cache_dir(cfg, db_path=db_path)).clear_all()
+    if removed > 0:
+        print(_c(f"  Removed {removed} temporary video frame cache folder(s).", DIM))
+    return removed
+
+
 def _apply_cli_overrides(cfg: AppConfig, args: Any) -> AppConfig:
     if args.api_url or args.api_key:
         hydrus_updates: dict[str, str] = {}
@@ -247,6 +257,7 @@ async def main() -> int:
                     pending_n = len(db.get_run_targets(RunTargetState.PENDING))
                     if args.discard_run:
                         db.clear_active_run()
+                        _clear_video_frame_cache(cfg, db_path)
                         print(_c(f"  Discarded previous unfinished run ({pending_n} pending file(s)).\n", YELLOW))
                     elif args.yes:
                         print(
@@ -281,6 +292,7 @@ async def main() -> int:
 
                         if ans in ("d", "discard"):
                             db.clear_active_run()
+                            _clear_video_frame_cache(cfg, db_path)
                             print(_c("  Discarded previous run.\n", YELLOW))
                         elif ans in ("r", "resume"):
                             is_resume = True
@@ -336,6 +348,7 @@ async def main() -> int:
     if args.clear_cache:
         logger.info("Executing action: --clear-cache on %s", cache_path)
         if not cache_path.is_file():
+            _clear_video_frame_cache(cfg, db_path)
             print("Inference cache is already empty (cache.db does not exist).")
             return 0
 
@@ -343,6 +356,7 @@ async def main() -> int:
             stats_info = cdb.get_stats()
             count = int(stats_info["predictions"])
             if count == 0:
+                _clear_video_frame_cache(cfg, db_path)
                 print("Inference cache is already empty.")
                 logger.info("Inference cache is already empty.")
                 return 0
@@ -363,6 +377,7 @@ async def main() -> int:
                     return 0
 
             deleted = cdb.clear_cache()
+            _clear_video_frame_cache(cfg, db_path)
             print(_c(f"\n  Successfully cleared {deleted} cached records and reclaimed disk space.", GREEN))
             logger.info("Cleared %d cached records from %s", deleted, cache_path)
             return 0
@@ -437,10 +452,20 @@ async def main() -> int:
         with Database(db_path) as db:
             pending_targets = db.get_run_targets(RunTargetState.PENDING)
             rejected_targets = db.get_run_targets(RunTargetState.REJECTED)
-            cached_paths = db.bulk_get_known_paths([h for h, _, _ in pending_targets])
+            pending_hashes = [h for h, _, _ in pending_targets]
+            cached_paths = db.bulk_get_known_paths(pending_hashes)
+            cached_frames = db.bulk_get_known_frames(pending_hashes)
 
         for h, _, m in pending_targets:
-            file_infos.append(FileInfo(file_hash=h, mime=m or "", size=0, local_path=cached_paths.get(h)))
+            file_infos.append(
+                FileInfo(
+                    file_hash=h,
+                    mime=m or "",
+                    size=0,
+                    local_path=cached_paths.get(h),
+                    num_frames=cached_frames.get(h),
+                )
+            )
 
         all_rejected_hashes = [h for h, _, _ in rejected_targets]
         rejected_mimes = {m for _, _, m in rejected_targets if m}
