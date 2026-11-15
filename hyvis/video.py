@@ -65,6 +65,8 @@ def extract_frames(
     max_frames: int = 11,
     max_frames_at_seconds: float = 60.0,
     include_edges: bool = True,
+    include_edges_max_seconds: float = 0.0,
+    detect_loops: bool = True,
     fades: FadeFilterConfig | None = None,
     low_interest: LowInterestFilterConfig | None = None,
     dedupe: bool = True,
@@ -76,7 +78,9 @@ def extract_frames(
 
     Frames are distributed evenly across the content duration, with padding
     around fade-ins/fade-outs and optional inclusion of the first/last
-    frame.
+    frame. When ``include_edges_max_seconds`` is non-zero and the clip is
+    longer than that, it is assumed to be a loop: edges are skipped and
+    sampling starts at the center of the content window and works outward.
 
     If `fades` is given, sampled frames that land inside fade-to-black /
     fade-to-white transitions are replaced by the nearest non-fade frame
@@ -105,6 +109,25 @@ def extract_frames(
             f"Cannot determine video duration for {video_path} (fps={fps}, frames={total_frame_count})"
         )
 
+    total_duration: float = total_frame_count / fps
+    use_edges, center_out = _resolve_edges(
+        total_duration, include_edges, include_edges_max_seconds
+    )
+    if use_edges and detect_loops:
+        try:
+            if _detect_loop_video(
+                cv2,
+                cap,
+                total_frame_count,
+                threshold=dedupe_threshold,
+                change_level=dedupe_change_level,
+                max_fraction=max(_LOOP_MIN_CHANGED_FRACTION, dedupe_max_changed_fraction),
+            ):
+                logger.debug("extract_frames: %s looks like a loop, skipping edges", video_path)
+                use_edges, center_out = False, True
+        except Exception as exc:  # detection is best-effort
+            logger.debug("extract_frames: loop detection failed for %s: %s", video_path, exc)
+
     try:
         frames = _extract_uniform(
             cap,
@@ -112,7 +135,8 @@ def extract_frames(
             total_frame_count=total_frame_count,
             max_frames=max_frames,
             max_frames_at_seconds=max_frames_at_seconds,
-            include_edges=include_edges,
+            include_edges=use_edges,
+            center_out=center_out,
             fades=fades,
             dedupe=dedupe,
             dedupe_threshold=dedupe_threshold,
@@ -133,6 +157,8 @@ def extract_gif_frames(
     max_frames: int = 11,
     max_frames_at_seconds: float = 60.0,
     include_edges: bool = True,
+    include_edges_max_seconds: float = 0.0,
+    detect_loops: bool = True,
     fades: FadeFilterConfig | None = None,
     low_interest: LowInterestFilterConfig | None = None,
     dedupe: bool = True,
@@ -146,8 +172,11 @@ def extract_gif_frames(
     GIF metadata defines the total animation duration. The same uniform
     timestamp distribution as videos is then applied: content padding,
     optional first/last frames, fade replacement, low-interest filtering and
-    near-duplicate removal. Returns the sampled frames as PIL Images in RGB
-    mode. Raises ValueError if the file cannot be opened or has no frames.
+    near-duplicate removal. When ``include_edges_max_seconds`` is non-zero and
+    the animation is longer than that, it is assumed to be a loop: edges are
+    skipped and sampling starts at the center of the content window and works
+    outward. Returns the sampled frames as PIL Images in RGB mode. Raises
+    ValueError if the file cannot be opened or has no frames.
     """
     from PIL import Image, ImageSequence
 
@@ -168,6 +197,22 @@ def extract_gif_frames(
 
         total_duration = sum(durations)
         fps = total_frame_count / total_duration
+        use_edges, center_out = _resolve_edges(
+            total_duration, include_edges, include_edges_max_seconds
+        )
+        if use_edges and detect_loops:
+            try:
+                if _detect_loop_gif(
+                    gif,
+                    total_frame_count,
+                    threshold=dedupe_threshold,
+                    change_level=dedupe_change_level,
+                    max_fraction=max(_LOOP_MIN_CHANGED_FRACTION, dedupe_max_changed_fraction),
+                ):
+                    logger.debug("extract_gif_frames: %s looks like a loop, skipping edges", gif_path)
+                    use_edges, center_out = False, True
+            except Exception as exc:  # detection is best-effort
+                logger.debug("extract_gif_frames: loop detection failed for %s: %s", gif_path, exc)
 
         padding_duration, content_start, content_end = _content_window(
             total_duration, fps, max_frames_at_seconds
@@ -181,7 +226,8 @@ def extract_gif_frames(
             num_frames_to_extract=num_frames_to_extract,
             padding_duration=padding_duration,
             content_duration=content_duration,
-            include_edges=include_edges,
+            include_edges=use_edges,
+            center_out=center_out,
         )
 
         logger.debug(
@@ -302,6 +348,91 @@ def _content_window(
     return padding_duration, content_start, content_end
 
 
+def _resolve_edges(
+    total_duration: float,
+    include_edges: bool,
+    include_edges_max_seconds: float,
+) -> tuple[bool, bool]:
+    """Return (use_edges, center_out) for a clip's duration.
+
+    Clips longer than ``include_edges_max_seconds`` are assumed to be loops:
+    their edge frames add no information, so edges are skipped and samples
+    are taken from the center of the content window outward. A threshold of
+    0 disables the duration rule.
+    """
+    if include_edges_max_seconds <= 0.0 or total_duration <= include_edges_max_seconds:
+        return include_edges, False
+    return False, True
+
+
+def _frames_match(
+    gray_a: Any,
+    gray_b: Any,
+    *,
+    threshold: float,
+    change_level: int,
+    max_fraction: float,
+) -> bool:
+    """True when two downscaled gray frames are near-identical.
+
+    Same two-part test as near-duplicate removal: a low mean difference AND
+    almost no pixels changed by more than ``change_level`` gray levels. A
+    near-static scene with one moving element is therefore not mistaken for
+    a loop seam.
+    """
+    import numpy as np
+
+    if max_fraction <= 0 or gray_a.shape != gray_b.shape:
+        return False
+    diff = np.abs(gray_a.astype(np.int16) - gray_b.astype(np.int16))
+    if float(diff.mean()) / 255.0 >= threshold:
+        return False
+    return float((diff > change_level).mean()) < max_fraction
+
+
+def _detect_loop_video(
+    cv2: Any,
+    cap: Any,
+    total_frame_count: int,
+    *,
+    threshold: float,
+    change_level: int,
+    max_fraction: float,
+) -> bool:
+    """True if a video's first and last frame are near-identical (a loop)."""
+    first = _read_frame(cv2, cap, 0)
+    last = _read_frame(cv2, cap, max(0, total_frame_count - 1))
+    if first is None or last is None:
+        return False
+    return _frames_match(
+        _downscale_gray(cv2, first, _FADE_ANALYSIS_SCALE),
+        _downscale_gray(cv2, last, _FADE_ANALYSIS_SCALE),
+        threshold=threshold,
+        change_level=change_level,
+        max_fraction=max_fraction,
+    )
+
+
+def _detect_loop_gif(
+    gif: "Image.Image",
+    total_frame_count: int,
+    *,
+    threshold: float,
+    change_level: int,
+    max_fraction: float,
+) -> bool:
+    """True if a GIF's first and last frame are near-identical (a loop)."""
+    if total_frame_count < 2:
+        return False
+    gif.seek(0)
+    first = _pil_gray(gif.convert("RGB"), _FADE_ANALYSIS_SCALE)
+    gif.seek(total_frame_count - 1)
+    last = _pil_gray(gif.convert("RGB"), _FADE_ANALYSIS_SCALE)
+    return _frames_match(
+        first, last, threshold=threshold, change_level=change_level, max_fraction=max_fraction
+    )
+
+
 def _read_frame(cv2: Any, cap: Any, frame_idx: int) -> Any | None:
     """Seek to frame_idx and return it as a BGR ndarray, or None on failure."""
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -335,6 +466,11 @@ def _mean_diff(cv2: Any, a: Any, b: Any) -> float:
 
 #: Resolution used for fade-frame detection (mean/std of luminance only).
 _FADE_ANALYSIS_SCALE = 160
+
+#: Loop-seam detection tolerates more changed pixels than dedupe: consecutive
+#: frames around the seam are one frame apart, so a high-contrast element
+#: moving one step already flips a few percent of pixels by >25 gray levels.
+_LOOP_MIN_CHANGED_FRACTION = 0.10
 
 
 def _luminance_stats(cv2: Any, cap: Any, frame_idx: int) -> tuple[float, float] | None:
@@ -619,6 +755,7 @@ def _uniform_timestamps(
     padding_duration: float,
     content_duration: float,
     include_edges: bool,
+    center_out: bool = False,
 ) -> tuple[float, ...]:
     """Generate timestamps to extract frames at.
 
@@ -626,6 +763,10 @@ def _uniform_timestamps(
 
     When content duration < minimum interval, paddings are skipped and
     content is a single frame at duration / 2.
+
+    With ``center_out`` the timestamps are ordered from the middle of the
+    content window outward, so near-duplicate removal keeps central frames
+    first (used for clips assumed to loop).
     """
     start: list[float] = []
     end: list[float] = []
@@ -651,7 +792,12 @@ def _uniform_timestamps(
         start = start + [padding_duration]
         end = [total_duration - padding_duration] + end
 
-    return tuple(start + content + end)
+    timestamps = start + content + end
+    if center_out:
+        center = padding_duration + content_duration / 2
+        timestamps = sorted(timestamps, key=lambda timestamp: abs(timestamp - center))
+
+    return tuple(timestamps)
 
 
 def _extract_uniform(
@@ -662,6 +808,7 @@ def _extract_uniform(
     max_frames: int,
     max_frames_at_seconds: float,
     include_edges: bool,
+    center_out: bool = False,
     fades: FadeFilterConfig | None = None,
     dedupe: bool = True,
     dedupe_threshold: float = 0.03,
@@ -685,6 +832,7 @@ def _extract_uniform(
         padding_duration=padding_duration,
         content_duration=content_duration,
         include_edges=include_edges,
+        center_out=center_out,
     )
 
     logger.debug(

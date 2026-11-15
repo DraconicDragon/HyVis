@@ -770,6 +770,8 @@ async def infer_files(
                             max_frames=video_cfg.max_frames,
                             max_frames_at_seconds=video_cfg.max_frames_at_seconds,
                             include_edges=video_cfg.include_edges,
+                            include_edges_max_seconds=video_cfg.include_edges_max_seconds,
+                            detect_loops=video_cfg.detect_loops,
                             fades=video_cfg.fades if video_cfg.exclude_fades else None,
                             low_interest=video_cfg.low_interest,
                             dedupe=video_cfg.dedupe,

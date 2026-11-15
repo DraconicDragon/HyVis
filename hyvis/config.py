@@ -760,6 +760,24 @@ class VideoConfig(StrictBaseModel):
                            dropped if near-identical to another sampled
                            frame (e.g. a loop's end frame duplicating its
                            start).
+    include_edges_max_seconds
+                           Loop assumption by duration: clips longer than
+                           this many seconds are treated as loops. Their
+                           edge frames are skipped and samples are taken
+                           from the center of the content window outward,
+                           since a loop's first frame is just another phase
+                           of the same motion. Shorter clips keep the
+                           edges. Set to 0 to disable this rule.
+                           Defaults to 0 (disabled).
+    detect_loops           Loop detection by picture: compare the first and
+                           last frame; when they match (using the dedupe
+                           thresholds) the clip is treated as a loop, so
+                           its edge frames are skipped and sampling starts
+                           at the center. This catches real loops of any
+                           duration and leaves non-looping clips alone.
+                           Reuses dedupe_threshold/dedupe_change_level/
+                           dedupe_max_changed_fraction for the comparison.
+                           Defaults to true.
     write_frames           Debug aid: save the sampled frames as PNGs under
                            frames/<file_hash>/ so you can inspect exactly what
                            is being inferred. Defaults to false.
@@ -803,6 +821,8 @@ class VideoConfig(StrictBaseModel):
     max_frames: int = Field(default=11, ge=1)
     max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
     include_edges: bool = True
+    include_edges_max_seconds: float = Field(default=0.0, ge=0.0)
+    detect_loops: bool = True
     write_frames: bool = False
     exclude_fades: bool = False
     dedupe: bool = True
