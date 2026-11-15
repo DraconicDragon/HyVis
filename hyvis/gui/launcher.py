@@ -14,20 +14,33 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def build_cli_command(config_path: Path | str, extra_args: list[str] | None = None) -> list[str]:
+def build_cli_command(
+    config_path: Path | str | None = None,
+    extra_args: list[str] | None = None,
+) -> list[str]:
     """Return the canonical command arguments list to execute HyVis."""
-    cmd = [sys.executable, "-m", "hyvis", str(config_path)]
+    cmd = [sys.executable, "-m", "hyvis"]
+    if config_path is not None:
+        cmd.append(str(config_path))
     if extra_args:
         cmd.extend(extra_args)
     return cmd
 
 
-def format_cli_command_str(config_path: Path | str, extra_args: list[str] | None = None) -> str:
+def format_cli_command_str(
+    config_path: Path | str | None = None,
+    extra_args: list[str] | None = None,
+) -> str:
     """Format the execution command as a shell-friendly copyable string."""
     # Use 'hyvis' alias if running from installed package, otherwise sys.executable
     executable = "hyvis" if shutil.which("hyvis") else f'"{sys.executable}" -m hyvis'
-    args_str = f" {' '.join(extra_args)}" if extra_args else ""
-    return f'{executable} "{config_path}"{args_str}'
+    parts = [executable]
+    if config_path is not None:
+        parts.append(f'"{config_path}"')
+    if extra_args:
+        for arg in extra_args:
+            parts.append(f'"{arg}"' if " " in arg else arg)
+    return " ".join(parts)
 
 
 def launch_in_external_terminal(
@@ -44,10 +57,10 @@ def launch_in_external_terminal(
     """
     if raw_command is not None:
         cmd_list = list(raw_command)
-    elif config_path is not None:
+    elif config_path is not None or extra_args:
         cmd_list = build_cli_command(config_path, extra_args)
     else:
-        raise ValueError("Either config_path or raw_command must be provided.")
+        raise ValueError("Either config_path, extra_args, or raw_command must be provided.")
 
     # 1. Windows: cmd.exe with 'start' and /k keeps the shell open after completion
     if sys.platform == "win32":

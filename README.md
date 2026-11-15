@@ -9,7 +9,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 
 > [!NOTE]
 > HyVis automatically converts underscores to spaces (preserving kaomojis) before pushing tags to Hydrus: `grea_(shingeki_no_bahamut)` becomes `grea (shingeki no bahamut)`.  
-> Non-configurable (open an issue if youw ish this to be configurable).
+> Non-configurable (open an issue if you wish this to be configurable).
 
 ## Table of Contents
 
@@ -195,10 +195,14 @@ Two things you may want to know about:
 
 ### HyVis CLI
 
-You can run the HyVis CLI utility through `hyvis` and by passing the path to your configured TOML file:
+You can run the HyVis CLI utility through `hyvis` by passing the path to your configured TOML file (or `--resume` to continue an unfinished run):
 
 ```bash
 hyvis path/to/config.toml
+
+# Resume an unfinished run 
+# resuming will read the config linked to the unfinished run from the database 
+hyvis --resume
 ```
 
 ### Configuration
@@ -211,7 +215,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 > [!TIP]
 > **Model Downloads & Local Storage:**  
-> HyVis attempts to automatically download required model files from HuggingFace to it's cache (look up the default HuggingFace cache directory for your OS if you need to know that).  
+> HyVis attempts to automatically download required model files from HuggingFace to its cache (look up the default HuggingFace cache directory for your OS if you need to know that).  
 > You can customize `source` for each model in two ways:
 >
 > - **Existing local directory**: Prefix the path with `local:` (e.g. `source = "local:/path/to/model"`) to use files already on disk without any HuggingFace network requests.
@@ -238,21 +242,33 @@ Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
 - `-y`, `--yes`
   Skip all interactive confirmation prompts.
 - `-f`, `--force`
-  Ignore the local database cache and re-process all matching files.
+  Ignore the local `inference_log` and `cache.db`; re-run GPU inference on all matching files.
+- `--resume`
+  Resume an unfinished inference run from `hyvis.db` using its saved config snapshot (`CONFIG_PATH` is optional).
+- `--discard-run`
+  Discard any unfinished run state in `hyvis.db` and start a fresh run.
+- `--db PATH`
+  Override the operational database (`hyvis.db`) path (also used when running `--resume` without `CONFIG_PATH`).
+- `--cache-db PATH`
+  Override the disposable prediction cache (`cache.db`) path.
 - `--infer-only`
-  Run model inference and save results to the database cache, but do not send any tags to Hydrus.
+  Run model inference and queue tags in `hyvis.db`, but do not send any tags to Hydrus.
+- `--dry-run`
+  Run model inference and tag filtering without saving to the database or pushing to Hydrus.
 - `--no-preview`
   Skip any [configured page previews](CONFIGURATION.md#hydruspreview).
 - `--push-only`
   Skip file queries and inference; immediately push any pending tags sitting in the local database queue to Hydrus.
 - `--clear-cache`
-  Clear the raw prediction cache from the database and run `VACUUM` to reclaim disk space.
+  Clear the raw prediction cache from `cache.db` and run `VACUUM` to reclaim disk space.
 - `--no-wait`
   Do not wait for Hydrus if it is offline/unreachable; fail fast instead.
+- `--log-level {DEBUG,INFO,WARNING,ERROR}`
+  Override the logging verbosity for the session log file (will override TOML log level setting).
 - `--api-url` / `--api-key`
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
 - <a id="extra-hash-file"></a>`--extra-hash-file PATH`
-  For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) Process a text file containing one SHA256 hash per line.
+  For compatibility with [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger). Process a text file containing one SHA256 hash per line.
 
 #### GUI (`hyvis-gui`) CLI Flags
 
