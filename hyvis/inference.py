@@ -22,6 +22,7 @@ import logging
 import queue
 import sys
 import threading
+import time
 from collections import deque
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -787,7 +788,7 @@ async def infer_files(
                     stats.total_tags_enqueued += len(prefixed_tags)
 
                     if idx % 25 == 0 or idx == len(plan.refilter_files) - 1:
-                        progress.set_last_file_info(fi.file_hash, model_cfg.model_id, len(prefixed_tags))
+                        progress.set_last_file_info(fi.file_hash, model_cfg.model_id, len(prefixed_tags), redraw=False)
                     progress.tick(processed=1)
 
                 except Exception as exc:
@@ -911,7 +912,7 @@ async def infer_files(
                 except Exception:
                     pass
 
-                runtime_str = f"PyTorch on {device_str} │ Weights: {weight_dt} │ Compute: {compute_dt}{autocast}"
+                runtime_str = f"PyTorch on {device_str} | Weights: {weight_dt} | Compute: {compute_dt}{autocast}"
 
             elif session.backend == vibe.Backend.ONNX:
                 providers = runtime.get("providers", [])
@@ -1009,7 +1010,9 @@ async def infer_files(
                         try:
                             raw_result = item.result
                             if not isinstance(raw_result, TagResult):
-                                raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
+                                raise TypeError(
+                                    f"Expected TagResult from tagger model, got {type(raw_result).__name__}"
+                                )
                             tag_count = _commit_inferred_result(fi, raw_result)
                             consecutive_errors = 0
                             stats.ok += 1
@@ -1027,15 +1030,18 @@ async def infer_files(
                                 return stats
 
                     if last_file_hash is not None:
-                        progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
+                        progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count, redraw=False)
                     if batch_processed or batch_errors:
                         progress.tick(processed=batch_processed, errors=batch_errors)
 
-            # Sub-pass B2: lazily stream frames, merge per-frame scores, then commit once per file.
+            # Sub-Pass B2: Videos & Animated Images (lazy frame streaming + max-score merge) ---
             if multiframe_files:
                 fc_mode = config.video.frame_cache_mode
                 is_dry = isinstance(db, DryRunDatabase)
-                use_disk_cache = not is_dry and (
+                # NOTE: In "auto" mode, len(models) > 1 enables disk caching even on a --resume run
+                # where only the final model remains (writes Q97 JPEGs and deletes them immediately
+                # after commit). Harmless and safe; keeping the check simple avoids guessing remaining passes.
+                use_disk_cache = (not is_dry) and (
                     fc_mode == "disk" or (fc_mode == "auto" and len(config.inference.models) > 1)
                 )
                 frame_cache = (
@@ -1045,6 +1051,7 @@ async def infer_files(
                 )
                 plan_cfg = config.video.to_plan_config()
                 prep_hash = plan.video_prep_hash
+
                 pending_refs: deque[tuple[str, int, int]] = deque()
                 decode_errors: queue.SimpleQueue[tuple[FileInfo, Exception]] = queue.SimpleQueue()
                 failed_decode_hashes: set[str] = set()
@@ -1060,19 +1067,25 @@ async def infer_files(
                                 fi.num_frames = probe.total_frames
                             f_plan = plan_frames(probe.duration_s, probe.total_frames, config=plan_cfg)
                             expected_n = f_plan.target_count
+
                             if frame_cache is not None and frame_cache.has_complete_frames(fi.file_hash, prep_hash):
                                 frame_iter = frame_cache.load_frames(fi.file_hash, prep_hash)
                             else:
-                                raw_iter = iter_extract_frames(fi.local_path, config=plan_cfg, probe=probe, plan=f_plan)
-                                frame_iter = (
-                                    frame_cache.save_and_yield_frames(fi.file_hash, prep_hash, raw_iter)
-                                    if frame_cache is not None
-                                    else raw_iter
+                                raw_iter = iter_extract_frames(
+                                    fi.local_path,
+                                    config=plan_cfg,
+                                    probe=probe,
+                                    plan=f_plan,
                                 )
+                                if frame_cache is not None:
+                                    frame_iter = frame_cache.save_and_yield_frames(fi.file_hash, prep_hash, raw_iter)
+                                else:
+                                    frame_iter = raw_iter
 
                             for frame in frame_iter:
                                 pending_refs.append((fi.file_hash, frame.index, expected_n))
                                 yield frame.image
+
                         except Exception as exc:
                             failed_decode_hashes.add(fi.file_hash)
                             decode_errors.put((fi, exc))
@@ -1083,18 +1096,24 @@ async def infer_files(
 
                 active_hash: str | None = None
                 active_agg: FrameMaxAggregator | None = None
+                active_expected = 0
+                total_frames_inferred = 0
+                multiframe_t0 = time.monotonic()
 
                 def _flush_active_video() -> None:
-                    nonlocal active_hash, active_agg, consecutive_errors
+                    nonlocal active_hash, active_agg, active_expected, consecutive_errors
                     if active_hash is None or active_agg is None:
                         return
                     fh = active_hash
                     agg = active_agg
                     active_hash = None
                     active_agg = None
+                    active_expected = 0
                     fi = file_info_map[fh]
+
                     if fh in failed_decode_hashes:
                         return
+
                     try:
                         merged = agg.finalize()
                         tag_count = _commit_inferred_result(fi, merged)
@@ -1103,25 +1122,34 @@ async def infer_files(
                             or last_active_model_for_file.get(fh) == model_cfg.model_id
                         ):
                             frame_cache.cleanup_file(fh)
+
                         consecutive_errors = 0
                         stats.ok += 1
                         stats.total_tags_enqueued += tag_count
-                        progress.set_sub_status("")
-                        progress.set_last_file_info(fh, model_cfg.model_id, tag_count)
+                        progress.set_sub_status("", redraw=False)
+                        progress.set_last_file_info(fh, model_cfg.model_id, tag_count, redraw=False)
                         progress.tick(processed=1)
                     except Exception as exc:
                         _handle_infer_error(exc=exc, file_hash=fh, fi=fi, db=db, stats=stats)
                         consecutive_errors += 1
-                        progress.set_sub_status("")
+                        progress.set_sub_status("", redraw=False)
                         progress.tick(errors=1)
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            raise RuntimeError(f"Aborted: {consecutive_errors} consecutive errors (last: {exc})") from exc
+                            raise RuntimeError(
+                                f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                            ) from exc
 
                 def _drain_decode_errors() -> None:
                     nonlocal consecutive_errors
                     while not decode_errors.empty():
                         bad_fi, exc = decode_errors.get_nowait()
-                        _handle_infer_error(exc=exc, file_hash=bad_fi.file_hash, fi=bad_fi, db=db, stats=stats)
+                        _handle_infer_error(
+                            exc=exc,
+                            file_hash=bad_fi.file_hash,
+                            fi=bad_fi,
+                            db=db,
+                            stats=stats,
+                        )
                         if frame_cache is not None:
                             frame_cache.cleanup_file(bad_fi.file_hash)
                         consecutive_errors += 1
@@ -1136,28 +1164,43 @@ async def infer_files(
                         batch_size=model_cfg.batch_size,
                     ):
                         _drain_decode_errors()
+
                         for item in chunk:
                             file_hash, _frame_idx, expected_n = item.input_ref
                             if active_hash is not None and file_hash != active_hash:
                                 _flush_active_video()
+
                             if file_hash in failed_decode_hashes:
                                 continue
+
                             if active_hash is None:
                                 active_hash = file_hash
                                 active_agg = FrameMaxAggregator()
+                                active_expected = expected_n
+
                             raw_result = item.result
                             if not isinstance(raw_result, TagResult):
                                 failed_decode_hashes.add(file_hash)
-                                decode_errors.put((
-                                    file_info_map[file_hash],
-                                    TypeError(f"Expected TagResult, got {type(raw_result).__name__}"),
-                                ))
+                                decode_errors.put(
+                                    (
+                                        file_info_map[file_hash],
+                                        TypeError(f"Expected TagResult, got {type(raw_result).__name__}"),
+                                    )
+                                )
                                 continue
+
                             assert active_agg is not None
                             active_agg.update(raw_result)
+                            total_frames_inferred += 1
+
+                        if active_hash is not None and active_agg is not None:
+                            fr_elapsed = max(time.monotonic() - multiframe_t0, 0.1)
+                            fr_rate = total_frames_inferred / fr_elapsed
                             progress.set_sub_status(
-                                f"Video {file_hash[:8]} ({active_agg.frame_count}/{expected_n})"
+                                f"Video {active_hash[:8]} ({active_agg.frame_count}/{active_expected}) "
+                                f"│ Frames: {total_frames_inferred} ({fr_rate:.1f} fr/s)"
                             )
+
                     _flush_active_video()
                     _drain_decode_errors()
                 except RuntimeError as abort_exc:
@@ -1167,7 +1210,7 @@ async def infer_files(
                         return stats
                     raise
                 finally:
-                    progress.set_sub_status("")
+                    progress.set_sub_status("", redraw=False)
 
             db.commit()
             cache_db.commit()
