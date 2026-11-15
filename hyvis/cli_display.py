@@ -264,8 +264,9 @@ def print_confirmation(
             cpu_n = len(plan.refilter_files)
             skip_n = len(plan.skip_hashes)
             print(
-                f"       work plan        {_c(f'{gpu_n} GPU', YELLOW if gpu_n else DIM)}  │  "
-                f"{_c(f'{cpu_n} CPU re-filter', CYAN if cpu_n else DIM)}  │  "
+                # todo: change string, this print assumes GPU when inference can be on other devices too
+                f"       work plan        {_c(f'{gpu_n} GPU', YELLOW if gpu_n else DIM)}  |  "
+                f"{_c(f'{cpu_n} CPU re-filter', CYAN if cpu_n else DIM)}  |  "
                 f"{_c(f'{skip_n} skipped', DIM)}"
             )
         # Only show output services if explicitly configured per-model

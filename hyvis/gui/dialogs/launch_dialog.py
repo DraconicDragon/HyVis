@@ -275,7 +275,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
 
             ar_details = QLabel(
                 f"<b>Database:</b> {self.cfg.database.path}<br>"
-                f"<b>Started:</b> {run_info.started_at} &nbsp;│&nbsp; <b>Config:</b> {orig_cfg_str}<br>"
+                f"<b>Started:</b> {run_info.started_at} &nbsp;|&nbsp; <b>Config:</b> {orig_cfg_str}<br>"
                 f"<b>Inference:</b> {done_n} queued, <b>{pending_n} remaining</b>, {rej_n} rejected<br>"
                 f"<span style='color: {self.tokens.text_secondary};'>"
                 "If HyVis is currently running in another terminal, wait for it to finish before launching here."
