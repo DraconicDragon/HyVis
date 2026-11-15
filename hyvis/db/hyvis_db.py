@@ -51,7 +51,7 @@ PushAction = Literal["add_tags", "delete_tags"]
 
 @dataclass(frozen=True)
 class ActiveRunInfo:
-    """Snapshot metadata for an active or interrupted inference run."""
+    """Snapshot metadata for an active or unfinished inference run."""
 
     config_toml: str
     config_path: str | None
@@ -77,7 +77,7 @@ def hash_api_key(api_key: str) -> str:
 
 @dataclass(frozen=True)
 class ActiveRunInspection:
-    """Read-only snapshot of an active/interrupted run and its locked target hashes."""
+    """Read-only snapshot of an active/unfinished run and its locked target hashes."""
 
     run: ActiveRunInfo
     pending_hashes: list[str]
@@ -378,7 +378,7 @@ class Database:
     # region Active Run Scratchpad & Staging
 
     def get_active_run(self) -> ActiveRunInfo | None:
-        """Return the active/interrupted run metadata if one exists, else None."""
+        """Return the active/unfinished run metadata if one exists, else None."""
         row = self.conn.execute(
             "SELECT config_toml, config_path, mode, force_mode, hyvis_version, started_at FROM active_run WHERE id = 1"
         ).fetchone()

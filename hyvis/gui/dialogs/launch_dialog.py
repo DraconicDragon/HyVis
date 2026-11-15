@@ -1,6 +1,6 @@
 """
 launch_dialog.py — Preflight verification and launch dialog.
-Checks for interrupted runs, Hydrus connectivity, candidate & rejected counts,
+Checks for unfinished runs, Hydrus connectivity, candidate & rejected counts,
 and dual preview pages before spawning terminal.
 """
 
@@ -961,7 +961,6 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         # Confirm before clearing an unfinished run
         if self._active_run is not None and self._active_run_action() == "discard":
             pending_n = len(self._active_run.pending_hashes)
-            done_n = self._active_run.done_count
             ans = QMessageBox.warning(
                 self,
                 "Confirm Discard Unfinished Run",

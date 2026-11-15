@@ -123,7 +123,7 @@ def print_confirmation(
     }.get(mode, mode)
 
     if is_resume:
-        mode_label = f"{mode_label}  [RESUMING INTERRUPTED RUN]"
+        mode_label = f"{mode_label}  [RESUMING UNFINISHED RUN]"
 
     print()
     print(_c("  ═══ HyVis | Operation Confirmation ════════════════════════════════", BOLD, CYAN))

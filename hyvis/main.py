@@ -223,7 +223,7 @@ async def main() -> int:
             active = db.get_active_run()
 
         if active is None:
-            print(_c(f"No interrupted run found in {db_path}. Nothing to resume.", YELLOW))
+            print(_c(f"No unfinished run found in {db_path}. Nothing to resume.", YELLOW))
             return 0
 
         cfg = AppConfig.from_toml_string(active.config_toml)
@@ -247,11 +247,11 @@ async def main() -> int:
                     pending_n = len(db.get_run_targets(RunTargetState.PENDING))
                     if args.discard_run:
                         db.clear_active_run()
-                        print(_c(f"  Discarded previous interrupted run ({pending_n} pending file(s)).\n", YELLOW))
+                        print(_c(f"  Discarded previous unfinished run ({pending_n} pending file(s)).\n", YELLOW))
                     elif args.yes:
                         print(
                             _c(
-                                f"ERROR: An interrupted run from {active.started_at} ({pending_n} pending file(s)) "
+                                f"ERROR: An unfinished run from {active.started_at} ({pending_n} pending file(s)) "
                                 f"exists in {db_path}.",
                                 RED,
                             ),
@@ -265,7 +265,7 @@ async def main() -> int:
                     else:
                         print(
                             _c(
-                                f"  Found interrupted run from {active.started_at} ({pending_n} pending file(s)).",
+                                f"  Found unfinished run from {active.started_at} ({pending_n} pending file(s)).",
                                 YELLOW,
                             )
                         )

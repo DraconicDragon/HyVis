@@ -146,7 +146,7 @@ class DryRunDatabase(Database):
         self._dry_run_staged.setdefault(file_hash, {})[model_id] = clean
 
     def get_active_run(self) -> None:
-        """Dry-run mode ignores any active/interrupted run on disk."""
+        """Dry-run mode ignores any active/unfinished run on disk."""
         return
 
     def get_staged_hashes_for_model(self, model_id: str) -> set[str]:

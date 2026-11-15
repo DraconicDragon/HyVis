@@ -57,12 +57,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume an interrupted inference run using the saved snapshot in hyvis.db.",
+        help="Resume an unfinished inference run using the saved snapshot in hyvis.db.",
     )
     parser.add_argument(
         "--discard-run",
         action="store_true",
-        help="Discard any interrupted active run in hyvis.db and start fresh.",
+        help="Discard any unfinished active run in hyvis.db and start fresh.",
     )
     parser.add_argument(
         "--db",
@@ -124,7 +124,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.resume and args.discard_run:
         parser.error("--resume and --discard-run cannot be used together.")
     if args.resume and args.force:
-        parser.error("--resume cannot be combined with --force (uses the interrupted run's original force setting).")
+        parser.error("--resume cannot be combined with --force (uses the unfinished run's original force setting).")
     if args.resume and args.dry_run:
         parser.error("--resume cannot be combined with --dry-run.")
     if args.resume and args.extra_hash_file is not None:
