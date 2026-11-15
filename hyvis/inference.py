@@ -15,6 +15,7 @@ dropped in without touching the inference loop.  See FileSource below.
 
 from __future__ import annotations
 
+import gc
 import logging
 import sys
 import threading
@@ -392,22 +393,46 @@ class PhaseStats:
 # region Frame merging
 
 
+#: Substrings that identify an allocation failure in runtime exception text.
+_MEMORY_ERROR_MARKERS = (
+    "out of memory",
+    "outofmemoryerror",
+    "out of host memory",
+    "outofhostmemoryerror",
+    "failed to allocate memory",
+    "cannot allocate memory",
+    "not enough memory",
+    "insufficient memory",
+    "memory allocation",
+    "std::bad_alloc",
+    "bad_alloc",
+    "cublas_status_alloc_failed",
+    "cudnn_status_alloc_failed",
+)
+
+
 def _is_memory_error(exc: BaseException) -> bool:
     """Return True when an exception looks like an out-of-memory condition."""
     if isinstance(exc, MemoryError):
         return True
+    if type(exc).__name__ in {"OutOfMemoryError", "CUDAOutOfMemoryError"}:
+        return True
     message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in (
-            "failed to allocate memory",
-            "out of memory",
-            "cuda error",
-            "not enough memory",
-            "std::bad_alloc",
-            "cannot allocate",
-        )
-    )
+    return any(marker in message for marker in _MEMORY_ERROR_MARKERS)
+
+
+def _release_memory() -> None:
+    """Drop collectable objects and return cached GPU memory to the driver."""
+    gc.collect()
+    try:
+        import torch
+    except Exception:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 def merge_frame_results(frame_results: list[dict[str, dict[str, float]]]) -> dict[str, dict[str, float]]:
@@ -680,13 +705,21 @@ async def infer_files(
 
             # region Image inference (with OOM batch-size retry)
 
-            if inputs:
-                stream_batch = model_cfg.batch_size
-                stream_processed = 0
+            # One batch size for the whole model pass. When a batch does not fit
+            # in memory it is halved and the smaller size is kept, so the run
+            # learns its ceiling once instead of failing again on every file.
+            batch_size = model_cfg.batch_size
 
-                while True:
+            if inputs:
+                pending = list(inputs)
+
+                while pending:
+                    batch_hashes = pending[:batch_size]
+                    batch_inputs = {file_hash: inputs[file_hash] for file_hash in batch_hashes}
+                    persisted: set[str] = set()
+
                     try:
-                        async for chunk in session.infer_async(inputs, batch_size=stream_batch):
+                        async for chunk in session.infer_async(batch_inputs, batch_size=len(batch_hashes)):
                             batch_processed = 0
                             batch_errors = 0
                             last_file_hash = None
@@ -695,6 +728,7 @@ async def infer_files(
                             for item in chunk:
                                 file_hash = str(item.input_ref)
                                 fi = file_info_map[file_hash]
+                                persisted.add(file_hash)
 
                                 try:
                                     raw_result = item.result
@@ -704,7 +738,6 @@ async def infer_files(
                                         )
                                     last_tag_count = _persist_result(file_hash, fi, raw_result)
                                     consecutive_errors = 0  # Reset on success
-                                    stream_processed += 1
                                     batch_processed += 1
                                     last_file_hash = file_hash
                                 except Exception as exc:
@@ -729,21 +762,45 @@ async def infer_files(
                                 progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
                             if batch_processed or batch_errors:
                                 progress.tick(processed=batch_processed, errors=batch_errors)
-                        break
                     except Exception as exc:
-                        # Retry the whole stream at a smaller batch size when the
-                        # model could not fit the first batch into memory. A
-                        # failure mid-stream stays fatal: files processed so far
-                        # may already be persisted, so restarting would redo work.
-                        if not (_is_memory_error(exc) and stream_batch > 1 and stream_processed == 0):
+                        # A batch that does not fit is retried at half the size.
+                        # Only files that were not persisted are re-sent, so a
+                        # failure halfway through a batch never redoes work.
+                        if not _is_memory_error(exc):
                             raise
+                        if len(batch_hashes) == 1:
+                            # Nothing left to shrink: count this file as an error
+                            # and keep going instead of killing the whole run.
+                            _handle_infer_error(
+                                exc=exc,
+                                file_hash=batch_hashes[0],
+                                fi=file_info_map[batch_hashes[0]],
+                                db=db,
+                                stats=stats,
+                            )
+                            consecutive_errors += 1
+                            progress.tick(errors=1)
+                            pending = pending[1:]
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                stats.aborted_early = True
+                                stats.abort_reason = (
+                                    f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                )
+                                return stats
+                            continue
+                        retry_hashes = [file_hash for file_hash in batch_hashes if file_hash not in persisted]
+                        pending = retry_hashes + pending[len(batch_hashes):]
+                        batch_size = max(1, len(batch_hashes) // 2)
+                        _release_memory()
                         logger.warning(
                             "Model %s: out of memory at batch size %d, retrying with %d",
                             model_cfg.model_id,
-                            stream_batch,
-                            max(1, stream_batch // 2),
+                            len(batch_hashes),
+                            batch_size,
                         )
-                        stream_batch = max(1, stream_batch // 2)
+                        continue
+
+                    pending = pending[len(batch_hashes):]
 
             # endregion
 
@@ -802,10 +859,12 @@ async def infer_files(
                         )
 
                         # infer_async expects a list: a bare tuple is parsed as one
-                        # (image, ref) pair.
+                        # (image, ref) pair. The frame batch shares the model batch
+                        # size, so a ceiling learned on images applies here too.
                         frame_inputs = list(frames)
                         frame_scores: list[dict[str, dict[str, float]]] = []
-                        frame_batch = model_cfg.batch_size
+                        frame_batch = min(batch_size, len(frame_inputs))
+                        out_of_memory = False
 
                         while True:
                             try:
@@ -816,20 +875,40 @@ async def infer_files(
                             except InferenceCancelled:
                                 raise
                             except Exception as exc:
-                                if not _is_memory_error(exc) or frame_batch <= 1:
+                                if not _is_memory_error(exc):
                                     raise
+                                if frame_batch <= 1:
+                                    # A single frame does not fit: skip this file
+                                    # so a cluster of huge animations cannot trip
+                                    # the consecutive-error abort.
+                                    logger.warning(
+                                        "Skipping animation %s: out of memory at batch size 1", file_hash
+                                    )
+                                    out_of_memory = True
+                                    break
+                                failed_batch = frame_batch
+                                frame_batch = max(1, frame_batch // 2)
+                                frame_scores = []
+                                _release_memory()
                                 logger.warning(
                                     "Model %s: out of memory on %s at batch size %d, retrying with %d",
                                     model_cfg.model_id,
                                     file_hash[:8],
+                                    failed_batch,
                                     frame_batch,
-                                    max(1, frame_batch // 2),
                                 )
-                                frame_batch = max(1, frame_batch // 2)
-                                frame_scores = []
+
+                        if out_of_memory:
+                            batch_size = frame_batch
+                            stats.skipped += 1
+                            consecutive_errors = 0
+                            progress.tick(skipped=1)
+                            continue
 
                         if not frame_scores:
                             raise RuntimeError("All sampled frames failed inference")
+
+                        batch_size = frame_batch
 
                         merged_scores = merge_frame_results(frame_scores)
                         raw_result = tagger_result_from_category_scores(merged_scores)
