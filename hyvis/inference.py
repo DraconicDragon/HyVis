@@ -15,14 +15,16 @@ dropped in without touching the inference loop.  See FileSource below.
 
 from __future__ import annotations
 
+import gc
 import logging
 import sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 import vibe
-from vibe import InferenceCancelled, TagResult
+from vibe import InferenceCancelled, TagEntry, TagResult
 from vibe_result_transforms import (
     CleanTags,
     TagLevelThresholds,
@@ -389,7 +391,175 @@ class PhaseStats:
 # endregion
 
 
+# region Frame merging
+
+
+#: Substrings that identify an allocation failure in runtime exception text.
+_MEMORY_ERROR_MARKERS = (
+    "out of memory",
+    "outofmemoryerror",
+    "out of host memory",
+    "outofhostmemoryerror",
+    "failed to allocate memory",
+    "cannot allocate memory",
+    "not enough memory",
+    "insufficient memory",
+    "memory allocation",
+    "std::bad_alloc",
+    "bad_alloc",
+    "cublas_status_alloc_failed",
+    "cudnn_status_alloc_failed",
+)
+
+
+def _is_memory_error(exc: BaseException) -> bool:
+    """Return True when an exception looks like an out-of-memory condition."""
+    if isinstance(exc, MemoryError):
+        return True
+    if type(exc).__name__ in {"OutOfMemoryError", "CUDAOutOfMemoryError"}:
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in _MEMORY_ERROR_MARKERS)
+
+
+def _release_memory() -> None:
+    """Drop collectable objects and return cached GPU memory to the driver."""
+    gc.collect()
+    try:
+        import torch
+    except Exception:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _current_rss_mb() -> float:
+    """Return this process' resident set size in MiB, or 0.0 when unavailable."""
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+    except OSError:
+        return 0.0
+    for line in status.splitlines():
+        if line.startswith("VmRSS:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                return int(parts[1]) / 1024.0
+    return 0.0
+
+
+class _SessionBudget:
+    """Track how much work one model session has done before it is recycled."""
+
+    __slots__ = ("_max_files", "_max_growth_mb", "_baseline_mb", "_files")
+
+    def __init__(self, *, max_files: int, max_growth_mb: int) -> None:
+        self._max_files = max_files
+        self._max_growth_mb = max_growth_mb
+        self._baseline_mb = _current_rss_mb()
+        self._files = 0
+
+    def add(self, count: int) -> None:
+        """Record `count` more processed files."""
+        self._files += max(0, count)
+
+    def spent(self) -> bool:
+        """Return True when the session should be closed and reloaded."""
+        if self._max_files and self._files >= self._max_files:
+            return True
+        if self._max_growth_mb:
+            growth = _current_rss_mb() - self._baseline_mb
+            return growth >= self._max_growth_mb
+        return False
+
+    @property
+    def files(self) -> int:
+        """Number of files processed by this session so far."""
+        return self._files
+
+
+def merge_frame_results(frame_results: list[dict[str, dict[str, float]]]) -> dict[str, dict[str, float]]:
+    """
+    Merge per-frame {category: {tag: score}} results into one per-file result.
+
+    Tags are unioned across frames and keep the highest score they reached in
+    any single frame, so a tag only has to be confident in one sampled frame.
+    """
+    merged: dict[str, dict[str, float]] = {}
+    for frame_result in frame_results:
+        for category, tag_scores in frame_result.items():
+            if not isinstance(tag_scores, dict):
+                continue
+            merged_category = merged.setdefault(str(category), {})
+            for tag, score in tag_scores.items():
+                try:
+                    score_value = float(score)
+                except (TypeError, ValueError):
+                    continue
+                if score_value > merged_category.get(tag, 0.0):
+                    merged_category[tag] = score_value
+    return merged
+
+
+def tagger_result_from_category_scores(category_scores: dict[str, dict[str, float]]) -> TagResult:
+    """
+    Rebuild a vibe TagResult from a {category: {tag: score}} mapping.
+
+    Video inference produces plain score mappings; wrapping them in a TagResult
+    lets them run through the same transform pipeline and tag extraction as
+    single-image results.
+    """
+    return TagResult(
+        categories={
+            category: [TagEntry(tag, score) for tag, score in tag_scores.items()]
+            for category, tag_scores in category_scores.items()
+        }
+    )
+
+
+# endregion
+
+
 # region Inference
+
+
+def _log_session_runtime(session: Any, model_cfg: ModelConfig) -> None:
+    """Print and log the execution backend/precision line for a loaded model."""
+    exec_info = session.execution_info()
+    runtime = exec_info.get("runtime", {})
+
+    if session.backend == vibe.Backend.PYTORCH:
+        prec = runtime.get("precision", {})
+        weight_dt = prec.get("weight_dtype", "unknown")
+        compute_dt = prec.get("compute_dtype", "unknown")
+        autocast = " (autocast)" if prec.get("autocast_enabled") else ""
+
+        # Device formatting: e.g. cuda:0 (NVIDIA GeForce RTX 3060)
+        device_str = str(runtime.get("device", "unknown"))
+        try:
+            import torch
+
+            if device_str.startswith("cuda") and torch.cuda.is_available():
+                idx = int(device_str.split(":")[1]) if ":" in device_str else torch.cuda.current_device()
+                device_str = f"cuda:{idx} ({torch.cuda.get_device_name(idx)})"
+        except Exception:
+            pass
+
+        runtime_str = f"PyTorch on {device_str} │ Weights: {weight_dt} │ Compute: {compute_dt}{autocast}"
+
+    elif session.backend == vibe.Backend.ONNX:
+        providers = runtime.get("providers", [])
+        active_ep = providers[0] if providers else "unknown"
+        runtime_str = f"ONNX on {active_ep}"
+
+    else:
+        runtime_str = f"{session.backend}"
+
+    print(f"    Runtime: {_c(runtime_str, GREEN)}")
+    print()
+    logger.info("Model '%s' initialized | %s", model_cfg.model_id, runtime_str)
 
 
 async def infer_files(
@@ -460,8 +630,21 @@ async def infer_files(
     output_services = config.resolved_output_tag_services(model_cfg)
     configured_model_ids = [m.model_id for m in config.inference.models]
 
-    # Build inputs as (path, file_hash) tuples for inference backend.
-    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in valid_process}
+    from hyvis.config import is_animated_mime, is_video_mime
+    from hyvis.video import dump_frames, extract_frames, extract_gif_frames
+
+    # Images go through the batch inference stream; videos and animated GIFs
+    # are sampled frame by frame in a separate phase below. Animated images
+    # only take that path while [video] frame sampling is enabled.
+    video_cfg = config.video
+    sequence_files = [
+        fi
+        for fi in valid_process
+        if is_video_mime(fi.mime) or (video_cfg.enabled and is_animated_mime(fi.mime))
+    ]
+    sequence_hashes = {fi.file_hash for fi in sequence_files}
+    image_files = [fi for fi in valid_process if fi.file_hash not in sequence_hashes]
+    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in image_files}
 
     load_kwargs: dict[str, Any] = {
         "source": model_cfg.source,
@@ -477,79 +660,48 @@ async def infer_files(
     listener = None
     stop_cancel = threading.Event()
 
+    # Work that is still pending. Both lists survive a session reload, and
+    # entries are dropped as soon as their result is persisted, so a reload
+    # continues where the previous session stopped.
+    pending_images = list(inputs)
+    pending_sequences = list(sequence_files)
+    batch_size = model_cfg.batch_size
+
     try:
-        with vibe.load(model_cfg.model_id, **load_kwargs) as session:
-            exec_info = session.execution_info()
-            runtime = exec_info.get("runtime", {})
+        first_session = True
+        while (pending_images or pending_sequences) and not stats.aborted_early:
+            with vibe.load(model_cfg.model_id, **load_kwargs) as session:
+                if first_session:
+                    _log_session_runtime(session, model_cfg)
+                    progress.reset_start_time()
+                    first_session = False
 
-            if session.backend == vibe.Backend.PYTORCH:
-                prec = runtime.get("precision", {})
-                weight_dt = prec.get("weight_dtype", "unknown")
-                compute_dt = prec.get("compute_dtype", "unknown")
-                autocast = " (autocast)" if prec.get("autocast_enabled") else ""
+                pipeline = build_transform_pipeline(session, eff_filter)
 
-                # Device formatting: e.g. cuda:0 (NVIDIA GeForce RTX 3060)
-                device_str = str(runtime.get("device", "unknown"))
+                # Pre-calculate once per model so the inner loop does zero allocations:
+                compiled_filter = compile_output_filter(eff_filter)
+                total_model_tags = len(session.tagger.catalog.labels) if session.tagger.catalog else 0
+                cache_raw_enabled = config.database.cache_raw_predictions
+                min_cache_score = config.database.min_cache_score
+                budget = _SessionBudget(
+                    max_files=config.inference.session_recycle_files,
+                    max_growth_mb=config.inference.session_recycle_rss_growth_mb,
+                )
+                recycle = False
+
+                listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
+
                 try:
-                    import torch
+                    # region Persist one file result
 
-                    if device_str.startswith("cuda") and torch.cuda.is_available():
-                        idx = int(device_str.split(":")[1]) if ":" in device_str else torch.cuda.current_device()
-                        device_str = f"cuda:{idx} ({torch.cuda.get_device_name(idx)})"
-                except Exception:
-                    pass
+                    def _persist_result(file_hash: str, fi: FileInfo, raw_result: TagResult) -> int:
+                        """
+                        Persist one file result and enqueue its tags.
 
-                runtime_str = f"PyTorch on {device_str} │ Weights: {weight_dt} │ Compute: {compute_dt}{autocast}"
-
-            elif session.backend == vibe.Backend.ONNX:
-                providers = runtime.get("providers", [])
-                active_ep = providers[0] if providers else "unknown"
-
-                # If running on CUDA EP, optionally show the GPU name
-                # ep_extra = ""
-                # if "cuda" in active_ep.lower():
-                #     try:
-                #         import torch
-                #         if torch.cuda.is_available():
-                #             ep_extra = f" ({torch.cuda.get_device_name()})"
-                #     except Exception:
-                #         pass
-
-                runtime_str = f"ONNX on {active_ep}"
-
-            else:
-                runtime_str = f"{session.backend}"
-
-            print(f"    Runtime: {_c(runtime_str, GREEN)}")
-            print()
-            logger.info("Model '%s' initialized | %s", model_cfg.model_id, runtime_str)
-
-            progress.reset_start_time()
-            pipeline = build_transform_pipeline(session, eff_filter)
-
-            # Pre-calculate once per model so the inner loop does zero allocations:
-            compiled_filter = compile_output_filter(eff_filter)
-            total_model_tags = len(session.tagger.catalog.labels) if session.tagger.catalog else 0
-            cache_raw_enabled = config.database.cache_raw_predictions
-            min_cache_score = config.database.min_cache_score
-
-            listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
-
-            async for chunk in session.infer_async(inputs, batch_size=model_cfg.batch_size):
-                batch_processed = 0
-                batch_errors = 0
-                last_file_hash = None
-                last_tag_count = 0
-
-                for item in chunk:
-                    file_hash: str = str(item.input_ref)
-                    fi = file_info_map[file_hash]
-
-                    try:
-                        raw_result = item.result
-                        if not isinstance(raw_result, TagResult):
-                            raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
-
+                        Returns the number of tags enqueued. Shared by the image and
+                        video phases so both go through the same raw cache, transform
+                        pipeline, and tag extraction.
+                        """
                         # 1. Upsert known_file FIRST to satisfy foreign key constraint!
                         db.upsert_file(file_hash, file_path=fi.local_path, mime=fi.mime, status="active")
 
@@ -574,7 +726,7 @@ async def infer_files(
                         tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                         prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
-                        # 5. Track zero-tag files or enqueue tags into push_queue for each configured service (merges tags automatically)
+                        # 5. Track zero-tag files or enqueue tags into push_queue for each configured service
                         if not prefixed_tags:
                             stats.zero_tags += 1
                         else:
@@ -601,36 +753,279 @@ async def infer_files(
                         # Periodic commit to prevent disk sync thrashing
                         db.batch_tick(batch_size=50)
 
-                        consecutive_errors = 0
                         stats.ok += 1
                         stats.total_tags_cached += total_model_tags
                         stats.total_tags_enqueued += len(prefixed_tags)
-                        batch_processed += 1
-                        last_file_hash = file_hash
-                        last_tag_count = len(prefixed_tags)
+                        return len(prefixed_tags)
 
-                    except Exception as exc:
-                        _handle_infer_error(
-                            exc=exc,
-                            file_hash=file_hash,
-                            fi=fi,
-                            db=db,
-                            stats=stats,
-                        )
-                        consecutive_errors += 1
-                        batch_errors += 1
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            stats.aborted_early = True
-                            stats.abort_reason = f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
-                            return stats
-                        continue
+                    # endregion
 
-                if last_file_hash is not None:
-                    progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
-                if batch_processed or batch_errors:
-                    progress.tick(processed=batch_processed, errors=batch_errors)
+                    # region Image inference (with OOM batch-size retry)
 
-            # Flush any uncommitted transactions from this run
+                    if pending_images:
+                        while pending_images and not recycle and not stats.aborted_early:
+                            batch_hashes = pending_images[:batch_size]
+                            batch_inputs = {file_hash: inputs[file_hash] for file_hash in batch_hashes}
+                            persisted: set[str] = set()
+                            batch_processed = 0
+                            batch_errors = 0
+                            last_file_hash = None
+                            last_tag_count = 0
+
+                            try:
+                                async for chunk in session.infer_async(batch_inputs, batch_size=len(batch_hashes)):
+                                    for item in chunk:
+                                        file_hash = str(item.input_ref)
+                                        fi = file_info_map[file_hash]
+                                        persisted.add(file_hash)
+
+                                        try:
+                                            raw_result = item.result
+                                            if not isinstance(raw_result, TagResult):
+                                                raise TypeError(
+                                                    f"Expected TagResult from vibe, got {type(raw_result).__name__}"
+                                                )
+                                            last_tag_count = _persist_result(file_hash, fi, raw_result)
+                                            consecutive_errors = 0  # Reset on success
+                                            batch_processed += 1
+                                            last_file_hash = file_hash
+                                        except Exception as exc:
+                                            _handle_infer_error(
+                                                exc=exc,
+                                                file_hash=file_hash,
+                                                fi=fi,
+                                                db=db,
+                                                stats=stats,
+                                            )
+                                            consecutive_errors += 1
+                                            batch_errors += 1
+                                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                                stats.aborted_early = True
+                                                stats.abort_reason = (
+                                                    f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                                )
+                                                break
+                                            continue
+
+                                    if last_file_hash is not None:
+                                        progress.set_last_file_info(
+                                            last_file_hash, model_cfg.model_id, last_tag_count
+                                        )
+                                    if batch_processed or batch_errors:
+                                        progress.tick(processed=batch_processed, errors=batch_errors)
+                                    if stats.aborted_early:
+                                        break
+                            except Exception as exc:
+                                # A batch that does not fit is retried at half the size.
+                                # Only files that were not persisted are re-sent, so a
+                                # failure halfway through a batch never redoes work.
+                                if not _is_memory_error(exc):
+                                    raise
+                                if len(batch_hashes) == 1:
+                                    # Nothing left to shrink: count this file as an error
+                                    # and keep going instead of killing the whole run.
+                                    _handle_infer_error(
+                                        exc=exc,
+                                        file_hash=batch_hashes[0],
+                                        fi=file_info_map[batch_hashes[0]],
+                                        db=db,
+                                        stats=stats,
+                                    )
+                                    consecutive_errors += 1
+                                    progress.tick(errors=1)
+                                    pending_images = pending_images[1:]
+                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                        stats.aborted_early = True
+                                        stats.abort_reason = (
+                                            f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                        )
+                                        break
+                                    continue
+                                retry_hashes = [
+                                    file_hash for file_hash in batch_hashes if file_hash not in persisted
+                                ]
+                                pending_images = retry_hashes + pending_images[len(batch_hashes):]
+                                batch_size = max(1, len(batch_hashes) // 2)
+                                _release_memory()
+                                logger.warning(
+                                    "Model %s: out of memory at batch size %d, retrying with %d",
+                                    model_cfg.model_id,
+                                    len(batch_hashes),
+                                    batch_size,
+                                )
+                                continue
+
+                            if stats.aborted_early:
+                                break
+                            pending_images = pending_images[len(batch_hashes):]
+                            budget.add(batch_processed + batch_errors)
+                            if budget.spent():
+                                recycle = True
+
+                    # endregion
+
+                    # region Video / animation inference (sample frames, infer, merge)
+
+                    if pending_sequences and not stats.aborted_early:
+
+                        async def _process_sequence(fi: FileInfo) -> bool:
+                            """Infer one animation file. Returns False when the run should stop."""
+                            nonlocal batch_size, consecutive_errors
+
+                            file_hash = fi.file_hash
+                            try:
+                                extractor = extract_frames if is_video_mime(fi.mime) else extract_gif_frames
+                                frames = extractor(
+                                    fi.local_path,
+                                    max_frames=video_cfg.max_frames,
+                                    max_frames_at_seconds=video_cfg.max_frames_at_seconds,
+                                    probe_multiplier=video_cfg.probe_multiplier,
+                                    max_probes=video_cfg.max_probes,
+                                    include_edges=video_cfg.include_edges,
+                                    loop=video_cfg.loop,
+                                    fades=video_cfg.fades if video_cfg.fades.enabled else None,
+                                    low_interest=video_cfg.low_interest,
+                                    dedupe=video_cfg.dedupe,
+                                )
+                                if not frames:
+                                    # Nothing decodable (e.g. an AV1 file this OpenCV build
+                                    # cannot read, or a fully black clip). Skip it instead of
+                                    # counting a hard error so a cluster of such files cannot
+                                    # trip the consecutive-error abort.
+                                    logger.warning(
+                                        "Skipping animation %s: no usable frames could be sampled",
+                                        file_hash,
+                                    )
+                                    stats.skipped += 1
+                                    consecutive_errors = 0
+                                    progress.tick(skipped=1)
+                                    return True
+
+                                if video_cfg.write_frames:
+                                    out_dir = dump_frames(frames, file_hash=file_hash)
+                                    logger.info("Wrote %d debug frame(s) to %s", len(frames), out_dir)
+
+                                logger.info(
+                                    "Model %s: %s sampled %d frame(s)",
+                                    model_cfg.model_id,
+                                    file_hash[:8],
+                                    len(frames),
+                                )
+
+                                # infer_async expects a list: a bare tuple is parsed as one
+                                # (image, ref) pair. The frame batch shares the model batch
+                                # size, so a ceiling learned on images applies here too.
+                                frame_inputs = list(frames)
+                                frame_scores: list[dict[str, dict[str, float]]] = []
+                                frame_batch = min(batch_size, len(frame_inputs))
+                                out_of_memory = False
+
+                                while True:
+                                    try:
+                                        async for chunk in session.infer_async(
+                                            frame_inputs, batch_size=frame_batch
+                                        ):
+                                            for item in chunk:
+                                                frame_scores.append(item.result.as_category_score_dict())
+                                        break
+                                    except InferenceCancelled:
+                                        raise
+                                    except Exception as exc:
+                                        if not _is_memory_error(exc):
+                                            raise
+                                        if frame_batch <= 1:
+                                            # A single frame does not fit: skip this file
+                                            # so a cluster of huge animations cannot trip
+                                            # the consecutive-error abort.
+                                            logger.warning(
+                                                "Skipping animation %s: out of memory at batch size 1",
+                                                file_hash,
+                                            )
+                                            out_of_memory = True
+                                            break
+                                        failed_batch = frame_batch
+                                        frame_batch = max(1, frame_batch // 2)
+                                        frame_scores = []
+                                        _release_memory()
+                                        logger.warning(
+                                            "Model %s: out of memory on %s at batch size %d, retrying with %d",
+                                            model_cfg.model_id,
+                                            file_hash[:8],
+                                            failed_batch,
+                                            frame_batch,
+                                        )
+
+                                if out_of_memory:
+                                    batch_size = frame_batch
+                                    stats.skipped += 1
+                                    consecutive_errors = 0
+                                    progress.tick(skipped=1)
+                                    return True
+
+                                if not frame_scores:
+                                    raise RuntimeError("All sampled frames failed inference")
+
+                                batch_size = frame_batch
+                                merged_scores = merge_frame_results(frame_scores)
+                                raw_result = tagger_result_from_category_scores(merged_scores)
+                                tag_count = _persist_result(file_hash, fi, raw_result)
+
+                                consecutive_errors = 0
+                                progress.set_last_file_info(file_hash, model_cfg.model_id, tag_count)
+                                progress.tick(processed=1)
+                                return True
+                            except InferenceCancelled:
+                                raise
+                            except Exception as exc:
+                                _handle_infer_error(exc=exc, file_hash=file_hash, fi=fi, db=db, stats=stats)
+                                consecutive_errors += 1
+                                progress.tick(errors=1)
+                                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                    stats.aborted_early = True
+                                    stats.abort_reason = (
+                                        f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                    )
+                                    return False
+                                return True
+
+                        position = 0
+                        while position < len(pending_sequences):
+                            fi = pending_sequences[position]
+
+                            if session.is_cancellation_requested():
+                                stats.aborted_early = True
+                                stats.abort_reason = "Inference cancelled by user (press 'q')"
+                                break
+
+                            if not await _process_sequence(fi):
+                                break
+
+                            position += 1
+                            budget.add(1)
+                            if budget.spent():
+                                recycle = True
+                                break
+
+                        pending_sequences = pending_sequences[position:]
+
+                    # endregion
+
+                finally:
+                    stop_cancel.set()
+                    if listener is not None:
+                        listener.join(timeout=1.0)
+                        listener = None
+
+            if recycle:
+                logger.info(
+                    "Model %s: recycled session after %d file(s), rss %.0f MiB",
+                    model_cfg.model_id,
+                    budget.files,
+                    _current_rss_mb(),
+                )
+                _release_memory()
+
+            # Flush any uncommitted transactions from this session
             db.commit()
 
     except InferenceCancelled:

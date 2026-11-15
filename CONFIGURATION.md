@@ -443,6 +443,8 @@ Global settings for running tag inference across your models.
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `models` | Array of Tables | **Yes** | Definitions of the model sessions to load and run. |
+| `session_recycle_files` | Integer | No | Close and reload the model session after this many files to release accumulated memory. The run resumes from the cache, so no file is inferred twice. `0` disables the file-count limit. <br> Defaults to `2000`. |
+| `session_recycle_rss_growth_mb` | Integer | No | Close and reload the model session once its memory growth since the session started exceeds this many MiB. `0` disables the memory limit. <br> Defaults to `1024`. |
 
 ### `[[inference.models]]`
 
@@ -529,3 +531,75 @@ min_cache_score = 0.01
 ```
 
 </details>
+
+---
+
+## `[video]`
+
+Settings for tagging video files and animated images (GIF, APNG) by sampling frames.
+
+When `enabled` is `true`, files with a `video/*` MIME type are accepted alongside images. For each video a dense grid of candidate frames is probed across the content window (the clip minus padding around its fade-in/fade-out), dead frames are dropped, near-duplicates are removed, and the survivors go through the configured models. Per-frame results are merged into one result per file: a tag is kept if it appears in any sampled frame, using its highest score across frames. Everything downstream (thresholds, output filter, tag services, preview, push) behaves exactly like it does for images.
+
+The probe grid holds `probe_multiplier` times as many candidates as frames that will be kept, capped at `max_probes`. Probing more than you keep is the point: when a candidate is a fade, a black frame or a repeat of an earlier moment, the filter drops it and a different moment takes its place, so the file still ends up with a full set of representative frames instead of a thinner one. Probes are decoded in ascending frame order and the decoder walks forward rather than seeking, because a random seek on WebM re-decodes from the start of the file.
+
+Animated GIFs and APNGs are always accepted as images; while `enabled` is `true` they are sampled like videos instead of only using their first frame. A GIF or APNG has no frame rate clock, so each frame's display duration from the file metadata defines the animation timeline and probe timestamps are mapped onto frame indices through that timeline.
+
+`[video.loop]` holds the assumptions about looping animations: sub-second clips get a single centered frame, clips longer than `edges_max_seconds` skip their edge probes by duration alone, and `detect` compares the first and last frame so a clip that visibly wraps around loses its redundant edge probes. `[video.dedupe]` controls the near-duplicate test that drops one phase of a loop sampled twice. `[video.fades]` and `[video.low_interest]` drop dead probes: fade frames and flat dark frames. No filter replaces a dropped frame; the probe grid supplies the alternative.
+
+Requires `opencv-python-headless` for video files, which is installed automatically with HyVis (GIF and APNG sampling only uses Pillow). If OpenCV cannot decode a video at all, for example an AV1 build that only exposes a hardware decoding path, HyVis falls back to the `ffmpeg` command line when it is installed, so those files are still sampled instead of skipped.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Accept and tag video files, and sample animated GIFs and APNGs frame by frame. Set to `false` to keep rejecting videos like before this feature existed; animated images are then tagged from their first frame only. <br> Defaults to `true`. |
+| `max_frames` | Integer | No | Maximum number of frames per file sent to inference. Clips shorter than `max_frames_at_seconds` keep proportionally fewer. <br> Defaults to `11`. |
+| `max_frames_at_seconds` | Number | No | Duration (seconds) at which the full `max_frames` is kept. Shorter clips scale down; longer clips stay at `max_frames`. <br> Defaults to `60.0`. |
+| `probe_multiplier` | Integer | No | Probe grid size as a multiple of `max_frames`: a multiplier of `3` probes three candidates for every frame that may be kept, so dead and duplicate probes can be replaced by other moments. <br> Defaults to `3`. |
+| `max_probes` | Integer | No | Hard cap on probed frames per file, regardless of `probe_multiplier`. Higher values give the filters more alternatives and cost more decode time. <br> Defaults to `48`. |
+| `include_edges` | Boolean | No | Add the true first and last frame to the probe grid. They are ordinary probes: they can be dropped as duplicates, and `[video.loop]` can remove them for detected loops. <br> Defaults to `true`. |
+| `write_frames` | Boolean | No | Debug aid: save the sampled frames as PNGs under `frames/<file_hash>/` (relative to the directory HyVis is run from) so you can inspect exactly which frames are being inferred. Only written for files that actually run inference this session. <br> Defaults to `false`. |
+| `loop` | Table | No | Loop assumptions: single-frame rule, duration-based edge skipping and first/last frame detection. See `[video.loop]`. |
+| `dedupe` | Table | No | Near-duplicate probe removal. See `[video.dedupe]`. |
+| `fades` | Table | No | Fade-frame detection thresholds. See `[video.fades]`. |
+| `low_interest` | Table | No | Flat-and-dark probe removal. See `[video.low_interest]`. |
+
+### `[video.loop]`
+
+Assumptions about looping animations. Loops are the common case for short clips, and a loop's first and last frame are just another phase of the same motion, so edge probes often waste budget.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `detect` | Boolean | No | Compare the first and last probe of each file; when they match, the clip is treated as a loop and both edge probes are skipped, leaving the interior grid to represent every phase. The comparison decodes two frames and uses a looser changed-pixel tolerance than dedupe (a seam is one frame apart). <br> Defaults to `true`. |
+| `single_frame_below_seconds` | Number | No | Clips shorter than this many seconds are assumed to be loops too small to say anything beyond one moment, so a single centered frame is inferred and the probe grid is skipped entirely. Set to `0` to disable the rule. <br> Defaults to `1.0`. |
+| `edges_max_seconds` | Number | No | Duration-only loop assumption: clips longer than this many seconds drop their edge probes without decoding anything to check. Useful when long clips are predominantly loops. Set to `0` to disable the rule. <br> Defaults to `0.0`. |
+
+### `[video.dedupe]`
+
+Drops probes that are near-duplicates of an already-kept frame, i.e. the same phase of a loop sampled twice, or a long static segment. The test requires both a low mean frame difference and a small fraction of changed pixels, so a small but important change (a character, a face, water movement) in a mostly static frame survives.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Set to `false` to keep every probe that is not a dead frame. <br> Defaults to `true`. |
+| `threshold` | Number | No | Normalized mean frame difference (0-1) below which two probes count as duplicates. Lower = stricter. <br> Defaults to `0.03`. |
+| `change_level` | Integer | No | Pixels differing by more than this many 8-bit gray levels count as "changed". <br> Defaults to `25`. |
+| `max_changed_fraction` | Number | No | Max fraction (0-1) of changed pixels for two probes to still count as duplicates. Elements smaller than this fraction of the frame survive dedupe; lower it to protect smaller elements. A value of `0` disables the duplicate test. <br> Defaults to `0.01`. |
+
+### `[video.fades]`
+
+Drops probes that land inside a fade-to-black or fade-to-white transition. A fade frame is detected as near-uniform AND near-black/near-white, so dark scenes with detail are preserved. Nothing replaces the dropped probe; the next grid candidate takes its place.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Set to `true` to drop fade probes. <br> Defaults to `false`. |
+| `dark_threshold` | Number | No | Mean luminance (0-1) below which a frame counts as "black". Fade-to-black frames are typically below `0.05`. <br> Defaults to `0.10`. |
+| `light_threshold` | Number | No | Mean luminance (0-1) above which a frame counts as "white". <br> Defaults to `0.90`. |
+| `uniformity` | Number | No | Luminance std (0-1) below which a frame counts as flat/uniform. A dark scene with detail has a higher std and is therefore NOT treated as a fade. <br> Defaults to `0.08`. |
+
+### `[video.low_interest]`
+
+Drops probes with little interesting content: near-uniform AND dark, i.e. black or mostly-black empty frames (fade-ins/outs the padding missed). Dark scenes with real detail (high std) are preserved, and bright frames are never dropped by this filter.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Set to `false` to keep all probed frames. <br> Defaults to `true`. |
+| `min_luminance` | Number | No | Mean luminance (0-1) below which a frame may count as empty (the darkness gate). <br> Defaults to `0.15`. |
+| `min_std` | Number | No | Luminance std (0-1) below which a frame counts as flat/uniform (no detail). A frame is only dropped when it is flat AND dark. <br> Defaults to `0.05`. |

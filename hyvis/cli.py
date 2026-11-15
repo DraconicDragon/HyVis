@@ -83,5 +83,10 @@ def parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging verbosity (default: config or WARNING).",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Shorthand for --log-level DEBUG: verbose output, including video frame sampling decisions.",
+    )
     parser.add_argument("--version", action=_VersionAction, help="Show program's version number and exit.")
     return parser.parse_args()

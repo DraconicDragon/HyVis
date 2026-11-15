@@ -33,6 +33,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 - **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying `--extra-hash-file` (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
 - **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
 - **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
+- **Video and GIF Support**: Tag video files and animated GIFs or APNGs by [sampling frames](CONFIGURATION.md#video) across their duration and merging the per-frame results
 - **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
 
 ### Showcase
@@ -101,7 +102,7 @@ Activate the virtual environment:
 
 ### 4. Install HyVis
 
-Install HyVis and its core dependencies:
+Install HyVis and its core dependencies (including `opencv-python-headless`, which provides video frame extraction):
 
 ```bash
 # Core CLI only
@@ -223,6 +224,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - [`tagging_example.toml`](config_examples/tagging_example.toml) - Generic example config for general tagging of files using a model with basic default settings - *likely a good starting point for most users*
 
+
 - [`dan_rating_only.toml`](config_examples/dan_rating_only.toml) - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
 
 - [`tagging_multi_model.toml`](config_examples/tagging_multi_model.toml) - A more advanced example config that uses 2 models (one outputting Danbooru tags, the other E621 tags) to tag files and puts each model's output in separate tag services
@@ -249,6 +251,8 @@ Please see [SUPPORTED_MODELS.md](SUPPORTED_MODELS.md)
   Clear the raw prediction cache from the database and run `VACUUM` to reclaim disk space.
 - `--no-wait`
   Do not wait for Hydrus if it is offline/unreachable; fail fast instead.
+- `--debug`
+  Shorthand for `--log-level DEBUG`: verbose logging, including video frame sampling decisions.
 - `--api-url` / `--api-key`
   Override the [connection parameters](CONFIGURATION.md#hydrus) specified in your TOML config. Useful for running the same config against multiple Hydrus clients.
 - <a id="extra-hash-file"></a>`--extra-hash-file PATH`
@@ -275,4 +279,4 @@ Q: Can I try models before starting a run/outside of HyVis as like a model previ
 A: No. I have something like a separate model preview module in mind for which I can add a button to hyvis-gui's models page, but that's about it. It may also be GUI only (no CLI/TUI), at first at least
 
 Q: Video/Animation support?  
-A: soon™, perhaps. I have ideas and a rough plan for it
+A: Yes. Video files and animated GIFs or APNGs are tagged by [sampling frames](CONFIGURATION.md#video) across their duration and merging the per-frame results. PSD files (and any other image format Pillow can decode) are tagged from their saved flattened composite

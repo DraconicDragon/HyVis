@@ -59,9 +59,28 @@ ALLOWED_MIMES: frozenset[str] = frozenset(
         "image/jxl",
         "image/avif",
         "image/heif",
-        # "image/gif",
+        "image/gif",
+        "image/apng",
+        # Photoshop files are tagged from their saved flattened composite.
+        "image/vnd.adobe.photoshop",
     }
 )
+
+#: Any MIME starting with this prefix is treated as a video when video support is enabled.
+VIDEO_MIME_PREFIX = "video/"
+
+#: Image MIME types that can hold an animation and are sampled frame by frame.
+ANIMATED_MIMES: frozenset[str] = frozenset({"image/gif", "image/apng"})
+
+
+def is_video_mime(mime: str | None) -> bool:
+    """Return True if the given Hydrus MIME type identifies a video file."""
+    return bool(mime and mime.startswith(VIDEO_MIME_PREFIX))
+
+
+def is_animated_mime(mime: str | None) -> bool:
+    """Return True if the given MIME type may contain an animation (GIF, APNG)."""
+    return bool(mime and mime in ANIMATED_MIMES)
 
 
 def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
@@ -604,6 +623,20 @@ class InferenceConfig(StrictBaseModel):
         title="Configured Models",
         description="List of model sessions to load and execute sequentially.",
     )
+    session_recycle_files: int = Field(
+        default=2000,
+        ge=0,
+        title="Session Recycle After Files",
+        description="Close and reload the model session after this many files to release memory. 0 disables the file-count limit.",
+        examples=[1000, 2000, 5000],
+    )
+    session_recycle_rss_growth_mb: int = Field(
+        default=1024,
+        ge=0,
+        title="Session Recycle RSS Growth (MiB)",
+        description="Close and reload the model session once its memory growth exceeds this many MiB. 0 disables the memory limit.",
+        examples=[512, 1024, 2048],
+    )
 
 
 class HydrusConfig(StrictBaseModel):
@@ -722,6 +755,178 @@ class HyvisConfig(StrictBaseModel):
         return v
 
 
+class VideoConfig(StrictBaseModel):
+    """
+    Settings for tagging video files and animated GIFs by sampling frames.
+
+    The sampler probes a dense grid of candidate frames across the content
+    window in one forward pass, drops dead frames (fades, flat dark frames)
+    and near-duplicates, and keeps one frame per visually distinct phase.
+    The grid is deliberately larger than the number of frames that go to
+    inference, so the filters have alternatives to reject.
+
+    enabled                Accept video/* MIME types and tag them. When false,
+                           videos are rejected; animated GIFs still load as
+                           images and are tagged from their first frame.
+    max_frames             Maximum number of sampled frames sent to inference
+                           per file. Shorter files keep proportionally fewer.
+    max_frames_at_seconds  Duration (seconds) at which the full max_frames is
+                           kept; shorter files keep proportionally fewer.
+    probe_multiplier       Candidate frames probed per kept frame. The default
+                           of 3 gives the fade, low-interest and duplicate
+                           filters roughly two alternatives to reject for
+                           every frame that survives.
+    max_probes             Hard ceiling on candidate frames per file, so a
+                           large probe_multiplier cannot turn into a decode
+                           marathon. Defaults to 48.
+    include_edges          Also probe the true first and last frame. Edge
+                           probes are dropped when the clip is detected as a
+                           loop, since its last frame just repeats its first.
+    write_frames           Debug aid: save the kept frames as PNGs under
+                           frames/<file_hash>/ so you can inspect exactly what
+                           is being inferred. Defaults to false.
+    loop                   Loop heuristics (detect, single_frame_below_seconds,
+                           edges_max_seconds). See LoopConfig.
+    dedupe                 Near-duplicate removal, the main defence against
+                           loop phases and static segments wasting max_frames.
+                           See DedupeConfig.
+    fades                  Fade-to-black/white frame filter. See
+                           FadeFilterConfig.
+    low_interest           Flat-and-dark frame filter (black frames, missed
+                           fade-outs). Enabled by default. See
+                           LowInterestFilterConfig.
+    """
+
+    enabled: bool = True
+    max_frames: int = Field(default=11, ge=1)
+    max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
+    probe_multiplier: int = Field(default=3, ge=1)
+    max_probes: int = Field(default=48, ge=1)
+    include_edges: bool = True
+    write_frames: bool = False
+    loop: "LoopConfig" = Field(default_factory=lambda: LoopConfig())
+    dedupe: "DedupeConfig" = Field(default_factory=lambda: DedupeConfig())
+    fades: "FadeFilterConfig" = Field(default_factory=lambda: FadeFilterConfig())
+    low_interest: "LowInterestFilterConfig" = Field(
+        default_factory=lambda: LowInterestFilterConfig()
+    )
+
+
+class LoopConfig(StrictBaseModel):
+    """
+    Loop heuristics for video and animated GIF sampling.
+
+    detect                  Compare the first and last frame of a clip before
+                            sampling. When they match within the dedupe
+                            thresholds (with a looser changed-pixel tolerance,
+                            because a seam is only one frame apart), the clip
+                            is treated as a loop: its edge probes are skipped
+                            so inference is not spent on a frame that repeats
+                            another one. Costs at most two extra decodes.
+                            Defaults to true.
+    single_frame_below_seconds
+                            Clips shorter than this are assumed to be loops
+                            too short to say anything beyond a single frame:
+                            one centered frame is inferred and the probe grid
+                            is skipped entirely. Set to 0 to disable the rule.
+                            Defaults to 1.0.
+    edges_max_seconds       Duration-only loop assumption that costs no
+                            decoding: clips longer than this are treated as
+                            loops, so their edge probes are skipped. Useful
+                            when most of your library is looping animations.
+                            Set to 0 to disable the rule. Defaults to 0.0.
+    """
+
+    detect: bool = True
+    single_frame_below_seconds: float = Field(default=1.0, ge=0.0)
+    edges_max_seconds: float = Field(default=0.0, ge=0.0)
+
+
+class DedupeConfig(StrictBaseModel):
+    """
+    Near-duplicate removal for sampled frames.
+
+    enabled              Drop sampled frames that are near-duplicates of an
+                         already-kept frame. This is what turns a dense probe
+                         grid into one frame per visually distinct phase, and
+                         what stops looping animations and static segments
+                         from burning the max_frames budget. Defaults to true.
+    threshold            Normalized mean frame difference (0-1) below which
+                         two frames count as duplicates. Lower = stricter
+                         (only near-identical frames are dropped). Defaults
+                         to 0.03.
+    change_level         Second, area-independent test: pixels differing by
+                         more than this many 8-bit gray levels count as
+                         "changed". Protects small but important changes (a
+                         character or a bit of water movement) that barely
+                         move the mean. Lower = stricter. Defaults to 25.
+    max_changed_fraction Max fraction (0-1) of pixels that may be changed
+                         before two frames stop counting as duplicates.
+                         Elements smaller than this fraction of the frame
+                         survive dedupe; lower it to protect smaller elements.
+                         Defaults to 0.01.
+    """
+
+    enabled: bool = True
+    threshold: float = Field(default=0.03, ge=0.0, le=1.0)
+    change_level: int = Field(default=25, ge=1, le=255)
+    max_changed_fraction: float = Field(default=0.01, ge=0.0, le=1.0)
+
+
+class FadeFilterConfig(StrictBaseModel):
+    """
+    Fade-to-black/fade-to-white frame filter.
+
+    A probed frame is dropped when its mean luminance is below dark_threshold
+    OR above light_threshold, AND its luminance std is below uniformity (i.e.
+    it is flat, not a detailed dark/bright scene). Dropping is deliberate:
+    the probe grid has spare candidates, so a fade frame is simply skipped
+    and the next distinct frame in that phase is kept instead.
+
+    enabled                  Drop fade frames from the probe selection. The
+                             filters below are only read when this is true.
+                             Defaults to false.
+    dark_threshold           Mean luminance (0-1) below which a frame counts
+                             as "black" for detection. Fade-to-black frames
+                             are typically < 0.05.
+    light_threshold          Mean luminance (0-1) above which a frame counts
+                             as "white" for detection.
+    uniformity               Luminance std (0-1) below which a frame counts
+                             as flat/uniform. Dark scenes with detail have
+                             higher std and are therefore preserved.
+    """
+
+    enabled: bool = False
+    dark_threshold: float = Field(default=0.10, ge=0.0, le=1.0)
+    light_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    uniformity: float = Field(default=0.08, ge=0.0, le=1.0)
+
+
+class LowInterestFilterConfig(StrictBaseModel):
+    """
+    Filter for sampled frames with little interesting content (used only
+    when [video].low_interest.enabled = true, the default).
+
+    A sampled frame is DROPPED (not replaced - the frame budget shrinks)
+    when it is near-uniform AND dark: luminance std below min_std AND mean
+    luminance below min_luminance. That is a black / mostly-black empty
+    frame - e.g. a fade-in/out that the fade padding or fade filter missed.
+    A dark scene with real detail (high std) is preserved, matching the
+    fade filter's philosophy; bright frames are never dropped by this filter.
+
+    enabled              When true, drop low-interest sampled frames before
+                         inference. Defaults to true.
+    min_luminance        Mean luminance (0-1) below which a frame may count
+                         as empty. Defaults to 0.15.
+    min_std              Luminance std (0-1) below which a frame counts as
+                         flat/uniform (no detail). Defaults to 0.05.
+    """
+
+    enabled: bool = True
+    min_luminance: float = Field(default=0.15, ge=0.0, le=1.0)
+    min_std: float = Field(default=0.05, ge=0.0, le=1.0)
+
+
 class AppConfig(StrictBaseModel):
     hydrus: HydrusConfig = Field(
         ...,
@@ -748,6 +953,12 @@ class AppConfig(StrictBaseModel):
         title="Application Settings",
         description="Application-level execution behavior and logging verbosity.",
     )
+    video: VideoConfig = Field(
+        default_factory=VideoConfig,
+        title="Video",
+        description="Video tagging: probe grid across the content window, loop assumptions, near-duplicate, fade and low-interest frame filters.",
+    )
+
 
     # region Helpers
 
