@@ -20,20 +20,24 @@ This document outlines all available settings for your HyVis configuration TOML 
 HyVis application settings.
 
 > [!TIP]
-> Log level can be overwritten using the `--log-level` flag .
+> Log level can be overwritten using the `--log-level` flag.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `log_level` | String | No | Logging verbosity. Options: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. Defaults to `"WARNING"`. |
-| `infer_only` | Boolean | No | Run model inference and cache predictions, but do not push any tags to Hydrus. Can be overridden using the `--infer-only` CLI flag. <br> Defaults to `false`. |
+| `log_level` | String | No | Logging verbosity written to the session log file (console highest log level can only be `WARNING`). Options: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. <br> Defaults to `"INFO"`. |
+| `infer_only` | Boolean | No | Run model inference and queue tags in `hyvis.db`, but do not push any tags to Hydrus. Can be overridden using the `--infer-only` CLI flag. <br> Defaults to `false`. |
+| `max_log_files` | Integer | No | Maximum number of past run log files to keep on disk (`1` to `1000`). Older logs are automatically deleted when exceeded. <br> Defaults to `20`. |
+| `log_dir` | String | No | Directory path where session run logs are stored. Relative paths resolve against the working directory. <br> Defaults to `"logs"`. |
 
 <details>
 <summary>💡 View <code>[hyvis]</code> Example</summary>
 
 ```toml
 [hyvis]
-log_level = "WARNING"
+log_level = "INFO"
 infer_only = false
+max_log_files = 20
+log_dir = "logs"
 ```
 
 </details>
@@ -189,7 +193,7 @@ keys = ["your_service_key_here", "another_service_key_here"]
 
 ### `[[hydrus.add_tags]]`
 
-*Array of tables (Can be defined multiple times).* Specifies rules for extra tags to apply to successfully processed files. These tags are added **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies rules for extra tags to apply to successfully processed files. These tags are added **only after** all configured models have processed the file.
 
 Defining multiple blocks allows routing different tags to different tag services (e.g. local workflow tags to your local service, and model metadata tags to a shared service).
 
@@ -197,6 +201,7 @@ Defining multiple blocks allows routing different tags to different tag services
 | :-------- | :--- | :------- | :---------- |
 | `tags` | Array of Strings | **Yes** | List of tags to add to files. |
 | `tag_service_keys` | Array of Strings | **Yes** | Destination Hydrus tag service keys to write these tags to. |
+| `only_if_tags_emitted` | Boolean | No | If `true`, this rule is only applied if at least one tag was emitted by the model(s) during this run. If all predictions fall below threshold (zero tags), this rule is skipped. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[[hydrus.add_tags]]</code> Example</summary>
@@ -205,22 +210,24 @@ Defining multiple blocks allows routing different tags to different tag services
 [[hydrus.add_tags]]
 tags = ["ai:tagged"]
 tag_service_keys = ["my_service_key_here"]
+only_if_tags_emitted = true
 ```
 
 </details>
 
 ### `[[hydrus.remove_tags]]`
 
-*Array of tables (Can be defined multiple times).* Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed **only after** all configured models have successfully processed them (both inference and pushing succeeded).
+*Array of tables (Can be defined multiple times).* Specifies cleanup rules for removing temporary search/queue tags from Hydrus. These tags are removed **only after** all configured models have processed the file.
 
 Defining multiple blocks allows targeting specific cleanup tags to specific tag services.
 
-If tag removal fails for any reason, the tags remain in Hydrus. On the next run, the files are picked up again, bypass inference using the local database cache, and retry the cleanup phase. You can also rerun pending cleanups anytime by executing `hyvis <config> --push-only`.
+If tag pushing fails for any reason, pending operations stay queued in `hyvis.db` and can be retried anytime by running `hyvis <config> --push-only` (or on the next run).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | No | List of tags to remove from successfully processed files. |
-| `tag_service_keys` | Array of Strings | No* | Target Hydrus tag service keys to remove these tags from. <br> **Only required if `tags` is specified*. |
+| `tags` | Array of Strings | **Yes** | List of tags to remove from successfully processed files. |
+| `tag_service_keys` | Array of Strings | **Yes** | Target Hydrus tag service keys to remove these tags from. |
+| `only_if_tags_emitted` | Boolean | No | If `true`, this rule is only applied if at least one tag was emitted by the model(s) during this run. If all predictions fall below threshold (zero tags), this rule is skipped. <br> Defaults to `false`. |
 
 <details>
 <summary>💡 View <code>[[hydrus.remove_tags]]</code> Example</summary>
@@ -229,6 +236,7 @@ If tag removal fails for any reason, the tags remain in Hydrus. On the next run,
 [[hydrus.remove_tags]]
 tags = ["temp:tagme", "queue:ai processing"]
 tag_service_keys = ["my_service_key_here"]
+only_if_tags_emitted = true
 ```
 
 </details>
@@ -418,8 +426,8 @@ This setting works independently from `[output_filter.max_tags_per_category]`.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `tags` | Array of Strings | No | Explicit list of raw tags that belong to this subset. |
-| `limit` | Integer | No* | The maximum number of tags from this subset to output. Must be $\ge 1$. <br> Defaults to `1`. <br> **Required if `tags` is specified*. |
+| `tags` | Array of Strings | **Yes** | Explicit list of raw tags that belong to this subset. |
+| `limit` | Integer | No | The maximum number of tags from this subset to output. Must be $\ge 1$. <br> Defaults to `1`. |
 
 <details>
 <summary>💡 View <code>[[output_filter.max_tags_per_subset]]</code> Example</summary>
@@ -510,13 +518,14 @@ keys = ["special_service_key_123"]
 
 ## `[database]`
 
-Settings for the application's local state and cache storage.
+Settings for the application's operational SQLite database (`hyvis.db`) and disposable raw prediction cache (`cache.db`).
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
-| `path` | String | No | Path to the SQLite database file. Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
-| `cache_raw_predictions` | Boolean | No | Saves raw, un-culled* model predictions to the DB. Allows instant re-filtering when thresholds change without re-running GPU inference. \*By default there's minimal culling, see `min_cache_score`. <br> Defaults to `false`. |
-| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `1.0`) saved to the raw cache. **Warning**: setting this below 0.01 will increase DB size by a lot. Cache can be cleared with `--clear-cache` CLI arg. <br> Defaults to `0.01`. |
+| `path` | String | No | Path to the SQLite operational database (`hyvis.db`). Relative paths are resolved from the directory where the application is run. <br> Defaults to `"data/hyvis.db"`. |
+| `cache_path` | String / Null | No | Optional path to the disposable raw prediction cache database (`cache.db`). If omitted or `null`, `cache.db` is stored automatically alongside `database.path`. <br> Defaults to `null`. |
+| `cache_raw_predictions` | Boolean | No | Saves raw, un-culled\* model predictions into `cache.db` using compact binary storage. Allows instant CPU re-filtering when `output_filter` settings change without re-running GPU inference. \*Minimal noise pruning is applied via `min_cache_score`. <br> Defaults to `true`. |
+| `min_cache_score` | Float | No | Minimum confidence score (`0.0` to `0.1`) saved to `cache.db`. Setting this very low (e.g. `0.001`) increases `cache.db` size significantly. Cache can be cleared anytime with `--clear-cache`. <br> Defaults to `0.005`. |
 
 <details>
 <summary>💡 View <code>[database]</code> Example</summary>
@@ -524,8 +533,9 @@ Settings for the application's local state and cache storage.
 ```toml
 [database]
 path = "data/hyvis.db"
+# cache_path = "data/cache.db"
 cache_raw_predictions = true
-min_cache_score = 0.01
+min_cache_score = 0.005
 ```
 
 </details>
