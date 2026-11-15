@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     n            INTEGER NOT NULL,       -- Number of surviving tag entries
     data         BLOB NOT NULL,          -- Packed binary payload with 1-byte version header
     inferred_at  INTEGER NOT NULL,       -- Unix epoch milliseconds (UTC)
+    prep_hash    TEXT NOT NULL DEFAULT '', -- Sampling fingerprint ('' for static images)
     PRIMARY KEY (model_row, file_hash)
 );
 """
@@ -468,6 +469,7 @@ class CacheDatabase:
         scores: np.ndarray,
         *,
         min_cache_score: float,
+        prep_hash: str = "",
     ) -> None:
         """Pack and store sparse raw predictions for one (model_row, file_hash)."""
         if self._read_only or model_row < 0:
@@ -480,15 +482,16 @@ class CacheDatabase:
 
         self.conn.execute(
             """
-            INSERT INTO predictions (model_row, file_hash, floor_q, n, data, inferred_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO predictions (model_row, file_hash, floor_q, n, data, inferred_at, prep_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(model_row, file_hash) DO UPDATE SET
                 floor_q     = excluded.floor_q,
                 n           = excluded.n,
                 data        = excluded.data,
-                inferred_at = excluded.inferred_at
+                inferred_at = excluded.inferred_at,
+                prep_hash   = excluded.prep_hash
             """,
-            (model_row, hash_bytes, floor_q, n, blob, now_ms),
+            (model_row, hash_bytes, floor_q, n, blob, now_ms, prep_hash),
         )
         self.batch_tick()
 
@@ -498,10 +501,12 @@ class CacheDatabase:
         file_hashes: Sequence[str],
         *,
         max_floor_q: int,
+        prep_hashes_by_file: Mapping[str, str] | None = None,
     ) -> set[str]:
         """
         Return the subset of `file_hashes` present in `predictions` for `model_row`
-        whose stored `floor_q <= max_floor_q` (deep enough for the requested threshold).
+        whose stored `floor_q <= max_floor_q` and `prep_hash` matches the expected
+        sampling fingerprint (`""` for static images).
         """
         if not file_hashes or model_row < 0:
             return set()
@@ -515,14 +520,17 @@ class CacheDatabase:
             placeholders = ",".join("?" * len(chunk))
             rows = self.conn.execute(
                 f"""
-                SELECT file_hash FROM predictions
+                SELECT file_hash, prep_hash FROM predictions
                 WHERE model_row = ? AND floor_q <= ? AND file_hash IN ({placeholders})
                 """,
                 [model_row, max_floor_q, *chunk],
             ).fetchall()
-            for (raw_h,) in rows:
+            for raw_h, stored_prep in rows:
                 orig = bytes_to_hex.get(bytes(raw_h))
-                if orig is not None:
+                if orig is None:
+                    continue
+                expected_prep = prep_hashes_by_file.get(orig, "") if prep_hashes_by_file is not None else ""
+                if (stored_prep or "") == expected_prep:
                     found.add(orig)
 
         return found
