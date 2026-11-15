@@ -577,9 +577,9 @@ Drops probes that are near-duplicates of an already-kept frame, i.e. the same ph
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `enabled` | Boolean | No | Set to `false` to keep every probe that is not a dead frame. <br> Defaults to `true`. |
-| `threshold` | Number | No | Normalized mean frame difference (0–1) below which two probes count as duplicates. Lower = stricter. <br> Defaults to `0.03`. |
+| `threshold` | Number | No | Normalized mean frame difference (0-1) below which two probes count as duplicates. Lower = stricter. <br> Defaults to `0.03`. |
 | `change_level` | Integer | No | Pixels differing by more than this many 8-bit gray levels count as "changed". <br> Defaults to `25`. |
-| `max_changed_fraction` | Number | No | Max fraction (0–1) of changed pixels for two probes to still count as duplicates. Elements smaller than this fraction of the frame survive dedupe; lower it to protect smaller elements. A value of `0` disables the duplicate test. <br> Defaults to `0.01`. |
+| `max_changed_fraction` | Number | No | Max fraction (0-1) of changed pixels for two probes to still count as duplicates. Elements smaller than this fraction of the frame survive dedupe; lower it to protect smaller elements. A value of `0` disables the duplicate test. <br> Defaults to `0.01`. |
 
 ### `[video.fades]`
 
@@ -588,9 +588,9 @@ Drops probes that land inside a fade-to-black or fade-to-white transition. A fad
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `enabled` | Boolean | No | Set to `true` to drop fade probes. <br> Defaults to `false`. |
-| `dark_threshold` | Number | No | Mean luminance (0–1) below which a frame counts as "black". Fade-to-black frames are typically below `0.05`. <br> Defaults to `0.10`. |
-| `light_threshold` | Number | No | Mean luminance (0–1) above which a frame counts as "white". <br> Defaults to `0.90`. |
-| `uniformity` | Number | No | Luminance std (0–1) below which a frame counts as flat/uniform. A dark scene with detail has a higher std and is therefore NOT treated as a fade. <br> Defaults to `0.08`. |
+| `dark_threshold` | Number | No | Mean luminance (0-1) below which a frame counts as "black". Fade-to-black frames are typically below `0.05`. <br> Defaults to `0.10`. |
+| `light_threshold` | Number | No | Mean luminance (0-1) above which a frame counts as "white". <br> Defaults to `0.90`. |
+| `uniformity` | Number | No | Luminance std (0-1) below which a frame counts as flat/uniform. A dark scene with detail has a higher std and is therefore NOT treated as a fade. <br> Defaults to `0.08`. |
 
 ### `[video.low_interest]`
 
@@ -599,5 +599,5 @@ Drops probes with little interesting content: near-uniform AND dark, i.e. black 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
 | `enabled` | Boolean | No | Set to `false` to keep all probed frames. <br> Defaults to `true`. |
-| `min_luminance` | Number | No | Mean luminance (0–1) below which a frame may count as empty (the darkness gate). <br> Defaults to `0.15`. |
-| `min_std` | Number | No | Luminance std (0–1) below which a frame counts as flat/uniform (no detail). A frame is only dropped when it is flat AND dark. <br> Defaults to `0.05`. |
+| `min_luminance` | Number | No | Mean luminance (0-1) below which a frame may count as empty (the darkness gate). <br> Defaults to `0.15`. |
+| `min_std` | Number | No | Luminance std (0-1) below which a frame counts as flat/uniform (no detail). A frame is only dropped when it is flat AND dark. <br> Defaults to `0.05`. |

@@ -216,7 +216,7 @@ write_frames = false               # debug: save sampled frames to frames/<file_
 [video.loop]
 detect = true                      # compare the first and last frame; a match means a loop, so both edge probes are dropped
 single_frame_below_seconds = 1.0   # clips shorter than this cannot say much: one centered frame (0 = disabled)
-edges_max_seconds = 0.0        # clips longer than this are assumed to loop: drop the edge probes by duration (0 = disabled)
+edges_max_seconds = 0.0            # clips longer than this are assumed to loop: drop the edge probes by duration (0 = disabled)
 
 [video.dedupe]
 enabled = true                     # drop probes that are near-duplicates of an already-kept frame
