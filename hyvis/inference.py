@@ -411,19 +411,40 @@ def build_transform_pipeline_from_vocab(
 # region Planning & Filter Fingerprinting
 
 
-def compute_filter_hash(config: AppConfig, model_cfg: ModelConfig) -> str:
+def compute_filter_hash(
+    config: AppConfig,
+    model_cfg: ModelConfig,
+    *,
+    video_prep_hash: str = "",
+) -> str:
     """
     Compute a deterministic 16-char SHA-256 fingerprint of all settings that affect
     tag output or destination routing for `model_cfg`.
+
+    When `video_prep_hash` is non-empty (videos / animated images), sampling parameters
+    are folded in so changing video density invalidates multi-frame files without
+    touching static image completion records.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "output_filter": config.resolved_output_filter(model_cfg).model_dump(mode="json"),
         "output_tag_services": config.resolved_output_tag_services(model_cfg),
         "add_tags": [a.model_dump(mode="json") for a in config.hydrus.add_tags],
         "remove_tags": [r.model_dump(mode="json") for r in config.hydrus.remove_tags],
     }
+    if video_prep_hash:
+        payload["video_prep_hash"] = video_prep_hash
+
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def is_known_multiframe(fi: FileInfo) -> bool:
+    """Return True if Hydrus metadata already identifies `fi` as a video or multi-frame animation."""
+    from hyvis.config import is_video_mime
+
+    if is_video_mime(fi.mime):
+        return True
+    return fi.num_frames is not None and fi.num_frames > 1
 
 
 def resolve_model_variant_id(model_cfg: ModelConfig) -> str:
@@ -450,11 +471,17 @@ class ModelPassPlan:
 
     model_cfg: ModelConfig
     filter_hash: str
+    video_filter_hash: str
+    video_prep_hash: str
     resolved_variant_id: str
     cache_model_row: int | None
     skip_hashes: set[str]
     refilter_files: list[FileInfo]
     gpu_files: list[FileInfo]
+
+    def effective_filter_hash(self, fi: FileInfo) -> str:
+        """Return the filter_hash matching `fi` (static vs. multi-frame)."""
+        return self.video_filter_hash if is_known_multiframe(fi) else self.filter_hash
 
 
 def plan_model_pass(
@@ -474,6 +501,8 @@ def plan_model_pass(
       - gpu_files: Needs GPU inference (not in cache.db, too shallow floor_q, or --force).
     """
     filter_hash = compute_filter_hash(config, model_cfg)
+    video_prep_hash = config.video.prep_hash()
+    video_filter_hash = compute_filter_hash(config, model_cfg, video_prep_hash=video_prep_hash)
     resolved_variant = resolve_model_variant_id(model_cfg)
 
     staged_hashes = db.get_staged_hashes_for_model(model_cfg.model_id) if is_resume else set()
@@ -483,7 +512,8 @@ def plan_model_pass(
     need_work: list[FileInfo] = []
 
     for fi in file_infos:
-        if fi.file_hash in staged_hashes or not force and logged.get(fi.file_hash) == filter_hash:
+        expected_fh = video_filter_hash if is_known_multiframe(fi) else filter_hash
+        if fi.file_hash in staged_hashes or (not force and logged.get(fi.file_hash) == expected_fh):
             skip_hashes.add(fi.file_hash)
         else:
             need_work.append(fi)
@@ -492,6 +522,8 @@ def plan_model_pass(
         return ModelPassPlan(
             model_cfg=model_cfg,
             filter_hash=filter_hash,
+            video_filter_hash=video_filter_hash,
+            video_prep_hash=video_prep_hash,
             resolved_variant_id=resolved_variant,
             cache_model_row=None,
             skip_hashes=skip_hashes,
@@ -505,6 +537,8 @@ def plan_model_pass(
         return ModelPassPlan(
             model_cfg=model_cfg,
             filter_hash=filter_hash,
+            video_filter_hash=video_filter_hash,
+            video_prep_hash=video_prep_hash,
             resolved_variant_id=resolved_variant,
             cache_model_row=None,
             skip_hashes=skip_hashes,
@@ -514,10 +548,12 @@ def plan_model_pass(
 
     target_model_row = candidate_rows[0]
     max_floor_q = quantize_floor(config.database.min_cache_score)
+    prep_hashes_by_file = {fi.file_hash: (video_prep_hash if is_known_multiframe(fi) else "") for fi in need_work}
     cached_ok = cache_db.filter_cached_hashes(
         target_model_row,
         [fi.file_hash for fi in need_work],
         max_floor_q=max_floor_q,
+        prep_hashes_by_file=prep_hashes_by_file,
     )
 
     refilter_files = [fi for fi in need_work if fi.file_hash in cached_ok]
@@ -526,6 +562,8 @@ def plan_model_pass(
     return ModelPassPlan(
         model_cfg=model_cfg,
         filter_hash=filter_hash,
+        video_filter_hash=video_filter_hash,
+        video_prep_hash=video_prep_hash,
         resolved_variant_id=resolved_variant,
         cache_model_row=target_model_row if refilter_files else None,
         skip_hashes=skip_hashes,
@@ -730,7 +768,7 @@ async def infer_files(
                         model_cfg=model_cfg,
                         variant_id=vocab.variant_id,
                         vocab_hash=vocab.vocab_hash,
-                        filter_hash=plan.filter_hash,
+                        filter_hash=plan.effective_filter_hash(fi),
                         prefixed_tags=prefixed_tags,
                         output_services=output_services,
                         config=config,
@@ -895,6 +933,7 @@ async def infer_files(
                                 indices,
                                 scores,
                                 min_cache_score=min_cache_score,
+                                prep_hash=plan.video_prep_hash if is_known_multiframe(fi) else "",
                             )
 
                         # 3. Apply VRT transform pipeline on the full raw result
@@ -913,7 +952,7 @@ async def infer_files(
                             model_cfg=model_cfg,
                             variant_id=resolved_variant,
                             vocab_hash=vocab_hash,
-                            filter_hash=plan.filter_hash,
+                            filter_hash=plan.effective_filter_hash(fi),
                             prefixed_tags=prefixed_tags,
                             output_services=output_services,
                             config=config,

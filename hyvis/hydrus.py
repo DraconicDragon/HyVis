@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 import hydrus_api
 import hydrus_api.utils
 
-from hyvis.config import ALLOWED_MIMES, AppConfig, PageQueryConfig, TagQueryConfig
+from hyvis.config import AppConfig, PageQueryConfig, TagQueryConfig, is_supported_mime
 
 if TYPE_CHECKING:
     from hyvis.db import TagActionType
@@ -368,10 +368,14 @@ class HydrusClient:
     def filter_by_mime(
         self,
         hashes: list[str],
+        *,
+        allow_video: bool = False,
         progress_callback: Any | None = None,
     ) -> tuple[list[FileInfo], set[str], list[str]]:
         """
-        Batch-fetch metadata for all hashes, retain only allowed MIME types.
+        Batch-fetch metadata for all hashes, retain only eligible MIME types.
+        When `allow_video` is False, videos and known multi-frame animations (num_frames > 1)
+        are rejected instead of mis-tagging Frame 0.
 
         Returns (accepted_infos, rejected_mimes, rejected_hashes).
         """
@@ -392,19 +396,32 @@ class HydrusClient:
 
             for meta in metas:
                 mime: str = meta.get("mime", "")
-                if mime not in ALLOWED_MIMES:
-                    if mime:
-                        rejected_mimes.add(mime)
-                    rejected_hashes.append(meta["hash"])
-                    logger.debug("Skipping %s: unsupported MIME %s", meta.get("hash", "?"), mime)
-                    continue
-
                 raw_frames = meta.get("num_frames")
                 num_frames = (
                     int(raw_frames)
                     if not isinstance(raw_frames, bool) and isinstance(raw_frames, int) and raw_frames > 0
                     else None
                 )
+
+                if not is_supported_mime(mime, allow_video=allow_video):
+                    if mime:
+                        rejected_mimes.add(mime)
+                    rejected_hashes.append(meta["hash"])
+                    logger.debug("Skipping %s: unsupported MIME %s", meta.get("hash", "?"), mime)
+                    continue
+
+                if not allow_video and num_frames is not None and num_frames > 1:
+                    if mime:
+                        rejected_mimes.add(f"{mime} (animated)")
+                    rejected_hashes.append(meta["hash"])
+                    logger.debug(
+                        "Skipping %s: animated %s (%d frames) while video.enabled=False",
+                        meta.get("hash", "?"),
+                        mime,
+                        num_frames,
+                    )
+                    continue
+
                 accepted.append(
                     FileInfo(
                         file_hash=meta["hash"],
