@@ -427,8 +427,8 @@ async def main() -> int:
     boot_time = "offline"
 
     file_infos: list[FileInfo] = []
-    rejected_mimes: set[str] = set()
-    all_rejected_hashes: list[str] = []
+    rejected_mimes: set[str]
+    all_rejected_hashes: list[str]
     tag_query_counts: list[int] = []
     page_query_counts: list[int] = []
     extra_count = 0

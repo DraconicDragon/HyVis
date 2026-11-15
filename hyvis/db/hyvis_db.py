@@ -286,14 +286,6 @@ class Database:
         )
         self.batch_tick(batch_size=10)
 
-    def get_cached_path(self, file_hash: str) -> str | None:
-        """Return cached local path if it exists and status is active, else None."""
-        row = self.conn.execute(
-            "SELECT file_path FROM known_files WHERE file_hash = ? AND status = 'active'",
-            (file_hash,),
-        ).fetchone()
-        return row[0] if row and row[0] else None
-
     def bulk_get_known_paths(self, file_hashes: Sequence[str]) -> dict[str, str]:
         """Return a mapping of {file_hash: file_path} for active known files."""
         if not file_hashes:
