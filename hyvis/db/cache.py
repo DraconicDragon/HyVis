@@ -18,9 +18,11 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import numpy as np
+
+from hyvis.db.migrations_cache import CACHE_LATEST_VERSION, apply_cache_migrations
 
 if TYPE_CHECKING:
     from vibe.metadata import LabelCatalog
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = CACHE_LATEST_VERSION
 
 _FORMAT_U16_PLAIN = 1
 _FORMAT_U32_PLAIN = 2
@@ -205,20 +207,29 @@ class CacheDatabase:
 
         if self._read_only:
             if not is_memory and self._path.is_file():
-                uri = f"{self._path.resolve().as_uri()}?mode=ro"
-                self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False, timeout=30.0)
-                self._conn.execute("PRAGMA foreign_keys = ON")
-                return
-            # Missing cache in read-only / dry-run mode: open ephemeral in-memory schema
+                status = self._inspect_existing_version()
+                if status == "ok":
+                    uri = f"{self._path.resolve().as_uri()}?mode=ro"
+                    self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False, timeout=30.0)
+                    self._conn.execute("PRAGMA foreign_keys = ON")
+                    return
+                logger.warning(
+                    "Cache database %s has status '%s' in read-only mode; using empty in-memory cache for dry run.",
+                    self._path,
+                    status,
+                )
+            # Missing or unmigrated cache in read-only / dry-run mode: open ephemeral in-memory schema
             self._conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._conn.executescript(_CACHE_SCHEMA_SQL)
             self._conn.execute("PRAGMA query_only = ON")
             return
 
-        if not is_memory:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            if self._path.exists() and not self._check_existing_version():
+        if not is_memory and self._path.exists():
+            status = self._inspect_existing_version()
+            if status == "recreate":
                 self._unlink_db_files()
+        elif not is_memory:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(
             str(self._path),
@@ -235,30 +246,53 @@ class CacheDatabase:
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA cache_size = -65536")  # 64MiB
-        self._conn.executescript(_CACHE_SCHEMA_SQL)
-        self._conn.execute(f"PRAGMA user_version = {CACHE_SCHEMA_VERSION}")
+
+        if is_empty:
+            self._conn.executescript(_CACHE_SCHEMA_SQL)
+            self._conn.execute(f"PRAGMA user_version = {CACHE_SCHEMA_VERSION}")
+        else:
+            apply_cache_migrations(self._conn, db_path=self._path)
+            self._conn.executescript(_CACHE_SCHEMA_SQL)
+
         self._conn.commit()
         logger.debug("Cache database opened at %s (schema v%d)", self._path, CACHE_SCHEMA_VERSION)
 
-    def _check_existing_version(self) -> bool:
-        """Verify existing cache.db schema version; return False if mismatched or corrupt."""
+    def _inspect_existing_version(self) -> Literal["ok", "migrate", "recreate"]:
+        """
+        Inspect existing cache.db state:
+            - 'ok'       : matches CACHE_SCHEMA_VERSION
+            - 'migrate'  : valid older schema (1 <= ver < CACHE_SCHEMA_VERSION) or empty uninitialized DB
+            - 'recreate' : corrupt file, incomplete v0 tables, or newer future schema downgrade
+        """
         tmp_conn: sqlite3.Connection | None = None
         try:
             tmp_conn = sqlite3.connect(str(self._path), timeout=10.0)
             row = tmp_conn.execute("PRAGMA user_version").fetchone()
             ver = int(row[0]) if row else 0
-            if ver != CACHE_SCHEMA_VERSION:
+            table_count = int(tmp_conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0])
+
+            if ver == CACHE_SCHEMA_VERSION:
+                return "ok"
+            if 1 <= ver < CACHE_SCHEMA_VERSION or (ver == 0 and table_count == 0):
+                return "migrate"
+            if ver == 0 and table_count > 0:
                 logger.info(
-                    "Cache schema mismatch at %s (found v%d, expected v%d); recreating disposable cache.",
+                    "Found unversioned cache database at %s (v0 with %d tables); recreating disposable cache.",
                     self._path,
-                    ver,
-                    CACHE_SCHEMA_VERSION,
+                    table_count,
                 )
-                return False
-            return True
+                return "recreate"
+
+            logger.warning(
+                "Cache database %s has newer schema v%d (expected <= v%d); recreating disposable cache.",
+                self._path,
+                ver,
+                CACHE_SCHEMA_VERSION,
+            )
+            return "recreate"
         except sqlite3.DatabaseError as exc:
             logger.warning("Cache database %s appears corrupt (%s); recreating disposable cache.", self._path, exc)
-            return False
+            return "recreate"
         finally:
             if tmp_conn is not None:
                 tmp_conn.close()

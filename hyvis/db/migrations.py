@@ -1,11 +1,10 @@
 """
-migrations.py — Sequential, transactional schema migrations using PRAGMA user_version.
+migrations.py — Sequential, transactional schema migrations for hyvis.db using PRAGMA user_version.
 Keeps hyvis_db.py clean and ensures existing databases seamlessly upgrade without data loss.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import sqlite3
@@ -13,29 +12,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from hyvis.db.migration_base import run_migrations
+
 logger = logging.getLogger(__name__)
-
-
-# region Backup Helper
-
-
-def _backup_database(conn: sqlite3.Connection, db_path: Path, current_version: int) -> None:
-    """Safely creates a consistent snapshot of the SQLite database before running migrations."""
-    if str(db_path) in (":memory:", "") or not db_path.exists():
-        return
-
-    backup_path = db_path.with_name(f"{db_path.name}.backup_v{current_version}")
-    logger.info("Creating pre-migration database backup at %s...", backup_path)
-    try:
-        # contextlib.closing guarantees the backup connection closes immediately on Windows
-        with contextlib.closing(sqlite3.connect(backup_path)) as backup_conn:
-            conn.backup(backup_conn)
-        logger.info("Database backup created successfully.")
-    except Exception as exc:
-        logger.warning("Could not create database backup: %s (proceeding with migration)", exc)
-
-
-# endregion
 
 
 # region To v1
@@ -240,43 +219,18 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
     Check PRAGMA user_version and sequentially execute any pending migrations
     inside truly atomic DDL transactions.
     """
-    row = conn.execute("PRAGMA user_version").fetchone()
-    current_version: int = row[0] if row else 0
-
-    if current_version >= LATEST_VERSION:
-        return
-
-    logger.debug("Database user_version=%d (target=%d)", current_version, LATEST_VERSION)
-
-    # Pre-migration safety backup on existing databases
-    if db_path:
-        _backup_database(conn, Path(db_path), current_version)
-
-    dropped_legacy_cache = current_version < 2 <= LATEST_VERSION
-
-    for idx in range(current_version, LATEST_VERSION):
-        target_version = idx + 1
-        migration_fn = MIGRATIONS[idx]
-        fn_name = getattr(migration_fn, "__name__", f"step_{target_version}")
-        logger.info("Applying database migration %d -> %d (%s)...", idx, target_version, fn_name)
-
-        # Force an explicit transaction so DDL (DROP TABLE, CREATE TABLE) is 100% atomic
-        old_isolation = conn.isolation_level
-        try:
-            conn.isolation_level = None  # Autocommit mode for manual transaction control
-            conn.execute("BEGIN IMMEDIATE")
-            migration_fn(conn)
-            conn.execute(f"PRAGMA user_version = {target_version}")
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            logger.exception("Migration %d -> %d failed; rolled back all changes.", idx, target_version)
-            raise
-        finally:
-            conn.isolation_level = old_isolation
+    migration_map = {idx + 1: fn for idx, fn in enumerate(MIGRATIONS)}
+    prev_version = run_migrations(
+        conn,
+        migration_map,
+        latest_version=LATEST_VERSION,
+        db_path=db_path,
+        label="Database",
+        create_backup=True,
+    )
 
     # Reclaim space outside transaction if legacy JSON cache was dropped
-    if dropped_legacy_cache and str(db_path or "") not in (":memory:", ""):
+    if prev_version < 2 <= LATEST_VERSION and str(db_path or "") not in (":memory:", ""):
         old_isolation = conn.isolation_level
         try:
             conn.isolation_level = None
@@ -286,8 +240,6 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
             logger.warning("Post-migration VACUUM skipped: %s", exc)
         finally:
             conn.isolation_level = old_isolation
-
-    logger.info("Database migrations complete. Current schema version: v%d", LATEST_VERSION)
 
 
 # endregion
