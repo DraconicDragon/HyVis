@@ -725,7 +725,7 @@ class HyvisConfig(StrictBaseModel):
     max_log_files: int = Field(
         default=20,
         ge=1,
-        le=100,
+        le=1000,
         title="Max Log Files",
         description=(
             "The maximum number of past log files to keep on disk.\n"
