@@ -825,7 +825,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
                 self,
                 "Confirm Discard Unfinished Run",
                 f"Are you sure you want to discard the unfinished run from {self._active_run.run.started_at}?\n\n"
-                f"{pending_n} file(s) had not finished inference yet ({done_n} already-inferred file(s) remain logged/queued). "
+                f"{pending_n} file(s) had not finished inference yet.\n"
                 "Only proceed if no HyVis process is currently running in another terminal.\n\n"
                 "This will clear the unfinished run state and start a fresh run with your current configuration.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
