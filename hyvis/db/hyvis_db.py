@@ -306,6 +306,26 @@ class Database:
                     results[h] = p
         return results
 
+    def bulk_get_known_frames(self, file_hashes: Sequence[str]) -> dict[str, int]:
+        """Return a mapping of {file_hash: num_frames} for files with recorded frame counts."""
+        if not file_hashes:
+            return {}
+
+        results: dict[str, int] = {}
+        for chunk in self._chunk_list(file_hashes, 900):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"""
+                SELECT file_hash, num_frames FROM known_files
+                WHERE file_hash IN ({placeholders}) AND num_frames IS NOT NULL
+                """,
+                chunk,
+            ).fetchall()
+            for h, n in rows:
+                if n is not None:
+                    results[h] = int(n)
+        return results
+
     def get_all_known_hashes(self) -> list[str]:
         """Return all file hashes tracked in known_files (used for orphan cache purging)."""
         rows = self.conn.execute("SELECT file_hash FROM known_files").fetchall()
