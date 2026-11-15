@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -26,7 +27,14 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.config import AppConfig
-from hyvis.db import ActiveRunInspection, RunMode, inspect_active_run_readonly
+from hyvis.db import (
+    ActiveRunInspection,
+    ClientBindingInspection,
+    RunMode,
+    hash_api_key,
+    inspect_active_run_readonly,
+    inspect_client_binding_readonly,
+)
 from hyvis.gui.base_widgets import Divider
 from hyvis.gui.launcher import format_cli_command_str, launch_in_external_terminal
 from hyvis.gui.theme import CardTheme, ThemeSubscriberMixin
@@ -35,6 +43,14 @@ from hyvis.hydrus import HydrusClient, HydrusError
 from hyvis.preflight import PreflightResult, inspect_preview_page, run_preflight
 
 logger = logging.getLogger(__name__)
+
+
+class _ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, ev: QMouseEvent) -> None:
+        self.clicked.emit()
+        super().mousePressEvent(ev)
 
 
 class _PreflightSignals(QObject):
@@ -68,7 +84,7 @@ class _ResumeCheckSignals(QObject):
 
 
 class _ResumeCheckWorker(QRunnable):
-    """Lightweight worker for resume mode: verifies Hydrus & preview pages without running search queries."""
+    """Lightweight worker for resume mode: verifies Hydrus, services, & preview pages without running search queries."""
 
     def __init__(self, cfg: AppConfig, active: ActiveRunInspection) -> None:
         super().__init__()
@@ -86,6 +102,13 @@ class _ResumeCheckWorker(QRunnable):
             )
             api_str = str(v_info.get("api_version") or v_info.get("version") or "unknown")
 
+            service_name_by_key: dict[str, str] = {}
+            try:
+                raw_services = client.get_services().get("services", {})
+                service_name_by_key = {k: str(v.get("name", k)) for k, v in raw_services.items()}
+            except Exception:
+                pass
+
             p = self.cfg.hydrus.preview
             cp = inspect_preview_page(client, p.page_name, p.page_index) if p and p.page_name else None
             rp = (
@@ -97,6 +120,7 @@ class _ResumeCheckWorker(QRunnable):
             res = PreflightResult(
                 hydrus_version=v_str,
                 api_version=api_str,
+                service_name_by_key=service_name_by_key,
                 candidate_hashes=list(self.active.pending_hashes),
                 rejected_hashes=list(self.active.rejected_hashes),
                 rejected_mimes=set(self.active.rejected_mimes),
@@ -162,6 +186,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         raw_db = Path(self.cfg.database.path)
         self._db_path = raw_db if raw_db.is_absolute() else (Path.cwd() / raw_db)
         self._active_run: ActiveRunInspection | None = inspect_active_run_readonly(self._db_path)
+        self._client_binding: ClientBindingInspection | None = inspect_client_binding_readonly(self._db_path)
+        self._has_client_mismatch: bool = False
 
         self._fresh_result: PreflightResult | None = None
         self._resume_result: PreflightResult | None = None
@@ -277,6 +303,49 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             ar_layout.addLayout(action_row)
             self.active_run_card.setContentLayout(ar_layout)
             layout.addWidget(self.active_run_card)
+
+        # 0b. Hydrus Client Binding Mismatch Card (Shown when connected client != bound client in hyvis.db)
+        self.client_mismatch_card = SectionCard(
+            "⚠ Hydrus Client Mismatch",
+            theme=CardTheme.WARNING_VIVID,
+            parent=container,
+        )
+        cm_layout = QVBoxLayout()
+        cm_layout.setContentsMargins(0, 0, 0, 0)
+        cm_layout.setSpacing(8)
+
+        self.client_mismatch_label = QLabel(self.client_mismatch_card)
+        self.client_mismatch_label.setWordWrap(True)
+        self.client_mismatch_label.setStyleSheet("border: none; background: transparent;")
+        cm_layout.addWidget(self.client_mismatch_label)
+
+        # Word-wrapped checkbox row (prevents long label from forcing horizontal scrollbar)
+        chk_row = QHBoxLayout()
+        chk_row.setContentsMargins(0, 0, 0, 0)
+        chk_row.setSpacing(8)
+
+        self.update_binding_chk = QCheckBox(self.client_mismatch_card)
+        self.update_binding_chk.setChecked(False)
+        self.update_binding_chk.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.update_binding_chk.toggled.connect(self._on_update_binding_toggled)
+        chk_row.addWidget(self.update_binding_chk, 0, Qt.AlignmentFlag.AlignTop)
+
+        # checkbox with qlabel attached so word wrapping happens
+        self.update_binding_lbl = _ClickableLabel(
+            "Update stored client binding to this Hydrus client and proceed (--update-client-binding)",
+            self.client_mismatch_card,
+        )
+        self.update_binding_lbl.setWordWrap(True)
+        self.update_binding_lbl.setStyleSheet("border: none; background: transparent;")
+        self.update_binding_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_binding_lbl.clicked.connect(self.update_binding_chk.toggle)
+        chk_row.addWidget(self.update_binding_lbl, 1)
+
+        cm_layout.addLayout(chk_row)
+
+        self.client_mismatch_card.setContentLayout(cm_layout)
+        self.client_mismatch_card.setVisible(False)
+        layout.addWidget(self.client_mismatch_card)
 
         # Candidate Files SectionCard
         self.files_card = SectionCard("Candidate Files", parent=container)
@@ -458,6 +527,8 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
 
     def _build_launch_target(self) -> tuple[Path | None, list[str]]:
         args = self._build_effective_args()
+        if self._has_client_mismatch and self.update_binding_chk.isChecked():
+            args.append("--update-client-binding")
         if self._active_run is not None:
             action = self._active_run_action()
             if action == "resume":
@@ -474,6 +545,12 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             self.cmd_edit.setPlainText(cmd_str)
 
     def _on_active_run_action_changed(self) -> None:
+        self.update_binding_chk.blockSignals(True)
+        self.update_binding_chk.setChecked(False)
+        self.update_binding_chk.blockSignals(False)
+        self._has_client_mismatch = False
+        self.client_mismatch_card.setVisible(False)
+
         self._sync_command_text()
         action = self._active_run_action()
 
@@ -487,6 +564,68 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
                 self._apply_preflight_result(self._fresh_result, is_resume=False)
             else:
                 self._run_preflight()
+
+    def _on_update_binding_toggled(self, checked: bool) -> None:
+        del checked
+        self._sync_command_text()
+        cand_count = len(self._result.candidate_hashes) if self._result else 0
+        mismatch_blocking = self._has_client_mismatch and not self.update_binding_chk.isChecked()
+        self.launch_btn.setEnabled(cand_count > 0 and not mismatch_blocking)
+
+    def _update_client_mismatch_ui(self) -> bool:
+        """
+        Evaluate whether the connected Hydrus client differs from the binding in hyvis.db.
+        Returns True if mismatch is currently blocking launch.
+        """
+        if self._client_binding is None or self._result is None:
+            self._has_client_mismatch = False
+            self.client_mismatch_card.setVisible(False)
+            return False
+
+        eff_cfg = self._effective_cfg_for_preview()
+        cur_url = eff_cfg.hydrus.api_url.strip().rstrip("/")
+        cur_key_hash = hash_api_key(eff_cfg.hydrus.api_key)
+        cur_services = frozenset(self._result.service_name_by_key.keys())
+
+        saved = self._client_binding.binding
+        url_changed = saved.api_url != cur_url
+        key_changed = saved.api_key_hash != cur_key_hash
+        removed_services = saved.service_keys - cur_services
+        added_services = cur_services - saved.service_keys
+
+        # Only trigger warning if URL, key, or existing services went missing
+        if not url_changed and not key_changed and not removed_services:
+            self._has_client_mismatch = False
+            self.client_mismatch_card.setVisible(False)
+            return False
+
+        self._has_client_mismatch = True
+        lines = [f"Database <b>{self.cfg.database.path}</b> was previously used with a different Hydrus client:"]
+        if url_changed:
+            lines.append(f"• <b>API URL:</b> {saved.api_url} → {cur_url}")
+        if key_changed:
+            lines.append("• <b>API Key:</b> changed (different Hydrus client or rotated key)")
+        if removed_services or added_services:
+            lines.append(f"• <b>Services:</b> {len(removed_services)} missing, {len(added_services)} new")
+
+        if self._client_binding.pending_push_count > 0:
+            lines.append(
+                f"<span style='color: {self.tokens.status_danger}; font-weight: 600;'>"
+                f"⚠ push_queue currently holds {self._client_binding.pending_push_count} unpushed file(s) from the previous client!"
+                "</span>"
+            )
+
+        lines.append(
+            f"<span style='color: {self.tokens.text_secondary};'>"
+            "If this is a separate Hydrus client (e.g. a test client), change <b>Database File Path</b> "
+            "(keeping the same Cache Database File Path) instead of overwriting the binding."
+            "</span>"
+        )
+
+        self.client_mismatch_label.setText("<br>".join(lines))
+        self.client_mismatch_card.setVisible(True)
+        self._sync_command_text()
+        return not self.update_binding_chk.isChecked()
 
     def _on_prompt_chk_toggled(self, checked: bool) -> None:
         del checked
@@ -593,10 +732,12 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.conn_label.setStyleSheet(f"font-weight: 600; color: {self.tokens.status_success};")
         self.recheck_btn.setEnabled(True)
 
+        mismatch_blocking = self._update_client_mismatch_ui()
+
         if is_resume:
             self._render_resume_files_summary()
             self._update_preview_ui()
-            self.launch_btn.setEnabled(cand_count > 0)
+            self.launch_btn.setEnabled(cand_count > 0 and not mismatch_blocking)
             return
 
         # Candidate and Rejected Files summary (fresh run)
@@ -616,7 +757,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.files_label.setText("<br>".join(msg_lines))
 
         self._update_preview_ui()
-        self.launch_btn.setEnabled(cand_count > 0)
+        self.launch_btn.setEnabled(cand_count > 0 and not mismatch_blocking)
 
     def _on_preflight_error(self, err_msg: str) -> None:
         if self._active_run_action() == "resume":

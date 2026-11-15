@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QWidget
 
-from hyvis.db import ActiveRunInfo, ActiveRunInspection, RunMode
+from hyvis.db import ActiveRunInfo, ActiveRunInspection, ClientBinding, ClientBindingInspection, RunMode
 from hyvis.gui.theme import BUILTIN_THEMES, theme_manager
 
 
@@ -49,7 +49,13 @@ class DevToolsStrip(QWidget):
             layout, "Launch (Active Run)", self._on_launch_mock_active_run_clicked
         )
         self.launch_active_button.setToolTip(
-            "Open launch dialog simulating an interrupted active run (to test warning card and Resume/Discard UI)."
+            "Open launch dialog simulating an unfinished active run (to test warning card and Resume/Discard UI)."
+        )
+        self.launch_mismatch_button = self._add_button(
+            layout, "Launch (Client Mismatch)", self._on_launch_mock_client_mismatch_clicked
+        )
+        self.launch_mismatch_button.setToolTip(
+            "Open launch dialog simulating a bound Hydrus client mismatch in hyvis.db."
         )
         self.unsaved_button = self._add_button(layout, "Unsaved changes", self._on_unsaved_changes_clicked)
 
@@ -154,13 +160,18 @@ class DevToolsStrip(QWidget):
             self._open_launch()
             return
 
+        import tomli_w
+
+        from hyvis.gui.state import _prune_none
+
         config_path = state.current_path or Path("config.toml")
         dialog_class = self._reload_dialog_class("launch_dialog", "LaunchDialog")
+        frozen_toml = tomli_w.dumps(_prune_none(state.config.model_dump(mode="json", exclude_none=True)))
 
-        # Mock an interrupted run with 38 pending, 12 done, and 3 rejected files
+        # Mock an unfinished run with 38 pending, 12 queued, and 3 rejected files
         mock_inspection = ActiveRunInspection(
             run=ActiveRunInfo(
-                config_toml=state.config.model_dump_json(),
+                config_toml=frozen_toml,
                 config_path=str(config_path),
                 mode=RunMode.DEFAULT,
                 force_mode=False,
@@ -175,12 +186,47 @@ class DevToolsStrip(QWidget):
 
         import hyvis.gui.dialogs.launch_dialog as ld_mod
 
-        orig_fn = ld_mod.inspect_active_run_readonly
+        orig_active = ld_mod.inspect_active_run_readonly
+        orig_binding = ld_mod.inspect_client_binding_readonly
         ld_mod.inspect_active_run_readonly = lambda _path: mock_inspection
+        ld_mod.inspect_client_binding_readonly = lambda _path: None
         try:
             dialog_class(state.config, config_path, window).exec()
         finally:
-            ld_mod.inspect_active_run_readonly = orig_fn
+            ld_mod.inspect_active_run_readonly = orig_active
+            ld_mod.inspect_client_binding_readonly = orig_binding
+
+    def _on_launch_mock_client_mismatch_clicked(self) -> None:
+        """Open launch dialog simulating a Hydrus client mismatch against db_meta."""
+        window = self._window_for(self._open_launch)
+        state = getattr(window, "state", None)
+        if window is None or state is None:
+            self._open_launch()
+            return
+
+        config_path = state.current_path or Path("config.toml")
+        dialog_class = self._reload_dialog_class("launch_dialog", "LaunchDialog")
+
+        mock_binding = ClientBindingInspection(
+            binding=ClientBinding(
+                api_url="http://127.0.0.1:45999",
+                api_key_hash="0000000000000000",
+                service_keys=frozenset({"deadbeef" * 8}),
+            ),
+            pending_push_count=17,
+        )
+
+        import hyvis.gui.dialogs.launch_dialog as ld_mod
+
+        orig_active = ld_mod.inspect_active_run_readonly
+        orig_binding = ld_mod.inspect_client_binding_readonly
+        ld_mod.inspect_active_run_readonly = lambda _path: None
+        ld_mod.inspect_client_binding_readonly = lambda _path: mock_binding
+        try:
+            dialog_class(state.config, config_path, window).exec()
+        finally:
+            ld_mod.inspect_active_run_readonly = orig_active
+            ld_mod.inspect_client_binding_readonly = orig_binding
 
     def _on_preferences_clicked(self) -> None:
         window = self._window_for(self._open_preferences)

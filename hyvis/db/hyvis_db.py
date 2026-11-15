@@ -86,6 +86,14 @@ class ActiveRunInspection:
     rejected_mimes: set[str]
 
 
+@dataclass(frozen=True)
+class ClientBindingInspection:
+    """Read-only snapshot of the bound Hydrus client fingerprint and pending queue state."""
+
+    binding: ClientBinding
+    pending_push_count: int
+
+
 # region Schema Definition
 
 _SCHEMA_SQL = """
@@ -842,6 +850,47 @@ def inspect_active_run_readonly(db_path: str | Path) -> ActiveRunInspection | No
         )
     except (sqlite3.Error, ValueError):
         # Safely handles unmigrated v1 databases or transient read locks
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def inspect_client_binding_readonly(db_path: str | Path) -> ClientBindingInspection | None:
+    """
+    Safely inspect the recorded Hydrus client binding and pending push count in strict
+    read-only URI mode without creating files or running migrations.
+    """
+    path = Path(db_path)
+    if str(path) == ":memory:" or not path.is_file():
+        return None
+
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=2.0)
+        rows = conn.execute(
+            "SELECT key, value FROM db_meta WHERE key IN ('client_api_url', 'client_api_key_hash', 'client_service_keys')"
+        ).fetchall()
+        meta = dict(rows)
+        if len(meta) < 3:
+            return None
+
+        services_list = json.loads(meta["client_service_keys"])
+        binding = ClientBinding(
+            api_url=meta["client_api_url"],
+            api_key_hash=meta["client_api_key_hash"],
+            service_keys=frozenset(str(k) for k in services_list),
+        )
+
+        q_row = conn.execute(
+            "SELECT COUNT(*) FROM push_queue WHERE attempts < ?",
+            (MAX_PUSH_ATTEMPTS,),
+        ).fetchone()
+        pending_pushes = int(q_row[0]) if q_row else 0
+
+        return ClientBindingInspection(binding=binding, pending_push_count=pending_pushes)
+    except (sqlite3.Error, ValueError, KeyError, TypeError):
         return None
     finally:
         if conn is not None:
