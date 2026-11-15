@@ -150,20 +150,28 @@ def extract_frames(
                 )
                 return (_to_pil(cv2, center_frame),)
 
-        frames = _sample_video(
-            cap,
-            fps=fps,
-            total_frame_count=total_frame_count,
-            max_frames=max_frames,
-            max_frames_at_seconds=max_frames_at_seconds,
-            probe_multiplier=probe_multiplier,
-            max_probes=max_probes,
-            include_edges=include_edges,
-            loop=loop,
-            dedupe=dedupe,
-            fades=fades,
-            low_interest=low_interest,
-        )
+        # A container can open while every frame fails to decode (AV1 builds
+        # with only a hardware path). Check one frame first so the OpenCV
+        # probe grid is skipped instead of failing once per candidate.
+        decodable = _read_frame(cv2, cap, 0) is not None
+        frames: tuple["Image.Image", ...] = ()
+        if decodable:
+            # Rewind: the readability check consumed frame 0.
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            frames = _sample_video(
+                cap,
+                fps=fps,
+                total_frame_count=total_frame_count,
+                max_frames=max_frames,
+                max_frames_at_seconds=max_frames_at_seconds,
+                probe_multiplier=probe_multiplier,
+                max_probes=max_probes,
+                include_edges=include_edges,
+                loop=loop,
+                dedupe=dedupe,
+                fades=fades,
+                low_interest=low_interest,
+            )
         if not frames:
             # OpenCV can open the container but not decode it: AV1 builds that
             # only expose a hardware path fail every read. Try the ffmpeg CLI
@@ -366,14 +374,78 @@ def _ffmpeg_binary() -> str | None:
     return shutil.which("ffmpeg")
 
 
-def _ffmpeg_frame(video_path: str | Path, timestamp: float) -> "Image.Image" | None:
-    """Decode one frame at ``timestamp`` through the ffmpeg CLI.
+def _ffmpeg_frames(video_path: str | Path, indices: Sequence[int]) -> dict[int, "Image.Image"]:
+    """Decode several frames in one ffmpeg pass, keyed by frame index.
 
-    Only used when OpenCV cannot decode the file. One subprocess per probe
-    keeps this bounded and stateless; probes are at most ``max_probes`` per
-    clip, and clips that reach this path are ones that would otherwise be
-    skipped entirely. Returns an RGB PIL frame, or None when the timestamp
-    cannot be decoded.
+    Only used when OpenCV cannot decode the file. A single pass with a
+    ``select`` filter is much cheaper than one process per probe: an AV1 file
+    with no seek index re-decodes from the start on every seek, which made a
+    50 probe fallback take a minute instead of about a second. Returns only
+    the frames that decoded; an incomplete result falls back to one grab per
+    index.
+    """
+    from PIL import Image
+
+    ffmpeg = _ffmpeg_binary()
+    ordered = sorted({idx for idx in indices if idx >= 0})
+    if ffmpeg is None or not ordered:
+        return {}
+    selector = "select='" + "+".join(f"eq(n\\,{idx})" for idx in ordered) + "'"
+    command = [
+        ffmpeg,
+        "-v",
+        "error",
+        "-nostdin",
+        "-i",
+        str(video_path),
+        "-vf",
+        selector,
+        "-an",
+        "-sn",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
+        "-",
+    ]
+    try:
+        # -fps_mode is the modern spelling; older builds only know -vsync.
+        completed = subprocess.run(
+            [*command[:8], "-fps_mode", "passthrough", *command[8:]],
+            capture_output=True,
+            timeout=_FFMPEG_TIMEOUT * 4,
+        )
+        if completed.returncode != 0:
+            completed = subprocess.run(
+                [*command[:8], "-vsync", "0", *command[8:]],
+                capture_output=True,
+                timeout=_FFMPEG_TIMEOUT * 4,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if completed.returncode != 0 or not completed.stdout:
+        return {}
+    signature = b"\x89PNG\r\n\x1a\n"
+    frames: dict[int, "Image.Image"] = {}
+    for position, chunk in enumerate(completed.stdout.split(signature)[1:]):
+        if position >= len(ordered):
+            break
+        try:
+            image = Image.open(io.BytesIO(signature + chunk))
+            image.load()
+            frames[ordered[position]] = image.convert("RGB")
+        except (OSError, ValueError):
+            return {}
+    if len(frames) != len(ordered):
+        return {}
+    return frames
+
+
+def _ffmpeg_frame(video_path: str | Path, timestamp: float) -> "Image.Image" | None:
+    """Decode one frame through the ffmpeg CLI (slow fallback path).
+
+    Kept for the rare case where the batch ``select`` pass cannot decode
+    cleanly; callers normally use ``_ffmpeg_frames``.
     """
     from PIL import Image
 
@@ -407,6 +479,7 @@ def _ffmpeg_frame(video_path: str | Path, timestamp: float) -> "Image.Image" | N
         return None
     try:
         frame = Image.open(io.BytesIO(completed.stdout))
+        frame.load()
         return frame.convert("RGB")
     except (OSError, ValueError):
         return None
@@ -451,7 +524,8 @@ def _sample_video_ffmpeg(
         max_frames_at_seconds=max_frames_at_seconds,
         include_edges=use_edges,
     )
-    cache: dict[int, "Image.Image | None"] = {}
+    decoded = _ffmpeg_frames(video_path, candidates)
+    cache: dict[int, "Image.Image | None"] = dict(decoded)
 
     def grab(frame_idx: int) -> "Image.Image | None":
         if frame_idx not in cache:
