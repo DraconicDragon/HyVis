@@ -744,161 +744,147 @@ class VideoConfig(StrictBaseModel):
     """
     Settings for tagging video files and animated GIFs by sampling frames.
 
+    The sampler probes a dense grid of candidate frames across the content
+    window in one forward pass, drops dead frames (fades, flat dark frames)
+    and near-duplicates, and keeps one frame per visually distinct phase.
+    The grid is deliberately larger than the number of frames that go to
+    inference, so the filters have alternatives to reject.
+
     enabled                Accept video/* MIME types and tag them. When false,
-                           videos are rejected exactly like before this feature;
-                           animated GIFs still load as images and are tagged
-                           from their first frame.
-    max_frames             Maximum number of sample frames extracted per video
-                           or animated GIF. Shorter files are sampled
-                           proportionally less.
+                           videos are rejected; animated GIFs still load as
+                           images and are tagged from their first frame.
+    max_frames             Maximum number of sampled frames sent to inference
+                           per file. Shorter files keep proportionally fewer.
     max_frames_at_seconds  Duration (seconds) at which the full max_frames is
-                           used; files shorter than this are sampled less,
-                           and the sampling interval never exceeds
-                           max_frames_at_seconds / max_frames.
-    sampler                Frame-selection strategy. "scan" probes a dense
-                           grid of candidate frames across the content window,
-                           skips dead frames (fades, flat black/white, dark
-                           near-uniform) and near-duplicates, and keeps the
-                           first frame of every visually distinct phase; it
-                           decodes each candidate once. "uniform" is the
-                           original duration-scaled even sampling followed by
-                           fade replacement and dedupe. "scan" is faster on
-                           files whose container has no frame index (WebM)
-                           and normally picks more distinct frames per
-                           inference. Defaults to "scan".
-    include_edges          Include the first and last frame of the video or
-                           animation. With dedupe enabled they may still be
-                           dropped if near-identical to another sampled
-                           frame (e.g. a loop's end frame duplicating its
-                           start).
-    include_edges_max_seconds
-                           Loop assumption by duration: clips longer than
-                           this many seconds are treated as loops. Their
-                           edge frames are skipped and samples are taken
-                           from the center of the content window outward,
-                           since a loop's first frame is just another phase
-                           of the same motion. Shorter clips keep the
-                           edges. Set to 0 to disable this rule.
-                           Defaults to 0 (disabled).
-    single_frame_below_seconds
-                           Assume clips shorter than this many seconds are
-                           loops: nothing meaningful can be conveyed in that
-                           time, so a single centered frame is inferred
-                           instead of the usual three (first/middle/last).
-                           Skips edge sampling, fade replacement and dedupe
-                           for these clips. Set to 0 to disable this rule.
-                           Defaults to 1.0.
-    detect_loops           Loop detection by picture: compare the first and
-                           last frame; when they match (using the dedupe
-                           thresholds) the clip is treated as a loop, so
-                           its edge frames are skipped and sampling starts
-                           at the center. This catches real loops of any
-                           duration and leaves non-looping clips alone.
-                           Reuses dedupe_threshold/dedupe_change_level/
-                           dedupe_max_changed_fraction for the comparison.
-                           Defaults to true.
-    write_frames           Debug aid: save the sampled frames as PNGs under
+                           kept; shorter files keep proportionally fewer.
+    probe_multiplier       Candidate frames probed per kept frame. The default
+                           of 3 gives the fade, low-interest and duplicate
+                           filters roughly two alternatives to reject for
+                           every frame that survives.
+    max_probes             Hard ceiling on candidate frames per file, so a
+                           large probe_multiplier cannot turn into a decode
+                           marathon. Defaults to 48.
+    include_edges          Also probe the true first and last frame. Edge
+                           probes are dropped when the clip is detected as a
+                           loop, since its last frame just repeats its first.
+    write_frames           Debug aid: save the kept frames as PNGs under
                            frames/<file_hash>/ so you can inspect exactly what
                            is being inferred. Defaults to false.
-    exclude_fades          Replace sampled frames that land inside
-                           fade-to-black/fade-to-white transitions with the
-                           nearest non-fade frame (see FadeFilterConfig).
-                           A fade frame is detected as near-uniform AND
-                           near-black/near-white, so dark scenes with detail
-                           are preserved. Defaults to false.
-    low_interest           Drop sampled frames with little interesting
-                           content (flat AND dark - e.g. black frames and
-                           fade-outs the padding missed) so inference is not
-                           wasted on them (see LowInterestFilterConfig).
-                           Defaults to enabled.
-    dedupe                 Drop sampled frames that are near-duplicates of an
-                           already-chosen frame. This is the main defence
-                           against looping animations (the same loop phase
-                           sampled at different times) and static segments
-                           wasting the max_frames budget. Applies to videos
-                           and animated GIFs. Defaults to true.
-    dedupe_threshold       Normalized mean frame difference (0-1) below which
-                           two sampled frames count as duplicates. Lower =
-                           stricter (only near-identical frames dropped).
-                           Defaults to 0.03.
-    dedupe_change_level    Second, area-independent duplicate test: two frames
-                           are only duplicates if the fraction of pixels
-                           differing by more than this (8-bit gray levels) is
-                           below dedupe_max_changed_fraction. Protects small
-                           but important changes (a character or water
-                           movement in a mostly static frame) that barely
-                           move the mean. Lower = stricter. Defaults to 25.
-    dedupe_max_changed_fraction
-                           Max fraction (0-1) of pixels that may differ by
-                           more than dedupe_change_level for two frames to
-                           still count as duplicates. Elements smaller than
-                           this fraction of the frame survive dedupe; lower
-                           it to protect smaller elements. Defaults to 0.01.
+    loop                   Loop heuristics (detect, single_frame_below_seconds,
+                           edges_max_seconds). See LoopConfig.
+    dedupe                 Near-duplicate removal, the main defence against
+                           loop phases and static segments wasting max_frames.
+                           See DedupeConfig.
+    fades                  Fade-to-black/white frame filter. See
+                           FadeFilterConfig.
+    low_interest           Flat-and-dark frame filter (black frames, missed
+                           fade-outs). Enabled by default. See
+                           LowInterestFilterConfig.
     """
 
     enabled: bool = True
     max_frames: int = Field(default=11, ge=1)
     max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
-    sampler: Literal["uniform", "scan"] = Field(default="scan")
+    probe_multiplier: int = Field(default=3, ge=1)
+    max_probes: int = Field(default=48, ge=1)
     include_edges: bool = True
-    include_edges_max_seconds: float = Field(default=0.0, ge=0.0)
-    single_frame_below_seconds: float = Field(default=1.0, ge=0.0)
-    detect_loops: bool = True
     write_frames: bool = False
-    exclude_fades: bool = False
-    dedupe: bool = True
-    dedupe_threshold: float = Field(default=0.03, ge=0.0, le=1.0)
-    dedupe_change_level: int = Field(default=25, ge=1, le=255)
-    dedupe_max_changed_fraction: float = Field(default=0.01, ge=0.0, le=1.0)
+    loop: "LoopConfig" = Field(default_factory=lambda: LoopConfig())
+    dedupe: "DedupeConfig" = Field(default_factory=lambda: DedupeConfig())
     fades: "FadeFilterConfig" = Field(default_factory=lambda: FadeFilterConfig())
     low_interest: "LowInterestFilterConfig" = Field(
         default_factory=lambda: LowInterestFilterConfig()
     )
 
 
+class LoopConfig(StrictBaseModel):
+    """
+    Loop heuristics for video and animated GIF sampling.
+
+    detect                  Compare the first and last frame of a clip before
+                            sampling. When they match within the dedupe
+                            thresholds (with a looser changed-pixel tolerance,
+                            because a seam is only one frame apart), the clip
+                            is treated as a loop: its edge probes are skipped
+                            so inference is not spent on a frame that repeats
+                            another one. Costs at most two extra decodes.
+                            Defaults to true.
+    single_frame_below_seconds
+                            Clips shorter than this are assumed to be loops
+                            too short to say anything beyond a single frame:
+                            one centered frame is inferred and the probe grid
+                            is skipped entirely. Set to 0 to disable the rule.
+                            Defaults to 1.0.
+    edges_max_seconds       Duration-only loop assumption that costs no
+                            decoding: clips longer than this are treated as
+                            loops, so their edge probes are skipped. Useful
+                            when most of your library is looping animations.
+                            Set to 0 to disable the rule. Defaults to 0.0.
+    """
+
+    detect: bool = True
+    single_frame_below_seconds: float = Field(default=1.0, ge=0.0)
+    edges_max_seconds: float = Field(default=0.0, ge=0.0)
+
+
+class DedupeConfig(StrictBaseModel):
+    """
+    Near-duplicate removal for sampled frames.
+
+    enabled              Drop sampled frames that are near-duplicates of an
+                         already-kept frame. This is what turns a dense probe
+                         grid into one frame per visually distinct phase, and
+                         what stops looping animations and static segments
+                         from burning the max_frames budget. Defaults to true.
+    threshold            Normalized mean frame difference (0-1) below which
+                         two frames count as duplicates. Lower = stricter
+                         (only near-identical frames are dropped). Defaults
+                         to 0.03.
+    change_level         Second, area-independent test: pixels differing by
+                         more than this many 8-bit gray levels count as
+                         "changed". Protects small but important changes (a
+                         character or a bit of water movement) that barely
+                         move the mean. Lower = stricter. Defaults to 25.
+    max_changed_fraction Max fraction (0-1) of pixels that may be changed
+                         before two frames stop counting as duplicates.
+                         Elements smaller than this fraction of the frame
+                         survive dedupe; lower it to protect smaller elements.
+                         Defaults to 0.01.
+    """
+
+    enabled: bool = True
+    threshold: float = Field(default=0.03, ge=0.0, le=1.0)
+    change_level: int = Field(default=25, ge=1, le=255)
+    max_changed_fraction: float = Field(default=0.01, ge=0.0, le=1.0)
+
+
 class FadeFilterConfig(StrictBaseModel):
     """
-    Thresholds for excluding fade-to-black/fade-to-white frames (used only
-    when [video].exclude_fades = true).
+    Fade-to-black/fade-to-white frame filter.
 
-    A sampled frame is treated as a fade frame when its mean luminance is
-    below dark_threshold OR above light_threshold, AND its luminance std is
-    below uniformity (i.e. it is flat, not a detailed dark/bright scene).
+    A probed frame is dropped when its mean luminance is below dark_threshold
+    OR above light_threshold, AND its luminance std is below uniformity (i.e.
+    it is flat, not a detailed dark/bright scene). Dropping is deliberate:
+    the probe grid has spare candidates, so a fade frame is simply skipped
+    and the next distinct frame in that phase is kept instead.
 
-    Fade frames are replaced by the nearest frame that is both not fade-like
-    and at least replacement_min_brightness bright (so the replacement is
-    comfortably past the fade, not the dimmest frame that barely passes the
-    detection test), searching within search_seconds.
-
+    enabled                  Drop fade frames from the probe selection. The
+                             filters below are only read when this is true.
+                             Defaults to false.
     dark_threshold           Mean luminance (0-1) below which a frame counts
-                             as "black" for DETECTION. Fade-to-black frames
+                             as "black" for detection. Fade-to-black frames
                              are typically < 0.05.
     light_threshold          Mean luminance (0-1) above which a frame counts
                              as "white" for detection.
     uniformity               Luminance std (0-1) below which a frame counts
                              as flat/uniform. Dark scenes with detail have
                              higher std and are therefore preserved.
-    replacement_min_brightness
-                             Minimum mean luminance (0-1) for sampled frames
-                             near fades. Frames below this - whether flat
-                             fade frames or merely dim-but-detailed frames
-                             just past a fade - are replaced by the nearest
-                             sufficiently bright non-fade frame within
-                             search_seconds. Tune this to control how bright
-                             the frames picked around fades are. Dark scenes
-                             are preserved: dim-but-detailed frames are only
-                             nudged when a fade-like frame actually exists
-                             nearby.
-    search_seconds           How far (seconds) to look in both directions for
-                             a replacement frame before giving up and keeping
-                             the original.
     """
 
+    enabled: bool = False
     dark_threshold: float = Field(default=0.10, ge=0.0, le=1.0)
     light_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
     uniformity: float = Field(default=0.08, ge=0.0, le=1.0)
-    replacement_min_brightness: float = Field(default=0.30, ge=0.0, le=1.0)
-    search_seconds: float = Field(default=2.0, gt=0.0)
 
 
 class LowInterestFilterConfig(StrictBaseModel):
@@ -955,7 +941,7 @@ class AppConfig(StrictBaseModel):
     video: VideoConfig = Field(
         default_factory=VideoConfig,
         title="Video",
-        description="Video tagging: frame sampling, near-duplicate removal, fade and low-interest frame filters.",
+        description="Video tagging: probe grid across the content window, loop assumptions, near-duplicate, fade and low-interest frame filters.",
     )
 
 

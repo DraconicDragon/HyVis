@@ -769,17 +769,13 @@ async def infer_files(
                             fi.local_path,
                             max_frames=video_cfg.max_frames,
                             max_frames_at_seconds=video_cfg.max_frames_at_seconds,
+                            probe_multiplier=video_cfg.probe_multiplier,
+                            max_probes=video_cfg.max_probes,
                             include_edges=video_cfg.include_edges,
-                            include_edges_max_seconds=video_cfg.include_edges_max_seconds,
-                            sampler=video_cfg.sampler,
-                            single_frame_below_seconds=video_cfg.single_frame_below_seconds,
-                            detect_loops=video_cfg.detect_loops,
-                            fades=video_cfg.fades if video_cfg.exclude_fades else None,
+                            loop=video_cfg.loop,
+                            fades=video_cfg.fades if video_cfg.fades.enabled else None,
                             low_interest=video_cfg.low_interest,
                             dedupe=video_cfg.dedupe,
-                            dedupe_threshold=video_cfg.dedupe_threshold,
-                            dedupe_change_level=video_cfg.dedupe_change_level,
-                            dedupe_max_changed_fraction=video_cfg.dedupe_max_changed_fraction,
                         )
                         if not frames:
                             # Nothing decodable (e.g. an AV1 file this OpenCV build

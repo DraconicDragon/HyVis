@@ -224,7 +224,7 @@ For a comprehensive list of all configuration options, see the [Configuration Gu
 
 - [`tagging_example.toml`](config_examples/tagging_example.toml) - Generic example config for general tagging of files using a model with basic default settings - *likely a good starting point for most users*
 
-- [`tagging_example_with_video.toml`](config_examples/tagging_example_with_video.toml) - Same as `tagging_example.toml`, but with video and animated GIF tagging enabled (uniform sampling with near-duplicate removal and the fade/low-interest frame filters) - a good starting point if you also tag videos
+- [`tagging_example_with_video.toml`](config_examples/tagging_example_with_video.toml) - Same as `tagging_example.toml`, but with video and animated GIF tagging enabled (probe-grid sampling with loop detection, near-duplicate removal and the fade/low-interest frame filters) - a good starting point if you also tag videos
 
 - [`dan_rating_only.toml`](config_examples/dan_rating_only.toml) - Example config that utilizes output filter options to only send the rating tag with the highest confidence score
 
