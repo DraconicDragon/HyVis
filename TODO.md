@@ -1,5 +1,9 @@
 # TODO
 
+- reusable function to handle "file(s)" thing and correctly show either plural or singular
+- make a textinput base widget that automatically adds a browse folder/file button
+  - add a way for users to see what the final absolute path/dir is based on the input (relative path can be different based on from what dir hyvis/hyvis gui is launched)
+
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
 
 - move add/remove tags to output filter?
