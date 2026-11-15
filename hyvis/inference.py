@@ -782,7 +782,17 @@ async def infer_files(
                             dedupe_max_changed_fraction=video_cfg.dedupe_max_changed_fraction,
                         )
                         if not frames:
-                            raise RuntimeError("No usable frames could be sampled from the file")
+                            # Nothing decodable (e.g. an AV1 file this OpenCV build
+                            # cannot read, or a fully black clip). Skip it instead of
+                            # counting a hard error so a cluster of such files cannot
+                            # trip the consecutive-error abort.
+                            logger.warning(
+                                "Skipping animation %s: no usable frames could be sampled", file_hash
+                            )
+                            stats.skipped += 1
+                            consecutive_errors = 0
+                            progress.tick(skipped=1)
+                            continue
 
                         if video_cfg.write_frames:
                             out_dir = dump_frames(frames, file_hash=file_hash)
