@@ -2,13 +2,6 @@
 
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
 
-- Database
-  - cache rework, separate DB file?
-  - rework failed push attempts stuff
-  - rework to be more robust across the board, especially for multi model configurations to be safe for resuming
-    - add/remove tags' "only push if tags emitted" relies on intermediate tag data like this, currently its in memory which is not good for multi model runs(?) (reminder to myself that models can also be cancelled)
-      - requires cache rework probably, since its part of cache and i dont want to keep the json cache we have right now
-
 - move add/remove tags to output filter?
   - also move model specific destination tag services there since it kinda doesnt fit to models page
 
@@ -23,10 +16,16 @@
 - Consider: improve descriptiveness of config option's descriptions in config.py so they are more informative as tooltips in the GUI
 
 - Something to do infer-only, but not send to push queue?
-  - DB currently does not save whether something has been successfully pushed and all
+  - ~~DB currently does not save whether something has been successfully pushed and all~~
   - Would this even be useful?
 
 ## TODO For User Interface
+
+- separate window for viewing logs in a table?
+  - spawned from menu bar, will show latest to oldest
+  - updates automatically like vscode (streaming content?)
+  - displays info in a table with log level, time, module, line being columns?
+  - options for filtering/sorting by log level, time etc
 
 - Show extra validation error/warning (warning needs to be implemented, separate from errors) when:
   - E: Unkown tag service key is set in a combobox (eg when user loaded old config but the tag service doesnt exist anymore)
@@ -40,7 +39,8 @@
 
 - [ ] A way to show info about model, description, extra notes, etc
   - [ ] Example: PixAI tagger having their funny rating tags be non-'standard'  ('rating:g' instead of 'general')
-  - [ ] Info needs to be provided by vibe
+  - [ ] Info should be provided by vibe (?)
+    - should probably go into a markdown file too so theres not a reliance on UI for this stuff
 - [ ] Model inference tryout/preview module (should be done only after availability and variant stuff is finished)
   - [ ] Show on model page, on launch dialog, or both?
   - [ ] while it is supposed to be a tryout module, it can be used at the same time as just a viewer for the
@@ -55,7 +55,7 @@
 
 - Least priority:
   - troubleshoot accent color application and dynamic updates at runtime
-    - For custom themes that use QPalette, the QPalette needs to be reset to get updated accent color, so truly dynamic accent color not possible
+    - For custom themes that use QPalette, the QPalette needs to be reset to get updated accent color, so truly dynamic accent color not possible(?)
       - But at least it should be saved on launch so it can be used again, right now its not possible to use it after switching to custom theme
 
 ### Potential Settings To Implement
@@ -89,12 +89,10 @@
 
 - (need more info) magic byte fallback for metadata fetch incase hydrus mime type is "unknown" (suggesting its not set, which would be unexpected)
 
-- (v2) support for removing tags if confidence is below a certain threshold
+- (v2) support for deletion/removal of tags if confidence is below a certain threshold
   - can be useful if there's wrong tags either from original source or from old model i guess?
 
 - configurable metadata fetch batch size (currently 256 hardcoded)
-
-- more utilities for db like clear-cache? model_id specific stuff maybe?
 
 - [x] Support for pulling files from an open page in hydrus
   - [ ] Could also work with tag queries - in the scope of pages, we apply the query instead of just all tags in a domain to the domain, but only on files that are in the page(s) - need to confirm if this will actually work easily
