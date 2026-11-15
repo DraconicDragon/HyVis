@@ -755,6 +755,17 @@ class VideoConfig(StrictBaseModel):
                            used; files shorter than this are sampled less,
                            and the sampling interval never exceeds
                            max_frames_at_seconds / max_frames.
+    sampler                Frame-selection strategy. "scan" probes a dense
+                           grid of candidate frames across the content window,
+                           skips dead frames (fades, flat black/white, dark
+                           near-uniform) and near-duplicates, and keeps the
+                           first frame of every visually distinct phase; it
+                           decodes each candidate once. "uniform" is the
+                           original duration-scaled even sampling followed by
+                           fade replacement and dedupe. "scan" is faster on
+                           files whose container has no frame index (WebM)
+                           and normally picks more distinct frames per
+                           inference. Defaults to "scan".
     include_edges          Include the first and last frame of the video or
                            animation. With dedupe enabled they may still be
                            dropped if near-identical to another sampled
@@ -828,6 +839,7 @@ class VideoConfig(StrictBaseModel):
     enabled: bool = True
     max_frames: int = Field(default=11, ge=1)
     max_frames_at_seconds: float = Field(default=60.0, gt=0.0)
+    sampler: Literal["uniform", "scan"] = Field(default="scan")
     include_edges: bool = True
     include_edges_max_seconds: float = Field(default=0.0, ge=0.0)
     single_frame_below_seconds: float = Field(default=1.0, ge=0.0)

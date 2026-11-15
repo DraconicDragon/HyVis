@@ -64,6 +64,7 @@ def extract_frames(
     *,
     max_frames: int = 11,
     max_frames_at_seconds: float = 60.0,
+    sampler: str = "scan",
     include_edges: bool = True,
     include_edges_max_seconds: float = 0.0,
     single_frame_below_seconds: float = 1.0,
@@ -82,6 +83,13 @@ def extract_frames(
     frame. When ``include_edges_max_seconds`` is non-zero and the clip is
     longer than that, it is assumed to be a loop: edges are skipped and
     sampling starts at the center of the content window and works outward.
+
+    With ``sampler="scan"`` (the default) a dense probe grid over the content
+    window is decoded once; fade frames, flat dark frames and near-duplicates
+    are dropped, and one frame is kept per visually distinct phase. This
+    avoids repeated seeks (very slow on WebM) and usually yields more
+    distinct frames per inference. ``sampler="uniform"`` keeps the original
+    even-sampling + fade replacement path.
 
     Clips shorter than ``single_frame_below_seconds`` are assumed to be
     loops too short to say anything beyond a single frame; one centered
@@ -127,6 +135,25 @@ def extract_frames(
     use_edges, center_out = _resolve_edges(
         total_duration, include_edges, include_edges_max_seconds
     )
+    if sampler == "scan":
+        try:
+            return _extract_scan(
+                cap,
+                fps=fps,
+                total_frame_count=total_frame_count,
+                max_frames=max_frames,
+                max_frames_at_seconds=max_frames_at_seconds,
+                include_edges=use_edges,
+                detect_loops=detect_loops,
+                fades=fades,
+                low_interest=low_interest,
+                dedupe=dedupe,
+                dedupe_threshold=dedupe_threshold,
+                dedupe_change_level=dedupe_change_level,
+                dedupe_max_changed_fraction=dedupe_max_changed_fraction,
+            )
+        finally:
+            cap.release()
     if use_edges and detect_loops:
         try:
             if _detect_loop_video(
@@ -170,6 +197,7 @@ def extract_gif_frames(
     *,
     max_frames: int = 11,
     max_frames_at_seconds: float = 60.0,
+    sampler: str = "scan",
     include_edges: bool = True,
     include_edges_max_seconds: float = 0.0,
     single_frame_below_seconds: float = 1.0,
@@ -225,6 +253,21 @@ def extract_gif_frames(
         use_edges, center_out = _resolve_edges(
             total_duration, include_edges, include_edges_max_seconds
         )
+        if sampler == "scan":
+            return _extract_gif_scan(
+                gif,
+                durations=durations,
+                max_frames=max_frames,
+                max_frames_at_seconds=max_frames_at_seconds,
+                include_edges=use_edges,
+                detect_loops=detect_loops,
+                fades=fades,
+                low_interest=low_interest,
+                dedupe=dedupe,
+                dedupe_threshold=dedupe_threshold,
+                dedupe_change_level=dedupe_change_level,
+                dedupe_max_changed_fraction=dedupe_max_changed_fraction,
+            )
         if use_edges and detect_loops:
             try:
                 if _detect_loop_gif(
@@ -513,6 +556,53 @@ def _luminance_stats(cv2: Any, cap: Any, frame_idx: int) -> tuple[float, float] 
     return float(mean[0][0]) / 255.0, float(std[0][0]) / 255.0
 
 
+class _VideoFrameStats:
+    """Luminance stats for video frames, decoded forward in one pass.
+
+    The fade filter asks for stats of a frame and its neighbourhood in
+    ascending order. Seeking to every index separately is ruinous for
+    containers without a frame index (WebM/Matroska): OpenCV falls back to
+    decoding from the start of the file on each seek, so a 12-frame sample
+    could take minutes. This reader keeps a decode cursor: requests at or
+    after it advance with plain reads, and only a backward or very distant
+    request seeks. Repeated requests are cached.
+    """
+
+    def __init__(self, cv2: Any, cap: Any, *, total_frame_count: int) -> None:
+        self._cv2 = cv2
+        self._cap = cap
+        self._total = total_frame_count
+        self._cache: dict[int, tuple[float, float] | None] = {}
+        # Index of the frame that the next `read()` will return.
+        self._next = 0
+        # Decoding forward through more than this many frames is slower than
+        # one seek on indexed containers.
+        self._max_forward_gap = 96
+
+    def get(self, frame_idx: int) -> tuple[float, float] | None:
+        """Return (mean, std) of luminance (0-1) for a frame, or None."""
+        if frame_idx in self._cache:
+            return self._cache[frame_idx]
+        if frame_idx < 0 or frame_idx >= self._total:
+            return None
+        if frame_idx < self._next or frame_idx - self._next > self._max_forward_gap:
+            self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            self._next = frame_idx
+        while self._next <= frame_idx:
+            ok, frame = self._cap.read()
+            current = self._next
+            self._next += 1
+            if not ok:
+                self._cache[current] = None
+                return self._cache.get(frame_idx)
+            if current != frame_idx:
+                continue
+            gray = _downscale_gray(self._cv2, frame, _FADE_ANALYSIS_SCALE)
+            mean, std = self._cv2.meanStdDev(gray)
+            self._cache[frame_idx] = (float(mean[0][0]) / 255.0, float(std[0][0]) / 255.0)
+        return self._cache.get(frame_idx)
+
+
 def _fade_stats_test(
     mean: float,
     std: float,
@@ -630,15 +720,30 @@ def _filter_fade_frames(
     originals. When nothing qualifies the original is kept so the caller
     never ends up with an empty selection.
 
+    All stats lookups happen in ascending frame order and windows are scanned
+    front to back, so a forward-decoding `get_stats` (see `_VideoFrameStats`)
+    never has to seek backwards. Scanning order does not affect the result:
+    "nearest" is chosen by distance, not by visit order.
+
     `get_stats(frame_idx)` returns (mean, std) of luminance for a frame, or
-    None if it cannot be decoded. Callers supply a cheap implementation:
-    the uniform sampler passes a caching seek-based lookup.
+    None if it cannot be decoded.
     """
     search_window = max(1, int(fades.search_seconds * fps))
     probe_stride = max(1, search_window // 8)
     # Safety cap for the extended search: fade-like stretches (fade-out tail +
     # trailing black) longer than ~10x the window are treated as content.
     extended_limit = min(total_frame_count, search_window * 10)
+
+    def fade_stats(idx: int) -> tuple[float, float] | None:
+        return get_stats(idx)
+
+    def is_fade_stats(stats: tuple[float, float] | None) -> bool:
+        if stats is None:
+            return False
+        mean, std = stats
+        return _fade_stats_test(
+            mean, std, dark=fades.dark_threshold, light=fades.light_threshold, uniformity=fades.uniformity
+        )
 
     def window_has_fade(idx: int) -> bool:
         """Cheap strided check for any fade-like frame in the window.
@@ -651,19 +756,13 @@ def _filter_fade_frames(
         would have been nudged - never keeps a flat fade (those bypass this
         probe) and never invents a replacement.
         """
-        for step in range(1, search_window + 1, probe_stride):
-            for cand in (idx - step, idx + step):
-                if not 0 <= cand < total_frame_count:
-                    continue
-                stats = get_stats(cand)
-                if stats is None:
-                    continue
-                mean, std = stats
-                if _fade_stats_test(
-                    mean, std, dark=fades.dark_threshold, light=fades.light_threshold, uniformity=fades.uniformity
-                ):
-                    return True
-        return False
+        probes = {
+            cand
+            for step in range(1, search_window + 1, probe_stride)
+            for cand in (idx - step, idx + step)
+            if 0 <= cand < total_frame_count
+        }
+        return any(is_fade_stats(fade_stats(cand)) for cand in sorted(probes))
 
     def find_replacement(
         idx: int,
@@ -679,27 +778,30 @@ def _filter_fade_frames(
         unbounded=True the search extends past the window (bounded by
         extended_limit) to escape long fade-like stretches."""
         limit = extended_limit if unbounded else search_window
+        lo = max(0, idx - limit)
+        hi = min(total_frame_count - 1, idx + limit)
         best: tuple[float, int] | None = None if orig_fade else (orig_mean, idx)
-        nearest_qual: int | None = None  # first qualifying frame in outward order = nearest
+        nearest: tuple[int, int] | None = None  # (distance, frame)
         saw_fade = False
-        for step in range(1, limit + 1):
-            for cand in (idx - step, idx + step):
-                if not 0 <= cand < total_frame_count:
-                    continue
-                stats = get_stats(cand)
-                if stats is None:
-                    continue
-                mean, std = stats
-                if _fade_stats_test(
-                    mean, std, dark=fades.dark_threshold, light=fades.light_threshold, uniformity=fades.uniformity
-                ):
-                    saw_fade = True
-                    continue  # candidate is itself fade-like
-                if best is None or mean > best[0]:
-                    best = (mean, cand)
-                if nearest_qual is None and mean >= fades.replacement_min_brightness:
-                    nearest_qual = cand
-        replacement = nearest_qual if nearest_qual is not None else (best[1] if best is not None else None)
+        for cand in range(lo, hi + 1):
+            if cand == idx:
+                continue
+            stats = fade_stats(cand)
+            if stats is None:
+                continue
+            mean, std = stats
+            if _fade_stats_test(
+                mean, std, dark=fades.dark_threshold, light=fades.light_threshold, uniformity=fades.uniformity
+            ):
+                saw_fade = True
+                continue  # candidate is itself fade-like
+            if best is None or mean > best[0]:
+                best = (mean, cand)
+            if mean >= fades.replacement_min_brightness:
+                distance = abs(cand - idx)
+                if nearest is None or distance < nearest[0]:
+                    nearest = (distance, cand)
+        replacement = nearest[1] if nearest is not None else (best[1] if best is not None else None)
         return replacement, saw_fade
 
     # Classify samples up front so we know whether any sampled frame is
@@ -712,24 +814,18 @@ def _filter_fade_frames(
     sample_is_fade: list[bool] = []
     sample_too_dim: list[bool] = []
     has_content = False
-    for idx in indices:
-        stats = get_stats(idx)
+    for idx in sorted(set(indices)):
+        stats = fade_stats(idx)
         sample_stats.append(stats)
-        if stats is None:
-            sample_is_fade.append(False)
-            sample_too_dim.append(False)
-            continue
-        mean, std = stats
-        is_fade = _fade_stats_test(
-            mean, std, dark=fades.dark_threshold, light=fades.light_threshold, uniformity=fades.uniformity
-        )
-        sample_is_fade.append(is_fade)
-        sample_too_dim.append(mean < fades.replacement_min_brightness)
-        if not is_fade:
+        sample_is_fade.append(is_fade_stats(stats))
+        sample_too_dim.append(stats is not None and stats[0] < fades.replacement_min_brightness)
+        if stats is not None and not sample_is_fade[-1]:
             has_content = True
 
+    by_index = {idx: pos for pos, idx in enumerate(sorted(set(indices)))}
     result: list[int] = []
-    for pos, idx in enumerate(indices):
+    for idx in indices:
+        pos = by_index[idx]
         stats = sample_stats[pos]
         if stats is None:
             result.append(idx)
@@ -762,6 +858,392 @@ def _filter_fade_frames(
                 continue
         result.append(idx)
     return result
+
+
+# region Scan sampling (dense probe, dead-frame and duplicate aware)
+
+
+class _VideoFrameReader:
+    """Decodes video frames on demand, walking forward when it can.
+
+    Random seeking is expensive on containers without a frame index (WebM:
+    OpenCV re-decodes from the start of the file), so this reader decodes
+    forward over small gaps and only seeks for backward or distant requests.
+    Callers request frames in ascending order.
+    """
+
+    def __init__(
+        self,
+        cv2: Any,
+        cap: Any,
+        *,
+        total_frame_count: int,
+        max_forward_gap: int,
+    ) -> None:
+        self._cv2 = cv2
+        self._cap = cap
+        self._total = total_frame_count
+        self._max_forward_gap = max_forward_gap
+        self._next = 0
+
+    def frame(self, frame_idx: int) -> Any | None:
+        """Return the frame at ``frame_idx`` as a BGR array, or None."""
+        if frame_idx < 0 or frame_idx >= self._total:
+            return None
+        if frame_idx < self._next or frame_idx - self._next > self._max_forward_gap:
+            self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            self._next = frame_idx
+        frame = None
+        while self._next <= frame_idx:
+            ok, current = self._cap.read()
+            self._next += 1
+            if not ok:
+                return None
+            frame = current
+        return frame
+
+
+def _scan_keep_budget(
+    *,
+    content_duration: float,
+    padding_duration: float,
+    max_frames: int,
+    max_frames_at_seconds: float,
+    include_edges: bool,
+) -> int:
+    """How many probed frames the scan sampler may keep for this clip.
+
+    Mirrors the uniform sampler's duration scaling so the scan sampler is a
+    drop-in replacement with the same inference cost: short clips get a
+    single center frame plus edges, longer clips scale up to ``max_frames``.
+    """
+    budget = _sample_count(content_duration, max_frames, max_frames_at_seconds)
+    keep = max(1, budget)
+    if include_edges:
+        keep += 2
+    if padding_duration * 2 < content_duration and budget > 1:
+        keep += 2
+    return min(keep, max_frames + 4)
+
+
+def _scan_candidate_indices(
+    *,
+    fps: float,
+    total_frame_count: int,
+    padding_duration: float,
+    content_duration: float,
+    max_frames: int,
+    include_edges: bool,
+) -> list[int]:
+    """Frame indices for the dense probe grid, ascending and deduplicated.
+
+    The grid is three times the output budget (bounded to 48 probes, and to
+    20 on long files where every probe costs a seek), spread over the content
+    window so every part of the clip has a chance to be represented. With
+    ``include_edges`` the true first and last frames are added as probes too.
+    """
+    if content_duration <= 0 or total_frame_count <= 0:
+        center = max(0, (total_frame_count - 1) // 2)
+        if include_edges and total_frame_count > 1:
+            return sorted({0, center, total_frame_count - 1})
+        return [center]
+
+    long_file = total_frame_count > 900
+    ceiling = 20 if long_file else 48
+    count = max(8, min(ceiling, 3 * max_frames))
+    step = content_duration / (count + 1)
+    indices = [int((padding_duration + step * (i + 1)) * fps) for i in range(count)]
+    if include_edges:
+        indices = [0, *indices, total_frame_count - 1]
+    return sorted({max(0, min(total_frame_count - 1, idx)) for idx in indices})
+
+
+def _select_scan_frames(
+    cv2: Any,
+    reader: _VideoFrameReader,
+    candidates: list[int],
+    *,
+    total_frame_count: int,
+    max_frames: int,
+    loop_detected: bool,
+    fades: FadeFilterConfig | None,
+    low_interest: LowInterestFilterConfig | None,
+    dedupe: bool,
+    dedupe_threshold: float,
+    dedupe_change_level: int,
+    dedupe_max_changed_fraction: float,
+) -> list["Image.Image"]:
+    """Pick visually distinct, non-dead frames from the probe grid.
+
+    A candidate is dropped when it is a fade frame, a flat dark frame
+    (low_interest), or a near-duplicate of an already-chosen frame. Because
+    the grid already covers the clip evenly, the first candidate of each
+    visually distinct phase wins and the rest of that phase is skipped, which
+    is exactly "one frame per distinct moment". Edge candidates are skipped
+    when the clip was detected as a loop (the last frame repeats the first).
+    """
+    kept: list[Image.Image] = []
+    accepted_grays: list[Any] = []
+    for idx in candidates:
+        if loop_detected and idx in (0, total_frame_count - 1):
+            continue
+        frame = reader.frame(idx)
+        if frame is None:
+            continue
+        gray = _downscale_gray(cv2, frame, _FADE_ANALYSIS_SCALE)
+        mean, std = cv2.meanStdDev(gray)
+        mean = float(mean[0][0]) / 255.0
+        std = float(std[0][0]) / 255.0
+        if fades is not None and _fade_stats_test(
+            mean,
+            std,
+            dark=fades.dark_threshold,
+            light=fades.light_threshold,
+            uniformity=fades.uniformity,
+        ):
+            logger.debug("scan: dropping fade frame at index %s", idx)
+            continue
+        if (
+            low_interest is not None
+            and low_interest.enabled
+            and mean < low_interest.min_luminance
+            and std < low_interest.min_std
+        ):
+            logger.debug("scan: dropping low-interest frame at index %s", idx)
+            continue
+        if dedupe and _is_near_duplicate(
+            gray,
+            accepted_grays,
+            dedupe_threshold,
+            dedupe_change_level,
+            dedupe_max_changed_fraction,
+        ):
+            continue
+        kept.append(_to_pil(cv2, frame))
+        accepted_grays.append(gray)
+        if len(kept) >= max_frames:
+            break
+    return kept
+
+
+def _extract_scan(
+    cap: Any,
+    *,
+    fps: float,
+    total_frame_count: int,
+    max_frames: int,
+    max_frames_at_seconds: float,
+    include_edges: bool,
+    detect_loops: bool,
+    fades: FadeFilterConfig | None,
+    low_interest: LowInterestFilterConfig | None,
+    dedupe: bool,
+    dedupe_threshold: float,
+    dedupe_change_level: int,
+    dedupe_max_changed_fraction: float,
+) -> tuple["Image.Image", ...]:
+    """Content-aware sampler: probe densely once, keep distinct live frames."""
+    cv2 = _load_cv2()
+    total_duration = total_frame_count / fps
+    padding_duration, content_start, content_end = _content_window(
+        total_duration, fps, max_frames_at_seconds
+    )
+    content_duration = max(0.0, content_end - content_start)
+    candidates = _scan_candidate_indices(
+        fps=fps,
+        total_frame_count=total_frame_count,
+        padding_duration=padding_duration,
+        content_duration=content_duration,
+        max_frames=max_frames,
+        include_edges=include_edges,
+    )
+    keep_budget = _scan_keep_budget(
+        content_duration=content_duration,
+        padding_duration=padding_duration,
+        max_frames=max_frames,
+        max_frames_at_seconds=max_frames_at_seconds,
+        include_edges=include_edges,
+    )
+    reader = _VideoFrameReader(
+        cv2,
+        cap,
+        total_frame_count=total_frame_count,
+        # Long files: seeks are cheaper than decoding every frame in between.
+        max_forward_gap=0 if total_frame_count > 900 else 120,
+    )
+    loop_detected = False
+    if include_edges and detect_loops and len(candidates) >= 3:
+        first = reader.frame(candidates[0])
+        last = reader.frame(candidates[-1])
+        if first is not None and last is not None:
+            try:
+                loop_detected = _frames_match(
+                    _downscale_gray(cv2, first, _FADE_ANALYSIS_SCALE),
+                    _downscale_gray(cv2, last, _FADE_ANALYSIS_SCALE),
+                    threshold=dedupe_threshold,
+                    change_level=dedupe_change_level,
+                    max_fraction=max(_LOOP_MIN_CHANGED_FRACTION, dedupe_max_changed_fraction),
+                )
+            except Exception as exc:  # detection is best-effort
+                logger.debug("scan: loop detection failed: %s", exc)
+
+    frames = _select_scan_frames(
+        cv2,
+        reader,
+        candidates,
+        total_frame_count=total_frame_count,
+        max_frames=keep_budget,
+        loop_detected=loop_detected,
+        fades=fades,
+        low_interest=low_interest,
+        dedupe=dedupe,
+        dedupe_threshold=dedupe_threshold,
+        dedupe_change_level=dedupe_change_level,
+        dedupe_max_changed_fraction=dedupe_max_changed_fraction,
+    )
+    logger.debug(
+        "extract_frames(scan) fps=%s frames=%s duration=%.2f probes=%s kept=%s loop=%s",
+        fps,
+        total_frame_count,
+        total_duration,
+        len(candidates),
+        len(frames),
+        loop_detected,
+    )
+    return tuple(frames)
+
+
+def _extract_gif_scan(
+    gif: "Image.Image",
+    *,
+    durations: list[float],
+    max_frames: int,
+    max_frames_at_seconds: float,
+    include_edges: bool,
+    detect_loops: bool,
+    fades: FadeFilterConfig | None,
+    low_interest: LowInterestFilterConfig | None,
+    dedupe: bool,
+    dedupe_threshold: float,
+    dedupe_change_level: int,
+    dedupe_max_changed_fraction: float,
+) -> tuple["Image.Image", ...]:
+    """Content-aware GIF sampler: one dense probe pass over the frames."""
+    import bisect
+
+    total_frame_count = len(durations)
+    total_duration = sum(durations)
+    if total_duration <= 0:
+        total_duration = max(0.1, 0.1 * total_frame_count)
+    fps = total_frame_count / total_duration
+
+    starts: list[float] = []
+    elapsed = 0.0
+    for duration in durations:
+        starts.append(elapsed)
+        elapsed += duration
+
+    def index_at(timestamp: float) -> int:
+        """Frame index whose display interval contains ``timestamp``."""
+        if total_frame_count == 0:
+            return 0
+        position = bisect.bisect_right(starts, timestamp) - 1
+        return max(0, min(total_frame_count - 1, position))
+
+    padding_duration, content_start, content_end = _content_window(
+        total_duration, fps, max_frames_at_seconds
+    )
+    content_duration = max(0.0, content_end - content_start)
+    keep_budget = _scan_keep_budget(
+        content_duration=content_duration,
+        padding_duration=padding_duration,
+        max_frames=max_frames,
+        max_frames_at_seconds=max_frames_at_seconds,
+        include_edges=include_edges,
+    )
+    if content_duration <= 0:
+        center = max(0, (total_frame_count - 1) // 2)
+        candidates = sorted({0, center, total_frame_count - 1}) if include_edges and total_frame_count > 1 else [center]
+    else:
+        long_file = total_frame_count > 900
+        ceiling = 20 if long_file else 48
+        count = max(8, min(ceiling, 3 * max_frames))
+        step = content_duration / (count + 1)
+        candidates = [
+            index_at(padding_duration + step * (i + 1)) for i in range(count)
+        ]
+        if include_edges:
+            candidates = [0, *candidates, total_frame_count - 1]
+        candidates = sorted(set(candidates))
+
+    loop_detected = False
+    if include_edges and detect_loops and len(candidates) >= 3:
+        try:
+            gif.seek(candidates[0])
+            first = _pil_gray(gif.convert("RGB"), _FADE_ANALYSIS_SCALE)
+            gif.seek(candidates[-1])
+            last = _pil_gray(gif.convert("RGB"), _FADE_ANALYSIS_SCALE)
+            loop_detected = _frames_match(
+                first,
+                last,
+                threshold=dedupe_threshold,
+                change_level=dedupe_change_level,
+                max_fraction=max(_LOOP_MIN_CHANGED_FRACTION, dedupe_max_changed_fraction),
+            )
+        except Exception as exc:  # detection is best-effort
+            logger.debug("scan: GIF loop detection failed: %s", exc)
+
+    kept: list[Image.Image] = []
+    accepted_grays: list[Any] = []
+    for idx in candidates:
+        if loop_detected and idx in (0, total_frame_count - 1):
+            continue
+        try:
+            gif.seek(idx)
+            frame = gif.convert("RGB").copy()
+        except (EOFError, OSError, ValueError):
+            continue
+        gray = _pil_gray(frame, _FADE_ANALYSIS_SCALE)
+        arr = gray.astype("float32")
+        mean = float(arr.mean() / 255.0)
+        std = float(arr.std() / 255.0)
+        if fades is not None and _fade_stats_test(
+            mean,
+            std,
+            dark=fades.dark_threshold,
+            light=fades.light_threshold,
+            uniformity=fades.uniformity,
+        ):
+            continue
+        if (
+            low_interest is not None
+            and low_interest.enabled
+            and mean < low_interest.min_luminance
+            and std < low_interest.min_std
+        ):
+            continue
+        if dedupe and _is_near_duplicate(
+            gray,
+            accepted_grays,
+            dedupe_threshold,
+            dedupe_change_level,
+            dedupe_max_changed_fraction,
+        ):
+            continue
+        kept.append(frame)
+        accepted_grays.append(gray)
+        if len(kept) >= keep_budget:
+            break
+
+    logger.debug(
+        "extract_gif_frames(scan) frames=%s duration=%.2f probes=%s kept=%s loop=%s",
+        total_frame_count,
+        total_duration,
+        len(candidates),
+        len(kept),
+        loop_detected,
+    )
+    return tuple(kept)
 
 
 # endregion
@@ -875,19 +1357,13 @@ def _extract_uniform(
 
     selected = [int(timestamp * fps) for timestamp in timestamps]
     if fades is not None:
-        # Caching seek-based lookup: repeated window lookups decode each frame
-        # once, and only flagged samples trigger window scans, so the typical
-        # cost is a handful of frame decodes (no full-video pass).
-        _stats_cache: dict[int, tuple[float, float] | None] = {}
-
-        def get_stats(idx: int) -> tuple[float, float] | None:
-            if idx not in _stats_cache:
-                _stats_cache[idx] = _luminance_stats(cv2, cap, idx)
-            return _stats_cache[idx]
-
+        # Forward-decoding lookup: window scans walk frames front to back, so
+        # the whole check costs a couple of sequential passes instead of a
+        # seek per probed frame (which is catastrophic on WebM).
+        stats_reader = _VideoFrameStats(cv2, cap, total_frame_count=total_frame_count)
         selected = _filter_fade_frames(
             selected,
-            get_stats=get_stats,
+            get_stats=stats_reader.get,
             fps=fps,
             total_frame_count=total_frame_count,
             fades=fades,
