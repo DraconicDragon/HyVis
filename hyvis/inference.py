@@ -730,6 +730,10 @@ async def infer_files(
     output_services = config.resolved_output_tag_services(model_cfg)
     compiled_filter = compile_output_filter(eff_filter)
 
+    from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
+
+    is_dry = db.read_only
+
     # region Pass A: CPU Re-filter from cache.db (zero GPU/vibe weight loading)
     if plan.refilter_files and plan.cache_model_row is not None:
         vocab = cache_db.get_vocab(plan.cache_model_row)
@@ -740,6 +744,9 @@ async def infer_files(
         else:
             model_meta_by_id[model_cfg.model_id] = (vocab.variant_id, vocab.vocab_hash, plan.filter_hash)
             cpu_pipeline = build_transform_pipeline_from_vocab(vocab, eff_filter)
+
+            fc_dir = resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None))
+            pass_a_frame_cache = FrameDiskCache(fc_dir) if (not is_dry and fc_dir.is_dir()) else None
 
             print(_c(f"  Re-filtering {len(plan.refilter_files)} cached item(s) on CPU (cache.db)...", GREEN))
             print()
@@ -770,7 +777,7 @@ async def infer_files(
                     if not prefixed_tags:
                         stats.zero_tags += 1
 
-                    _finalize_file(
+                    is_final = _finalize_file(
                         file_hash=fi.file_hash,
                         model_cfg=model_cfg,
                         variant_id=vocab.variant_id,
@@ -783,6 +790,8 @@ async def infer_files(
                         last_active_model_for_file=last_active_model_for_file,
                         model_meta_by_id=model_meta_by_id,
                     )
+                    if is_final and pass_a_frame_cache is not None:
+                        pass_a_frame_cache.cleanup_file(fi.file_hash)
 
                     stats.refiltered += 1
                     stats.total_tags_enqueued += len(prefixed_tags)
@@ -802,10 +811,8 @@ async def infer_files(
         return stats
 
     from hyvis.config import ANIMATABLE_IMAGE_MIMES
-    from hyvis.db import DryRunDatabase
     from hyvis.video.aggregator import FrameMaxAggregator
     from hyvis.video.extractor import is_animated_image, iter_extract_frames, probe_media
-    from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
     from hyvis.video.planner import plan_frames
 
     source = LocalFileSource(plan.gpu_files)
@@ -1034,12 +1041,11 @@ async def infer_files(
                     if batch_processed or batch_errors:
                         progress.tick(processed=batch_processed, errors=batch_errors)
 
-            # Sub-Pass B2: Videos & Animated Images (lazy frame streaming + max-score merge) ---
+            # Sub-Pass B2: Videos & Animated Images (lazy frame streaming + max-score merge)
             if multiframe_files:
                 fc_mode = config.video.frame_cache_mode
-                is_dry = isinstance(db, DryRunDatabase)
                 # NOTE: In "auto" mode, len(models) > 1 enables disk caching even on a --resume run
-                # where only the final model remains (writes Q97 JPEGs and deletes them immediately
+                # where only the final model remains (writes cached frames and deletes them immediately
                 # after commit). Harmless and safe; keeping the check simple avoids guessing remaining passes.
                 use_disk_cache = (not is_dry) and (
                     fc_mode == "disk" or (fc_mode == "auto" and len(config.inference.models) > 1)
@@ -1068,7 +1074,7 @@ async def infer_files(
                             f_plan = plan_frames(probe.duration_s, probe.total_frames, config=plan_cfg)
                             expected_n = f_plan.target_count
 
-                            if frame_cache is not None and frame_cache.has_complete_frames(fi.file_hash, prep_hash):
+                            if frame_cache is not None and frame_cache.validate_frames(fi.file_hash, prep_hash):
                                 frame_iter = frame_cache.load_frames(fi.file_hash, prep_hash)
                             else:
                                 raw_iter = iter_extract_frames(
@@ -1086,6 +1092,10 @@ async def infer_files(
                                 pending_refs.append((fi.file_hash, frame.index, expected_n))
                                 yield frame.image
 
+                        except ImportError as exc:
+                            # Environment/dependency failure: stop immediately instead of blaming files
+                            decode_errors.put((fi, exc))
+                            return
                         except Exception as exc:
                             failed_decode_hashes.add(fi.file_hash)
                             decode_errors.put((fi, exc))
@@ -1106,15 +1116,25 @@ async def infer_files(
                         return
                     fh = active_hash
                     agg = active_agg
+                    expected = active_expected
                     active_hash = None
                     active_agg = None
                     active_expected = 0
                     fi = file_info_map[fh]
 
                     if fh in failed_decode_hashes:
+                        progress.set_sub_status("", redraw=False)
                         return
 
                     try:
+                        if expected >= 4 and agg.frame_count < expected / 2:
+                            logger.warning(
+                                "Video %s yielded significantly fewer frames than planned (%d/%d).",
+                                fh[:8],
+                                agg.frame_count,
+                                expected,
+                            )
+
                         merged = agg.finalize()
                         tag_count = _commit_inferred_result(fi, merged)
                         if frame_cache is not None and (
@@ -1140,9 +1160,13 @@ async def infer_files(
                             ) from exc
 
                 def _drain_decode_errors() -> None:
-                    nonlocal consecutive_errors
                     while not decode_errors.empty():
                         bad_fi, exc = decode_errors.get_nowait()
+                        if isinstance(exc, ImportError):
+                            raise TypeError(f"Aborted: {exc}") from exc
+
+                        # Per-file media/decode errors mark the file as ERROR without counting
+                        # toward MAX_CONSECUTIVE_ERRORS (reserved for inference/runtime failures).
                         _handle_infer_error(
                             exc=exc,
                             file_hash=bad_fi.file_hash,
@@ -1152,10 +1176,7 @@ async def infer_files(
                         )
                         if frame_cache is not None:
                             frame_cache.cleanup_file(bad_fi.file_hash)
-                        consecutive_errors += 1
                         progress.tick(errors=1)
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            raise RuntimeError(f"Aborted: {consecutive_errors} consecutive errors (last: {exc})")
 
                 try:
                     async for chunk in session.infer_async(
@@ -1210,7 +1231,7 @@ async def infer_files(
                         return stats
                     raise
                 finally:
-                    progress.set_sub_status("", redraw=False)
+                    progress.set_sub_status("")
 
             db.commit()
             cache_db.commit()

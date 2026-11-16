@@ -70,6 +70,32 @@ class FrameDiskCache:
         except Exception:
             return False
 
+    def validate_frames(self, file_hash: str, prep_hash: str) -> bool:
+        """
+        Verify manifest, prep_hash, file presence, and full image decodability for all cached frames.
+        Opens and closes one frame at a time (O(1) memory). If any frame is corrupt, invalidates
+        the file's cache directory and returns False so the caller re-extracts cleanly.
+        """
+        if not self.has_complete_frames(file_hash, prep_hash):
+            return False
+
+        f_dir = self._file_dir(file_hash)
+        try:
+            data = json.loads((f_dir / _MANIFEST_NAME).read_text(encoding="utf-8"))
+            for entry in data["frames"]:
+                frame_path = f_dir / str(entry["file"])
+                with Image.open(frame_path) as img:
+                    img.load()
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Corrupt cached frame detected for %s (%s); invalidating frame cache and re-extracting.",
+                file_hash[:8],
+                exc,
+            )
+            self.cleanup_file(file_hash)
+            return False
+
     def load_frames(self, file_hash: str, prep_hash: str) -> Iterator[ExtractedFrame]:
         """Yield previously cached ExtractedFrames from disk (closing file handles immediately)."""
         f_dir = self._file_dir(file_hash)
