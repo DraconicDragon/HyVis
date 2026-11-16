@@ -161,6 +161,8 @@ class SectionCard(AutoRepolishMixin, QFrame):
     Uses AutoRepolishMixin for automatic repolishing on property updates.
     """
 
+    _CONTENT_MARGINS = (6, 0, 6, 4)
+
     toggled = Signal(bool)
 
     def __init__(
@@ -219,7 +221,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
         # Content container
         self._content_widget = QWidget(self)
         self._content_layout = QVBoxLayout(self._content_widget)
-        self._content_layout.setContentsMargins(6, 0, 6, 4)
+        self._content_layout.setContentsMargins(*self._CONTENT_MARGINS)
         self._content_layout.setSpacing(6)
         card_layout.addWidget(self._content_widget)
 
@@ -249,7 +251,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
         if self._title or self._is_checkable:
-            layout.setContentsMargins(6, 0, 6, 4)
+            layout.setContentsMargins(*self._CONTENT_MARGINS)
         QWidget().setLayout(self._content_layout)
         self._content_layout = layout
         self._content_widget.setLayout(layout)
