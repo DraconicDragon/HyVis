@@ -243,6 +243,40 @@ only_if_tags_emitted = true
 
 ---
 
+## `[video]`
+
+Optional settings for sampling and processing videos (`MP4`, `WebM`, `MKV`, etc.) and multi-frame animated images (`GIF`, `APNG`, `WebP`, `AVIF`, `JXL`, etc.). Keeps the highest score per tag across sampled frames.
+
+When `enabled` is `false` (default), videos and multi-frame animations are skipped so Frame 0 is never processed alone. Single-frame images (including 1-frame GIFs, WebPs, etc.) continue to run normally.
+
+| Parameter | Type | Required | Description |
+| :-------- | :--- | :------- | :---------- |
+| `enabled` | Boolean | No | Enable sampling and frame-level processing for videos and multi-frame animated images. <br> Defaults to `false`. |
+| `density_k` | Float | No | Sampling density multiplier (`> 0.0` to `20.0`) used in `N = k * sqrt(duration_s)`. Higher values sample more frames per video. <br> Defaults to `2.0`. |
+| `min_frames` | Integer | No | Minimum number of frames sampled per video/animation (`1` to `512`, must be $\le$ `max_frames`; clamped to total frames if shorter). <br> Defaults to `4`. |
+| `max_frames` | Integer | No | Hard upper cap on frames sampled per video (`1` to `2048`) to keep processing time bounded on long videos. <br> Defaults to `128`. |
+| `sparse_below_frames` | Integer | No | Files with fewer total frames than this threshold (`1` to `512`) use frame-count scaling instead of duration scaling. <br> Defaults to `32`. |
+| `frame_cache_mode` | String | No | Where extracted frames live during inference. Options: `"auto"`, `"memory"`, `"disk"`. <br>• `"auto"`: Streams in memory for 1 model; caches frames on disk for 2+ models.<br>• `"memory"`: Never writes extracted frames to disk (re-extracts per model).<br>• `"disk"`: Always saves extracted frames to disk until all models finish the file.<br>*(Note: When disk caching is active on multi-model runs, the first model receives original in-memory decoded frames while subsequent models read disk-cached frames.)* <br> Defaults to `"auto"`. |
+| `frame_cache_dir` | String / Null | No | Optional directory for temporary extracted frames when disk caching is active. If omitted or `null`, defaults to `frame_cache` beside `database.path`. <br> Defaults to `null`. |
+
+<details>
+<summary>💡 View <code>[video]</code> Example</summary>
+
+```toml
+[video]
+enabled = true
+density_k = 2.0
+min_frames = 4
+max_frames = 128
+sparse_below_frames = 32
+frame_cache_mode = "auto"
+# frame_cache_dir = "data/frame_cache"
+```
+
+</details>
+
+---
+
 ## `[output_filter]`
 
 Global settings for filtering and transforming tags before they are pushed to Hydrus. These values can also be overridden on a per-model basis.

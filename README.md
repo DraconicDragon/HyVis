@@ -1,7 +1,7 @@
 # HyVis - Hydrus Tagger
 
 > [!IMPORTANT]
-> **Work in Progress**: HyVis is fully functional and ready to use, but is still in pre-1.0 development. Minor breaking changes to configuration settings or CLI options may occur prior to v1.0 without automated migration paths.
+> **Work in Progress**: HyVis is functional and ready to use, but is still in pre-1.0 development. Minor breaking changes to configuration settings or CLI options may occur prior to v1.0 without automated migration paths.
 
 HyVis is a vibecoded local autotagging utility with optional desktop interface for your [Hydrus client](https://hydrusnetwork.github.io/hydrus/). It pairs vision transformer classification models with customizable tag filtering to automatically tag files and push them to Hydrus.
 
@@ -33,6 +33,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 - **File Fetching**: Fetch files from Hydrus using [open pages](CONFIGURATION.md#hydruspage_queries) (practically WYSIWYG), [tag search queries](CONFIGURATION.md#hydrustag_queries), or by supplying `--extra-hash-file` (for [wd-e621-hydrus-tagger](https://github.com/Garbevoir/wd-e621-hydrus-tagger) compatibility)
 - **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
 - **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
+- **Video / Animation Support**: Opt-in [frame sampling and max-score merging](CONFIGURATION.md#video) for videos (`MP4`, `WebM`, `MKV`, etc.) and multi-frame animated images (`GIF`, `APNG`, `WebP`, `AVIF`, `JXL`, etc.) using PyAV / FFmpeg.
 - **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
 
 ### Showcase
@@ -51,6 +52,10 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 </table>
 
 <table align="center">
+  <p align="center">
+    <b>Video &amp; Animation Page</b><br>
+    <img src=".assets/gui_video_page.png" alt="Video &amp; Animation Page" width="50%">
+  </p>
   <tr>
     <td align="center"><b>Output Filter + Error</b></td>
     <td align="center"><b>Launch Dialog</b></td>
@@ -71,8 +76,10 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 
 ### 1. Prerequisites
 
-- **git** | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- **Python 3.11** ***or higher*** | Python 3.12 to 3.14 is recommended (packages may not be up to date for 3.15+ yet, like `pillow-jxl-plugin`)
+- git | [Installation Guide](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+- Python 3.12 to 3.14 is recommended
+  - Dependencies may not be up to date for 3.15+ yet, like `pillow-jxl-plugin`
+  - Python 3.11 is currently supported but may be dropped soon (due to PyAV v19+ requiring Py 3.12+)
 - Local [Hydrus client](https://hydrusnetwork.github.io/hydrus/introduction.html) to connect to with [Client API enabled](https://hydrusnetwork.github.io/hydrus/client_api.html).
 
 ### 2. Clone the Repository
@@ -289,6 +296,3 @@ A: Uhhhhhhh, needs HyVis to have a daemon or such, which it doesn't right now. I
 
 Q: Can I try models before starting a run/outside of HyVis as like a model preview thing?  
 A: No. I have something like a separate model preview module in mind for which I can add a button to hyvis-gui's models page, but that's about it. It may also be GUI only (no CLI/TUI), at first at least
-
-Q: Video/Animation support?  
-A: soon™, perhaps. I have ideas and a rough plan for it
