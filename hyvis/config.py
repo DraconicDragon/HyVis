@@ -791,10 +791,10 @@ class VideoConfig(StrictBaseModel):
 
     enabled: bool = Field(
         default=False,
-        title="Enable Video & Animation Tagging",
+        title="Enable Video & Animation Processing",
         description=(
-            "When enabled, videos and multi-frame animated images are sampled and tagged across frames.\n"
-            "When disabled, videos and known multi-frame animations are skipped instead of tagging only Frame 0."
+            "When enabled, videos and multi-frame animated images are sampled and processed across frames.\n"
+            "When disabled, videos and known multi-frame animations are skipped instead of processing only Frame 0."
         ),
     )
     density_k: float = Field(
