@@ -167,10 +167,25 @@ def _get_onnxruntime_info() -> tuple[str, bool, str | None]:
     return "(not installed)", False, None
 
 
+def _get_av_info() -> tuple[str, bool, str | None]:
+    """Detect PyAV's bundled FFmpeg version in addition to its package version."""
+    ver, installed, summary = _get_dist_info("av")
+    if not installed:
+        return ver, False, summary
+
+    try:
+        av = importlib.import_module("av")
+        ffmpeg_version = av.ffmpeg_version_info
+    except (ImportError, OSError, AttributeError):
+        return ver, True, summary
+
+    return f"{ver} (bundled FFmpeg v{ffmpeg_version})", True, summary
+
+
 def get_system_info() -> list[DependencyGroup]:
     """
     Collect system, framework, and dependency information grouped by layer.
-    Pure metadata check: safe to call anytime with negligible startup latency.
+    PyAV's bundled FFmpeg version is read from its runtime module.
     """
     # 1. System & Runtime
     os_name = f"{platform.system()} {platform.release()} ({platform.machine()})"
@@ -225,7 +240,10 @@ def get_system_info() -> list[DependencyGroup]:
         "av",
     )
     for pkg_name in core_pkgs:
-        ver, inst, summary = _get_dist_info(pkg_name)
+        if pkg_name == "av":
+            ver, inst, summary = _get_av_info()
+        else:
+            ver, inst, summary = _get_dist_info(pkg_name)
         core_items.append(DependencyInfo(pkg_name, ver, is_installed=inst, summary=summary))
 
     # 3. Inference & Backends
