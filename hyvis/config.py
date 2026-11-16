@@ -54,25 +54,32 @@ STATIC_IMAGE_MIMES: frozenset[str] = frozenset(
         "image/jpeg",
         "image/jpg",
         "image/bmp",
+        "image/x-icon",
+        "image/qoi",
     }
 )
 
-#: Image MIME types that may contain either 1 frame (static) or >1 frames (animated)
+#: Image MIME types that may contain either 1 frame (static) or >1 frames (animated / multi-page)
 ANIMATABLE_IMAGE_MIMES: frozenset[str] = frozenset(
     {
         "image/png",
         "image/webp",
+        "image/gif",
+        "image/apng",
         "image/jxl",
         "image/avif",
         "image/heif",
+        "image/heic",
+        "image/tiff",
     }
 )
 
-#: Explicitly animated image MIME types
+#: Explicitly multi-frame animation sequence MIME types
 EXPLICIT_ANIMATED_MIMES: frozenset[str] = frozenset(
     {
-        "image/gif",
-        "image/apng",
+        "image/avif-sequence",
+        "image/heic-sequence",
+        "image/heif-sequence",
     }
 )
 
@@ -80,7 +87,7 @@ EXPLICIT_ANIMATED_MIMES: frozenset[str] = frozenset(
 
 
 def is_video_mime(mime: str) -> bool:
-    """Return True if a MIME string represents a video container or explicitly animated image."""
+    """Return True if a MIME string represents a video container or explicit animation sequence."""
     norm = mime.strip().lower()
     return norm.startswith("video/") or norm in EXPLICIT_ANIMATED_MIMES
 
