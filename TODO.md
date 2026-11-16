@@ -1,5 +1,8 @@
 # TODO
 
+- video: option to increase thresholds globally for multi-frame content
+  - or add a note for users to make multi-frame content tagging a separate run
+
 - print/show info of pyav and its bunlded ffmpeg in about page (maybe video page), and cli display if video stuff is enabled
 
 - reusable function to handle "file(s)" thing and correctly show either plural or singular
