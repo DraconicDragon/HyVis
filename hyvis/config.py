@@ -827,9 +827,11 @@ class VideoConfig(StrictBaseModel):
         title="Frame Cache Mode",
         description=(
             "Where extracted video/animation frames live during inference:\n"
-            "• auto: Streams in memory for 1 model; caches Q97 JPEGs on disk for 2+ models.\n"
+            "• auto: Streams in memory for 1 model; caches frames on disk for 2+ models.\n"
             "• memory: Never writes extracted frames to disk (re-extracts per model).\n"
-            "• disk: Always saves extracted frames to disk until all models finish the file."
+            "• disk: Always saves extracted frames to disk until all models finish the file.\n\n"
+            "Note: When disk caching is active on multi-model runs, the first model receives the "
+            "original in-memory decoded frames while subsequent models read the disk-cached frames."
         ),
     )
     frame_cache_dir: str | None = Field(

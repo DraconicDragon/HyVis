@@ -295,6 +295,13 @@ def print_confirmation(
             f"    sampling            k={vid.density_k}  min={vid.min_frames}  max={vid.max_frames}  sparse<{vid.sparse_below_frames}"
         )
         print(f"    frame cache         mode={vid.frame_cache_mode}")
+        if len(inf.models) > 1 and vid.frame_cache_mode in ("auto", "disk"):
+            print(
+                _c(
+                    "    note                Model 1 uses original decoded frames; subsequent models read disk-cached frames",
+                    DIM,
+                )
+            )
         print()
 
     # region Output Filter
