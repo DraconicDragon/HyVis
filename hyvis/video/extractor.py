@@ -8,6 +8,7 @@ adaptive sequential vs. keyframe-seek decoding) and Pillow for animated images
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from collections.abc import Iterator
@@ -67,6 +68,16 @@ class ExtractionResult:
 
 
 # region Probing & Orientation Helpers
+
+
+def _import_av() -> Any:
+    """Import PyAV lazily, raising a clear ImportError message if missing."""
+    try:
+        import av
+
+        return av
+    except ImportError as exc:
+        raise ImportError("PyAV ('av') is required for video decoding. Install it with 'pip install av'.") from exc
 
 
 def is_animated_image(path: str | Path) -> bool:
@@ -294,9 +305,14 @@ def _should_use_seek_strategy(probe: MediaProbe, plan: FramePlan) -> bool:
     return avg_interval >= _SEEK_MIN_INTERVAL_S
 
 
-def _extract_video_sequential(probe: MediaProbe, plan: FramePlan) -> Iterator[ExtractedFrame]:
+def _extract_video_sequential(
+    probe: MediaProbe,
+    plan: FramePlan,
+    *,
+    start_out_idx: int = 0,
+) -> Iterator[ExtractedFrame]:
     """Decode video in a single sequential pass, picking frames matching target timestamps or indices."""
-    import av
+    av = _import_av()
 
     with av.open(str(probe.path)) as container:
         stream = container.streams.video[0]
@@ -314,7 +330,7 @@ def _extract_video_sequential(probe: MediaProbe, plan: FramePlan) -> Iterator[Ex
             targets = (0.0,) if use_times else (0,)
 
         target_pos = 0
-        out_idx = 0
+        out_idx = start_out_idx
         logged_rotation = False
 
         for raw_idx, frame in enumerate(container.decode(stream)):
@@ -363,18 +379,19 @@ def _extract_video_sequential(probe: MediaProbe, plan: FramePlan) -> Iterator[Ex
                     if target_pos >= len(targets):
                         break
 
-        if out_idx < len(targets):
+        yielded_here = out_idx - start_out_idx
+        if yielded_here < len(targets):
             logger.debug(
                 "Video '%s' ended after yielding %d/%d planned frames (sequential).",
                 probe.path.name,
-                out_idx,
+                yielded_here,
                 len(targets),
             )
 
 
 def _extract_video_seek(probe: MediaProbe, plan: FramePlan) -> Iterator[ExtractedFrame]:
     """Extract target timestamps via backward keyframe seeks + short forward decode."""
-    import av
+    av = _import_av()
 
     with av.open(str(probe.path)) as container:
         stream = container.streams.video[0]
@@ -389,16 +406,20 @@ def _extract_video_seek(probe: MediaProbe, plan: FramePlan) -> Iterator[Extracte
         out_idx = 0
         logged_rotation = False
 
-        for target_t in plan.times_s:
+        for target_idx, target_t in enumerate(plan.times_s):
             seek_pts = int((target_t + start_s) / time_base)
             try:
                 container.seek(seek_pts, backward=True, stream=stream)
             except av.FFmpegError as exc:
                 logger.warning(
-                    "Seek failed at %.2fs in '%s' (%s); falling back to sequential.", target_t, probe.path.name, exc
+                    "Seek failed at %.2fs in '%s' (%s); falling back to sequential for remaining %d target(s).",
+                    target_t,
+                    probe.path.name,
+                    exc,
+                    len(plan.times_s) - target_idx,
                 )
-                if out_idx == 0:
-                    yield from _extract_video_sequential(probe, plan)
+                remaining_plan = dataclasses.replace(plan, times_s=plan.times_s[target_idx:])
+                yield from _extract_video_sequential(probe, remaining_plan, start_out_idx=out_idx)
                 return
 
             found = False
