@@ -174,7 +174,8 @@ class FrameDiskCache:
             return 0
         removed = 0
         for child in self.root.iterdir():
-            if child.is_dir():
+            # Only delete 64-char hex folders containing HyVis manifest.json
+            if child.is_dir() and len(child.name) == 64 and (child / "manifest.json").is_file():
                 shutil.rmtree(child, ignore_errors=True)
                 removed += 1
         return removed
