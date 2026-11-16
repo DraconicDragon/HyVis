@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.config import AppConfig
+from hyvis.config import AppConfig, is_video_mime
 from hyvis.db import (
     ActiveRunInspection,
     ClientBindingInspection,
@@ -748,12 +748,31 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             self.launch_btn.setEnabled(False)
             return
 
-        msg_lines = [f"<b>{cand_count}</b> candidate file{'s' if cand_count != 1 else ''} will be processed."]
+        multiframe_count = sum(
+            1
+            for fi in result.candidate_file_infos
+            if is_video_mime(fi.mime) or (fi.num_frames is not None and fi.num_frames > 1)
+        )
+        if self.cfg.video.enabled and multiframe_count > 0:
+            static_count = cand_count - multiframe_count
+            breakdown = f" ({static_count} static, {multiframe_count} video/animated)"
+        else:
+            breakdown = ""
+
+        msg_lines = [
+            f"<b>{cand_count}</b> candidate file{'s' if cand_count != 1 else ''} will be processed{breakdown}."
+        ]
         if rej_count > 0:
             mimes_str = ", ".join(sorted(result.rejected_mimes)) if result.rejected_mimes else "unknown"
             msg_lines.append(
                 f"<span style='color: {self.tokens.text_secondary};'>{rej_count} file(s) rejected with unsupported MIME: {mimes_str}</span>"
             )
+            if not self.cfg.video.enabled and any(is_video_mime(m) or "(animated)" in m for m in result.rejected_mimes):
+                msg_lines.append(
+                    f"<span style='color: {self.tokens.text_muted};'>"
+                    "Tip: Enable Video &amp; Animation Processing on the Video &amp; Animation page to process these."
+                    "</span>"
+                )
         self.files_label.setText("<br>".join(msg_lines))
 
         self._update_preview_ui()
