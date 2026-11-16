@@ -1163,7 +1163,7 @@ async def infer_files(
                     while not decode_errors.empty():
                         bad_fi, exc = decode_errors.get_nowait()
                         if isinstance(exc, ImportError):
-                            raise TypeError(f"Aborted: {exc}") from exc
+                            raise exc
 
                         # Per-file media/decode errors mark the file as ERROR without counting
                         # toward MAX_CONSECUTIVE_ERRORS (reserved for inference/runtime failures).
@@ -1224,6 +1224,10 @@ async def infer_files(
 
                     _flush_active_video()
                     _drain_decode_errors()
+                except ImportError as imp_exc:
+                    stats.aborted_early = True
+                    stats.abort_reason = f"Aborted: {imp_exc}"
+                    return stats
                 except RuntimeError as abort_exc:
                     if str(abort_exc).startswith("Aborted:"):
                         stats.aborted_early = True
