@@ -388,6 +388,7 @@ def test_multimodel_mixed_static_and_animated_end_to_end(tmp_path: Path, monkeyp
             self.model_id = model_id
             self.backend = vibe.Backend.PYTORCH
             self.variant = ""
+            self.capabilities = ("LabelCatalogProvider",)
             cat = cat_1 if model_id == "model_1" else cat_2
             self.tagger = vibe.TaggerView(catalog=cat, thresholds=None, recommendation=None)
 
