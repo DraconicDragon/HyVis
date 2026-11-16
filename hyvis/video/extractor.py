@@ -154,7 +154,7 @@ def _probe_pillow_image(path: Path) -> MediaProbe | None:
 
 def _probe_video_pyav(path: Path) -> MediaProbe:
     """Inspect a video container using PyAV without decoding frames."""
-    import av
+    av = _import_av()
 
     with av.open(str(path)) as container:
         if not container.streams.video:
