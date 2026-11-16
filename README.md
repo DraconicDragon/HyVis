@@ -34,6 +34,7 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 - **Client Previews**: [Preview](CONFIGURATION.md#hydruspreview) files that are about to be processed (or were rejected) in Hydrus before tagging begins.
 - **Multi-Model Support**: Run [multiple models](CONFIGURATION.md#inferencemodels) sequentially with global or per-model filter overrides
 - **Video / Animation Support**: Opt-in [frame sampling and max-score merging](CONFIGURATION.md#video) for videos (`MP4`, `WebM`, `MKV`, etc.) and multi-frame animated images (`GIF`, `APNG`, `WebP`, `AVIF`, `JXL`, etc.) using PyAV / FFmpeg.
+  - Note that HyVis doesn't currently support any tagging model that is capable of understanding temporal content / natively handling video input. Frame extraction is thus more of a workaround to use static image taggers for video tagging.
 - **Output Filtering**: Comprehensive settings for confidence thresholds, namespace prefix mappings, replacements, subset limits, and category filtering
 
 ### Showcase

@@ -90,6 +90,15 @@ class VideoPage(BaseConfigPage):
         desc_lbl.setWordWrap(True)
         enable_layout.addWidget(desc_lbl)
 
+        note_lbl = SemanticLabel(
+            "Note: HyVis doesn't currently support any tagging model that is capable of understanding temporal content / natively handling video input. "
+            "Frame extraction here is thus more of a workaround to use static image taggers for video tagging.",
+            role=TextRole.WARNING,
+            parent=self.enable_card,
+        )
+        note_lbl.setWordWrap(True)
+        enable_layout.addWidget(note_lbl)
+
         self.enable_card.setContentLayout(enable_layout)
         layout.addWidget(self.enable_card)
 
