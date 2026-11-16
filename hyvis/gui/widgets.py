@@ -184,7 +184,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
         self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
         card_layout = QVBoxLayout(self)
-        card_layout.setContentsMargins(10, 8, 10, 10)
+        card_layout.setContentsMargins(8, 6, 8, 8)
         card_layout.setSpacing(8)
 
         # Header container
@@ -219,7 +219,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
         # Content container
         self._content_widget = QWidget(self)
         self._content_layout = QVBoxLayout(self._content_widget)
-        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setContentsMargins(6, 0, 6, 4)
         self._content_layout.setSpacing(6)
         card_layout.addWidget(self._content_widget)
 
@@ -248,6 +248,8 @@ class SectionCard(AutoRepolishMixin, QFrame):
 
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
+        if self._title or self._is_checkable:
+            layout.setContentsMargins(6, 0, 6, 4)
         QWidget().setLayout(self._content_layout)
         self._content_layout = layout
         self._content_widget.setLayout(layout)
