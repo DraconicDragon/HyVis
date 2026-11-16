@@ -8,11 +8,10 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hyvis.db.migration_base import run_migrations
+from hyvis.db.migration_base import MigrationFn, run_migrations
 
 logger = logging.getLogger(__name__)
 
@@ -206,12 +205,12 @@ def _migrate_to_v2(conn: sqlite3.Connection) -> None:
 
 # region Migration Runner
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _migrate_to_v1,
-    _migrate_to_v2,
-]
+LATEST_VERSION = 2
 
-LATEST_VERSION: int = len(MIGRATIONS)
+MIGRATIONS: dict[int, MigrationFn] = {
+    1: _migrate_to_v1,
+    2: _migrate_to_v2,
+}
 
 
 def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None) -> None:
@@ -219,10 +218,9 @@ def apply_migrations(conn: sqlite3.Connection, db_path: Path | str | None = None
     Check PRAGMA user_version and sequentially execute any pending migrations
     inside truly atomic DDL transactions.
     """
-    migration_map = {idx + 1: fn for idx, fn in enumerate(MIGRATIONS)}
     prev_version = run_migrations(
         conn,
-        migration_map,
+        MIGRATIONS,
         latest_version=LATEST_VERSION,
         db_path=db_path,
         label="Database",
