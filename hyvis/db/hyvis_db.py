@@ -235,6 +235,11 @@ class Database:
             raise RuntimeError("Database is not open. Call open() or use as context manager.")
         return self._conn
 
+    @property
+    def read_only(self) -> bool:
+        """Return True if this database instance is read-only (e.g. because of dry-run)."""
+        return False
+
     def commit(self) -> None:
         """Force an immediate disk commit."""
         if self._conn is not None:
