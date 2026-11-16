@@ -70,6 +70,29 @@ class ExtractionResult:
 # region Probing & Orientation Helpers
 
 
+_PILLOW_PLUGINS_LOADED = False
+
+
+def _ensure_pillow_plugins() -> None:
+    """Register optional Pillow plugins (JXL, HEIF/HEIC/AVIF) for standalone extractor calls."""
+    global _PILLOW_PLUGINS_LOADED
+    if _PILLOW_PLUGINS_LOADED:
+        return
+    _PILLOW_PLUGINS_LOADED = True
+
+    try:
+        import pillow_jxl  # noqa: F401
+    except ImportError:
+        pass
+
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener()
+    except ImportError:
+        pass
+
+
 def _import_av() -> Any:
     """Import PyAV lazily, raising a clear ImportError message if missing."""
     try:
@@ -85,6 +108,7 @@ def is_animated_image(path: str | Path) -> bool:
     Fast header-only check to distinguish static images from multi-frame animations
     (e.g. APNG, animated WebP/AVIF/JXL/GIF). Returns False for video containers.
     """
+    _ensure_pillow_plugins()
     p = Path(path)
     try:
         with Image.open(p) as img:
@@ -95,6 +119,7 @@ def is_animated_image(path: str | Path) -> bool:
 
 def _probe_pillow_image(path: Path) -> MediaProbe | None:
     """Inspect a file with Pillow. Returns None if Pillow does not recognize it."""
+    _ensure_pillow_plugins()
     try:
         with Image.open(path) as img:
             n_frames = int(getattr(img, "n_frames", 1))
@@ -253,6 +278,7 @@ def _av_frame_to_pil(frame: Any) -> Image.Image:
 
 def _extract_pillow_frames(probe: MediaProbe, plan: FramePlan) -> Iterator[ExtractedFrame]:
     """Extract target frames from a static or animated image using Pillow."""
+    _ensure_pillow_plugins()
     with Image.open(probe.path) as img:
         if probe.kind == "image" or plan.target_count <= 1:
             upright = ImageOps.exif_transpose(img)
