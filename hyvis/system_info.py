@@ -222,6 +222,7 @@ def get_system_info() -> list[DependencyGroup]:
         "Pillow",
         "pillow-heif",
         "pillow-jxl-plugin",
+        "av",
     )
     for pkg_name in core_pkgs:
         ver, inst, summary = _get_dist_info(pkg_name)
