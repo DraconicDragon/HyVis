@@ -347,18 +347,21 @@ async def main() -> int:
     # region Early Action: Clear Cache
     if args.clear_cache:
         logger.info("Executing action: --clear-cache on %s", cache_path)
+
         if not cache_path.is_file():
-            _clear_video_frame_cache(cfg, db_path)
-            print("Inference cache is already empty (cache.db does not exist).")
+            removed_fc = _clear_video_frame_cache(cfg, db_path)
+            if removed_fc == 0:
+                print("Inference cache is already empty (cache.db does not exist).")
             return 0
 
         with CacheDatabase(cache_path) as cdb:
             stats_info = cdb.get_stats()
             count = int(stats_info["predictions"])
             if count == 0:
-                _clear_video_frame_cache(cfg, db_path)
-                print("Inference cache is already empty.")
-                logger.info("Inference cache is already empty.")
+                removed_fc = _clear_video_frame_cache(cfg, db_path)
+                if removed_fc == 0:
+                    print("Inference cache is already empty.")
+                    logger.info("Inference cache is already empty.")
                 return 0
 
             size_mb = stats_info["size_bytes"] / (1024 * 1024)
@@ -377,9 +380,10 @@ async def main() -> int:
                     return 0
 
             deleted = cdb.clear_cache()
-            _clear_video_frame_cache(cfg, db_path)
             print(_c(f"\n  Successfully cleared {deleted} cached records and reclaimed disk space.", GREEN))
             logger.info("Cleared %d cached records from %s", deleted, cache_path)
+
+            _clear_video_frame_cache(cfg, db_path)
             return 0
 
     # region Early Action: Push Only
