@@ -842,6 +842,12 @@ class VideoConfig(StrictBaseModel):
         examples=["data/frame_cache"],
     )
 
+    @model_validator(mode="after")
+    def _validate_frame_bounds(self) -> VideoConfig:
+        if self.min_frames > self.max_frames:
+            raise ValueError(f"min_frames ({self.min_frames}) cannot exceed max_frames ({self.max_frames}).")
+        return self
+
     def to_plan_config(self) -> Any:
         """Build a FramePlanConfig instance matching these settings."""
         from hyvis.video.planner import FramePlanConfig
