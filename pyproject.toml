@@ -15,6 +15,7 @@ dependencies = [
     "vibe-result-transforms @ git+https://github.com/DraconicDragon/vibe-result-transforms@dfafe4aac4e21b926f92766f8cf3299eb800abe1",
     "tomli-w>=1.2.0",
     "pydantic>=2.4.0,<3",
+    "av>=18.0.0",
 ]
 
 [project.optional-dependencies]
