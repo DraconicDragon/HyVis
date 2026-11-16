@@ -800,7 +800,7 @@ class VideoConfig(StrictBaseModel):
     density_k: float = Field(
         default=2.0,
         gt=0.0,
-        le=20.0,
+        le=60.0,
         title="Sampling Density (k)",
         description="Controls how many frames are sampled via N = k * sqrt(duration_s). Higher values sample more frames.",
         examples=[2.0],
@@ -808,7 +808,7 @@ class VideoConfig(StrictBaseModel):
     min_frames: int = Field(
         default=4,
         ge=1,
-        le=512,
+        le=2048,
         title="Minimum Sampled Frames",
         description="Minimum frames sampled per video/animation (clamped to total frames if shorter).",
         examples=[4],
@@ -816,7 +816,7 @@ class VideoConfig(StrictBaseModel):
     max_frames: int = Field(
         default=128,
         ge=1,
-        le=2048,
+        le=7200,
         title="Maximum Sampled Frames",
         description="Hard upper cap on frames sampled per video to keep processing time bounded on long videos.",
         examples=[128],
@@ -824,7 +824,7 @@ class VideoConfig(StrictBaseModel):
     sparse_below_frames: int = Field(
         default=32,
         ge=1,
-        le=512,
+        le=2048,
         title="Sparse Frame Threshold",
         description="Files with fewer total frames than this threshold use frame-count scaling instead of duration scaling.",
         examples=[32],
