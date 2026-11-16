@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Self
 from unittest.mock import MagicMock
@@ -74,6 +74,54 @@ def _make_video_config(
 def _write_animated_webp(path: Path, count: int = 6) -> None:
     frames = [Image.new("RGB", (32, 32), (i * 40, 20, 200 - i * 25)) for i in range(count)]
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=80, loop=0)
+
+
+class _FakeSession:
+    """Shared mock vibe.ModelSession satisfying tagger contracts and streaming chunks."""
+
+    def __init__(
+        self,
+        model_id: str,
+        catalog: LabelCatalog,
+        score_fn: Callable[[Any, Any], TagResult],
+    ) -> None:
+        self.model_id = model_id
+        self.backend = vibe.Backend.PYTORCH
+        self.variant = ""
+        self.capabilities = ("LabelCatalogProvider",)
+        self.tagger = vibe.TaggerView(catalog=catalog, thresholds=None, recommendation=None)
+        self._score_fn = score_fn
+
+    def execution_info(self) -> dict[str, Any]:
+        return {"runtime": {"device": "cpu", "precision": {"weight_dtype": "fp32", "compute_dtype": "fp32"}}}
+
+    def is_cancellation_requested(self) -> bool:
+        return False
+
+    async def infer_async(
+        self,
+        images: Any,
+        *,
+        refs: Any = None,
+        batch_size: int = 1,
+    ) -> AsyncIterator[InferenceResult]:
+        norm = normalize_input_format(images, refs=refs)
+        for start_idx, batch_vals, batch_refs in iter_raw_chunks(norm, batch_size=batch_size):
+            items = [
+                InferenceResultItem(
+                    index=start_idx + offset,
+                    result=self._score_fn(val, ref),
+                    input_ref=ref,
+                )
+                for offset, (val, ref) in enumerate(zip(batch_vals, batch_refs, strict=True))
+            ]
+            yield InferenceResult(items=items)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        pass
 
 
 # region Cache Migration & Known Frames Persistence
@@ -154,8 +202,7 @@ def test_bulk_get_known_frames_roundtrip(tmp_path: Path) -> None:
         db.upsert_file(h_unknown, file_path="/b.png", mime="image/png", num_frames=None)
         db.commit()
 
-        frames_map = db.bulk_get_known_frames([h_anim, h_unknown])
-        assert frames_map == {h_anim: 18}
+        assert db.bulk_get_known_frames([h_anim, h_unknown]) == {h_anim: 18}
 
 
 # endregion
@@ -383,61 +430,28 @@ def test_multimodel_mixed_static_and_animated_end_to_end(tmp_path: Path, monkeyp
         categories=("general",),
     )
 
-    class _FakeSession:
-        def __init__(self, model_id: str) -> None:
-            self.model_id = model_id
-            self.backend = vibe.Backend.PYTORCH
-            self.variant = ""
-            self.capabilities = ("LabelCatalogProvider",)
-            cat = cat_1 if model_id == "model_1" else cat_2
-            self.tagger = vibe.TaggerView(catalog=cat, thresholds=None, recommendation=None)
+    def _score_m1(val: Any, _ref: Any) -> TagResult:
+        if isinstance(val, Image.Image):
+            r = val.getpixel((16, 16))[0]
+            cameo_score = 0.88 if r > 100 else 0.05
+            scores = np.array([0.82, cameo_score], dtype=np.float32)
+        else:
+            scores = np.array([0.75, 0.10], dtype=np.float32)
+        return TagResult.from_arrays(tag_names=cat_1.names, scores=scores, category_indices={"general": (0, 1)})
 
-        def execution_info(self) -> dict[str, Any]:
-            return {"runtime": {"device": "cpu", "precision": {"weight_dtype": "fp32", "compute_dtype": "fp32"}}}
+    def _score_m2(_val: Any, _ref: Any) -> TagResult:
+        return TagResult.from_arrays(
+            tag_names=cat_2.names,
+            scores=np.array([0.91], dtype=np.float32),
+            category_indices={"general": (0,)},
+        )
 
-        def is_cancellation_requested(self) -> bool:
-            return False
+    def _load(model_id: str, **kwargs: Any) -> _FakeSession:
+        if model_id == "model_1":
+            return _FakeSession(model_id, cat_1, _score_m1)
+        return _FakeSession(model_id, cat_2, _score_m2)
 
-        async def infer_async(
-            self,
-            images: Any,
-            *,
-            refs: Any = None,
-            batch_size: int = 1,
-        ) -> AsyncIterator[InferenceResult]:
-            norm = normalize_input_format(images, refs=refs)
-            for start_idx, batch_vals, batch_refs in iter_raw_chunks(norm, batch_size=batch_size):
-                items: list[InferenceResultItem] = []
-                for offset, (val, ref) in enumerate(zip(batch_vals, batch_refs, strict=True)):
-                    if self.model_id == "model_1":
-                        if isinstance(val, Image.Image):
-                            # Check center red channel: frame index >= 3 has bright red -> cameo_tag spikes!
-                            r = val.getpixel((16, 16))[0]
-                            cameo_score = 0.88 if r > 100 else 0.05
-                            scores = np.array([0.82, cameo_score], dtype=np.float32)
-                        else:
-                            scores = np.array([0.75, 0.10], dtype=np.float32)
-                        res = TagResult.from_arrays(
-                            tag_names=cat_1.names,
-                            scores=scores,
-                            category_indices={"general": (0, 1)},
-                        )
-                    else:
-                        res = TagResult.from_arrays(
-                            tag_names=cat_2.names,
-                            scores=np.array([0.91], dtype=np.float32),
-                            category_indices={"general": (0,)},
-                        )
-                    items.append(InferenceResultItem(index=start_idx + offset, result=res, input_ref=ref))
-                yield InferenceResult(items=items)
-
-        def __enter__(self) -> Self:
-            return self
-
-        def __exit__(self, *_: object) -> None:
-            pass
-
-    monkeypatch.setattr(vibe, "load", lambda model_id, **kwargs: _FakeSession(model_id))
+    monkeypatch.setattr(vibe, "load", _load)
 
     extract_calls = 0
     import hyvis.video.extractor as real_extractor
@@ -508,12 +522,198 @@ def test_multimodel_mixed_static_and_animated_end_to_end(tmp_path: Path, monkeyp
 
         # Check known_files recorded updated frame count & cache.db stored prep_hash
         assert db.bulk_get_known_frames([h_anim]) == {h_anim: 6}
+
         m1_row = cdb.find_model_rows("model_1")[0]
         row = cdb.conn.execute(
             "SELECT prep_hash FROM predictions WHERE model_row = ? AND file_hash = ?",
             (m1_row, bytes.fromhex(h_anim)),
         ).fetchone()
         assert row is not None and row[0] == cfg.video.prep_hash()
+
+
+def test_frame_cache_corruption_recovery_and_pass_a_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    1. Corrupt a cached JPEG on disk -> validate_frames invalidates and re-extracts without marking file ERROR.
+    2. Final model running via Pass A (CPU re-filter) still deletes the temporary frame_cache directory.
+    """
+    anim_path = tmp_path / "anim.webp"
+    _write_animated_webp(anim_path, count=6)
+
+    h_anim = "4" * 64
+    fi = FileInfo(h_anim, "image/webp", 200, str(anim_path), num_frames=6)
+
+    fc_dir = tmp_path / "frame_cache"
+    cfg = _make_video_config(
+        video_enabled=True,
+        models=[{"model_id": "model_1"}, {"model_id": "model_2"}],
+        frame_cache_mode="disk",
+        frame_cache_dir=str(fc_dir),
+        db_path=str(tmp_path / "hyvis.db"),
+    )
+
+    fc = FrameDiskCache(fc_dir)
+    list(
+        fc.save_and_yield_frames(
+            h_anim,
+            cfg.video.prep_hash(),
+            iter(
+                [ExtractedFrame(index=0, source_index=0, timestamp_s=0.0, image=Image.new("RGB", (16, 16), (1, 2, 3)))]
+            ),
+        )
+    )
+    (fc_dir / h_anim / "0000.jpg").write_bytes(b"corrupt_not_a_jpeg")
+
+    cat_1 = LabelCatalog(labels=(LabelInfo(index=0, name="1girl", category="general"),), categories=("general",))
+    cat_2 = LabelCatalog(labels=(LabelInfo(index=0, name="smile", category="general"),), categories=("general",))
+
+    monkeypatch.setattr(
+        vibe,
+        "load",
+        lambda model_id, **kwargs: _FakeSession(
+            model_id,
+            cat_1,
+            lambda _v, _r: TagResult.from_arrays(
+                tag_names=cat_1.names,
+                scores=np.array([0.90], dtype=np.float32),
+                category_indices={"general": (0,)},
+            ),
+        ),
+    )
+
+    with Database(tmp_path / "hyvis.db") as db, CacheDatabase(tmp_path / "cache.db") as cdb:
+        row_2 = cdb.register_model("model_2", "", cat_2)
+        cdb.save_prediction(
+            row_2,
+            h_anim,
+            np.array([0], dtype=np.uint32),
+            np.array([0.85], dtype=np.float32),
+            min_cache_score=0.005,
+            prep_hash=cfg.video.prep_hash(),
+        )
+        cdb.commit()
+
+        db.start_active_run(
+            "[hydrus]\napi_url='http://127.0.0.1:45869'",
+            mode=RunMode.DEFAULT,
+            hyvis_version="test",
+            candidate_files=[(fi.file_hash, fi.mime)],
+        )
+
+        last_active = {h_anim: "model_2"}
+        meta_by_id: dict[str, tuple[str, str, str]] = {}
+
+        async def _run() -> None:
+            s1 = await infer_files(
+                cfg.inference.models[0],
+                [fi],
+                config=cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=1),
+                force=False,
+                last_active_model_for_file=last_active,
+                model_meta_by_id=meta_by_id,
+            )
+            assert s1.ok == 1 and s1.errors == 0
+            assert fc.validate_frames(h_anim, cfg.video.prep_hash()) is True
+
+            s2 = await infer_files(
+                cfg.inference.models[1],
+                [fi],
+                config=cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=1),
+                force=False,
+                last_active_model_for_file=last_active,
+                model_meta_by_id=meta_by_id,
+            )
+            assert s2.refiltered == 1 and s2.ok == 0
+            assert not (fc_dir / h_anim).exists()
+
+        asyncio.run(_run())
+
+
+def test_decode_error_classification_media_vs_missing_dep(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    1. >10 consecutive corrupt video files must NOT trip MAX_CONSECUTIVE_ERRORS; valid file at end still runs.
+    2. ImportError (missing PyAV) must abort immediately without marking files as FileStatus.ERROR.
+    """
+    import hyvis.video.extractor as extractor_mod
+
+    valid_anim = tmp_path / "valid.webp"
+    _write_animated_webp(valid_anim, count=4)
+
+    bad_files = [
+        FileInfo(f"{i:064x}", "video/mp4", 100, str(tmp_path / f"bad_{i}.mp4"), num_frames=10) for i in range(12)
+    ]
+    for bf in bad_files:
+        assert bf.local_path is not None
+        Path(bf.local_path).write_bytes(b"not a valid mp4")
+
+    good_hash = "f" * 64
+    good_fi = FileInfo(good_hash, "image/webp", 200, str(valid_anim), num_frames=4)
+    all_files = [*bad_files, good_fi]
+
+    cfg = _make_video_config(video_enabled=True, db_path=str(tmp_path / "hyvis.db"))
+    cat = LabelCatalog(labels=(LabelInfo(index=0, name="1girl", category="general"),), categories=("general",))
+
+    monkeypatch.setattr(
+        vibe,
+        "load",
+        lambda model_id, **kwargs: _FakeSession(
+            model_id,
+            cat,
+            lambda _v, _r: TagResult.from_arrays(
+                tag_names=cat.names,
+                scores=np.array([0.85], dtype=np.float32),
+                category_indices={"general": (0,)},
+            ),
+        ),
+    )
+
+    with Database(tmp_path / "hyvis1.db") as db, CacheDatabase(tmp_path / "cache1.db") as cdb:
+        stats1 = asyncio.run(
+            infer_files(
+                cfg.inference.models[0],
+                all_files,
+                config=cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=len(all_files)),
+                force=False,
+            )
+        )
+        assert stats1.aborted_early is False
+        assert stats1.errors == 12
+        assert stats1.ok == 1
+
+    monkeypatch.setattr(extractor_mod, "_import_av", MagicMock(side_effect=ImportError("No module named 'av'")))
+    with Database(tmp_path / "hyvis2.db") as db, CacheDatabase(tmp_path / "cache2.db") as cdb:
+        stats2 = asyncio.run(
+            infer_files(
+                cfg.inference.models[0],
+                [bad_files[0]],
+                config=cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=1),
+                force=False,
+            )
+        )
+        assert stats2.aborted_early is True
+        assert "PyAV" in stats2.abort_reason or "av" in stats2.abort_reason
+        assert stats2.errors == 0
+        row = db.conn.execute(
+            "SELECT status FROM known_files WHERE file_hash = ?", (bad_files[0].file_hash,)
+        ).fetchone()
+        assert row is None
 
 
 # endregion
