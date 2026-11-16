@@ -5,6 +5,7 @@ from .base import BaseConfigPage
 from .filters_page import FiltersPage
 from .hydrus_page import HydrusPage
 from .models_page import ModelsPage
+from .video_page import VideoPage
 
 __all__ = [
     "AppDbPage",
@@ -12,4 +13,5 @@ __all__ = [
     "FiltersPage",
     "HydrusPage",
     "ModelsPage",
+    "VideoPage",
 ]

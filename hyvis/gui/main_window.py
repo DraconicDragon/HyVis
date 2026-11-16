@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ from hyvis.gui.dialogs import (
     prompt_unsaved_changes,
 )
 from hyvis.gui.launcher import format_cli_command_str
-from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage
+from hyvis.gui.pages import AppDbPage, BaseConfigPage, FiltersPage, HydrusPage, ModelsPage, VideoPage
 from hyvis.gui.settings import (
     GuiSettings,
     delete_session_tmp,
@@ -61,10 +62,20 @@ from hyvis.gui.state import _DEFAULT_CONFIG_DICT, ConfigState, ConnectionStatus
 from hyvis.gui.theme import ThemeProperty, ThemeSubscriberMixin, WidgetState
 
 
+class PageIndex(IntEnum):
+    """Sidebar / QStackedWidget page indices in pipeline execution order."""
+
+    HYDRUS = 0
+    VIDEO = 1
+    MODELS = 2
+    FILTERS = 3
+    APP_DB = 4
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     message: str
-    page_index: int  # 0: Hydrus, 1: Models, 2: Filters, 3: AppDb
+    page_index: PageIndex
     section_title: str
     field_name: str | None = None
     model_index: int | None = None
@@ -75,13 +86,13 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
     msg = err.get("msg", "Invalid value")
 
     top_section = str(loc[0]) if loc else ""
-    page_idx = 0
+    page_idx: int = PageIndex.HYDRUS
     section_title = "General"
     field_name = None
     model_idx = None
 
     if top_section == "hydrus":
-        page_idx = 0
+        page_idx = PageIndex.HYDRUS
         section_title = "Hydrus"
         if len(loc) > 1:
             field_name = str(loc[1])
@@ -91,8 +102,21 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
             title = field_info.title if field_info and field_info.title else field_name
             msg = f"{title}: {msg}"
 
+    elif top_section == "video":
+        page_idx = PageIndex.VIDEO
+        section_title = "Video & Animation"
+        if len(loc) > 1:
+            field_name = str(loc[1])
+            from hyvis.config import VideoConfig
+
+            field_info = VideoConfig.model_fields.get(field_name)
+            title = field_info.title if field_info and field_info.title else field_name
+            msg = f"{title}: {msg}"
+        elif "min_frames" in msg:
+            field_name = "min_frames"
+
     elif top_section == "output_filter":
-        page_idx = 2
+        page_idx = PageIndex.FILTERS
         section_title = "Output Filter"
         if len(loc) > 1:
             field_name = str(loc[1])
@@ -103,7 +127,7 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
             msg = f"{title}: {msg}"
 
     elif top_section in ("database", "hyvis"):
-        page_idx = 3
+        page_idx = PageIndex.APP_DB
         section_title = "Database & App"
         if len(loc) > 1:
             field_name = str(loc[1])
@@ -122,7 +146,7 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
                 model_idx = None
 
             if len(loc) >= 5 and str(loc[3]) == "output_filter":
-                page_idx = 2  # Model-specific filter override
+                page_idx = PageIndex.FILTERS
                 section_title = f"Model #{model_idx + 1} Filter" if model_idx is not None else "Model Filter"
                 field_name = str(loc[4])
                 from hyvis.config import OutputFilterConfig
@@ -131,7 +155,7 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
                 title = field_info.title if field_info and field_info.title else field_name
                 msg = f"{title}: {msg}"
             else:
-                page_idx = 1
+                page_idx = PageIndex.MODELS
                 section_title = f"Model #{model_idx + 1}" if model_idx is not None else "Inference Models"
                 if len(loc) >= 4:
                     field_name = str(loc[3])
@@ -141,7 +165,7 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
                     title = field_info.title if field_info and field_info.title else field_name
                     msg = f"{title}: {msg}"
         else:
-            page_idx = 1
+            page_idx = PageIndex.MODELS
             section_title = "Inference Models"
 
     return ValidationIssue(
@@ -155,13 +179,13 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
 
 def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
     msg = rule_err
-    page_idx = 0
+    page_idx = PageIndex.HYDRUS
     section_title = "General"
     field_name = None
     model_idx = None
 
     if rule_err.startswith("[hydrus]"):
-        page_idx = 0
+        page_idx = PageIndex.HYDRUS
         section_title = "Hydrus"
         msg = rule_err.replace("[hydrus] ", "").strip()
         if "tag_queries" in rule_err:
@@ -169,13 +193,13 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         elif "output_tag_services" in rule_err:
             field_name = "output_tag_services"
     elif rule_err.startswith("[output_filter]"):
-        page_idx = 2
+        page_idx = PageIndex.FILTERS
         section_title = "Output Filter"
         msg = rule_err.replace("[output_filter] ", "").strip()
         if "allowed_categories" in rule_err:
             field_name = "allowed_categories"
     elif rule_err.startswith("[inference.models.") and ".output_filter]" in rule_err:
-        page_idx = 2  # FiltersPage
+        page_idx = PageIndex.FILTERS
         try:
             prefix = rule_err[len("[inference.models.") : rule_err.index(".output_filter]")]
             model_idx = int(prefix)
@@ -187,7 +211,7 @@ def _parse_business_rule_issue(rule_err: str) -> ValidationIssue:
         if "allowed_categories" in rule_err:
             field_name = "allowed_categories"
     elif rule_err.startswith("[inference]"):
-        page_idx = 1
+        page_idx = PageIndex.MODELS
         section_title = "Inference Models"
         msg = rule_err.replace("[inference] ", "").strip()
 
@@ -427,18 +451,35 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         install_smooth_scroll(self.sidebar)
 
-        sidebar_sections = [
-            (app_fields["hydrus"].title, app_fields["hydrus"].description),
-            (app_fields["inference"].title, app_fields["inference"].description),
-            (app_fields["output_filter"].title, app_fields["output_filter"].description),
+        self.hydrus_page = HydrusPage(self)
+        self.video_page = VideoPage(self)
+        self.models_page = ModelsPage(self)
+        self.filters_page = FiltersPage(self)
+        self.app_db_page = AppDbPage(self)
+
+        page_specs: list[tuple[PageIndex, str | None, str | None, BaseConfigPage]] = [
+            (PageIndex.HYDRUS, app_fields["hydrus"].title, app_fields["hydrus"].description, self.hydrus_page),
+            (PageIndex.VIDEO, app_fields["video"].title, app_fields["video"].description, self.video_page),
+            (PageIndex.MODELS, app_fields["inference"].title, app_fields["inference"].description, self.models_page),
             (
+                PageIndex.FILTERS,
+                app_fields["output_filter"].title,
+                app_fields["output_filter"].description,
+                self.filters_page,
+            ),
+            (
+                PageIndex.APP_DB,
                 f"{app_fields['database'].title} & App",
                 f"{app_fields['database'].description} {app_fields['hyvis'].description}",
+                self.app_db_page,
             ),
         ]
-        for title, desc in sidebar_sections:
-            item = QListWidgetItem(title)
-            item.setToolTip(desc)
+        page_specs.sort(key=lambda spec: spec[0])
+
+        for _idx, title, desc, _page in page_specs:
+            item = QListWidgetItem(title or "")
+            if desc:
+                item.setToolTip(desc)
             self.sidebar.addItem(item)
 
         # Set width based on longest item size + some extra to make it more distinct
@@ -452,21 +493,9 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
 
         # Right Stacked Pages
         self.page_stack = QStackedWidget(body_container)
-
-        self.hydrus_page = HydrusPage(self)
-        self.models_page = ModelsPage(self)
-        self.filters_page = FiltersPage(self)
-        self.app_db_page = AppDbPage(self)
-
-        # Central registry of configuration pages (inheriting BaseConfigPage)
-        self.pages: list[BaseConfigPage] = [
-            self.hydrus_page,
-            self.models_page,
-            self.filters_page,
-            self.app_db_page,
-        ]
-
-        for page in self.pages:
+        self.pages: list[BaseConfigPage] = []
+        for _idx, _title, _desc, page in page_specs:
+            self.pages.append(page)
             self.page_stack.addWidget(page)
 
         body_layout.addWidget(self.page_stack, stretch=1)
@@ -710,8 +739,7 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
 
     def _on_request_filter_scope(self, model_index: int) -> None:
         """Navigate to the Output & Filters page and select the requested model scope."""
-        # Index 2 is FiltersPage (Hydrus=0, Models=1, Filters=2, AppDb=3)
-        self.sidebar.setCurrentRow(2)
+        self.sidebar.setCurrentRow(PageIndex.FILTERS)
         self.filters_page.set_scope_by_model_index(model_index)
 
     def _toggle_issues_panel(self) -> None:
@@ -832,12 +860,12 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
             self.sidebar.setCurrentRow(issue.page_index)
 
         # 2. Scope navigation
-        if issue.page_index == 2:  # FiltersPage
+        if issue.page_index == PageIndex.FILTERS:
             if issue.model_index is not None:
                 self.filters_page.set_scope_by_model_index(issue.model_index)
             else:
                 self.filters_page.scope_combo.setCurrentIndex(0)
-        elif issue.page_index == 1 and issue.model_index is not None:  # ModelsPage
+        elif issue.page_index == PageIndex.MODELS and issue.model_index is not None:
             self.models_page.model_list.setCurrentRow(issue.model_index)
 
         # 3. Focus & scroll to widget
