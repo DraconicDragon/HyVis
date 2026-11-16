@@ -212,7 +212,7 @@ def test_bulk_get_known_frames_roundtrip(tmp_path: Path) -> None:
 
 
 def test_filter_by_mime_rejects_animations_when_video_disabled() -> None:
-    """When allow_video=False, videos AND multi-frame animatable images must be rejected."""
+    """When allow_video=False, videos/sequences and num_frames>1 animations reject; static GIF/HEIC/QOI/ICO pass."""
     client = HydrusClient("http://127.0.0.1:45869", "key")
     mock_api = MagicMock()
     mock_api.get_file_metadata.return_value = {
@@ -222,25 +222,27 @@ def test_filter_by_mime_rejects_animations_when_video_disabled() -> None:
             {"hash": "3" * 64, "mime": "video/mp4", "size": 300, "num_frames": 90},
             {"hash": "4" * 64, "mime": "image/webp", "size": 150, "num_frames": 1},
             {"hash": "5" * 64, "mime": "image/gif", "size": 180, "num_frames": 8},
+            {"hash": "6" * 64, "mime": "image/gif", "size": 120, "num_frames": 1},
+            {"hash": "7" * 64, "mime": "image/heic", "size": 250},
+            {"hash": "8" * 64, "mime": "image/qoi", "size": 90},
+            {"hash": "9" * 64, "mime": "image/x-icon", "size": 40},
+            {"hash": "a" * 64, "mime": "image/avif-sequence", "size": 310, "num_frames": 15},
         ]
     }
     client._client = mock_api
 
-    acc_off, rej_mimes_off, rej_hashes_off = client.filter_by_mime(
-        ["1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64],
-        allow_video=False,
-    )
-    assert [fi.file_hash for fi in acc_off] == ["1" * 64, "4" * 64]
-    assert set(rej_hashes_off) == {"2" * 64, "3" * 64, "5" * 64}
-    assert "image/webp (animated)" in rej_mimes_off
-    assert "video/mp4" in rej_mimes_off
-    assert "image/gif" in rej_mimes_off
+    all_hashes = ["1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64, "6" * 64, "7" * 64, "8" * 64, "9" * 64, "a" * 64]
 
-    acc_on, rej_mimes_on, rej_hashes_on = client.filter_by_mime(
-        ["1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64],
-        allow_video=True,
-    )
-    assert len(acc_on) == 5
+    acc_off, rej_mimes_off, rej_hashes_off = client.filter_by_mime(all_hashes, allow_video=False)
+    assert {fi.file_hash for fi in acc_off} == {"1" * 64, "4" * 64, "6" * 64, "7" * 64, "8" * 64, "9" * 64}
+    assert set(rej_hashes_off) == {"2" * 64, "3" * 64, "5" * 64, "a" * 64}
+    assert "image/webp (animated)" in rej_mimes_off
+    assert "image/gif (animated)" in rej_mimes_off
+    assert "video/mp4" in rej_mimes_off
+    assert "image/avif-sequence" in rej_mimes_off
+
+    acc_on, rej_mimes_on, rej_hashes_on = client.filter_by_mime(all_hashes, allow_video=True)
+    assert len(acc_on) == 10
     assert not rej_mimes_on and not rej_hashes_on
 
 
