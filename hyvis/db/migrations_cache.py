@@ -1,7 +1,7 @@
 """
 migrations_cache.py — Sequential, transactional schema migrations for cache.db.
 
-Keeps cached GPU prediction data intact across schema upgrades instead of deleting
+Keeps cached prediction data intact across schema upgrades instead of deleting
 and re-creating cache.db on every version bump.
 """
 

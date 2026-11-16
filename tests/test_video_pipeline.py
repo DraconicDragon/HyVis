@@ -291,13 +291,13 @@ def test_prep_hash_change_only_invalidates_multiframe_files(tmp_path: Path) -> N
         p_dens = plan_model_pass(m_cfg, files, config=cfg_v2_density, db=db, cache_db=cdb, force=False)
         assert p_dens.skip_hashes == {h_static}
         assert p_dens.refilter_files == []
-        assert [fi.file_hash for fi in p_dens.gpu_files] == [h_video]
+        assert [fi.file_hash for fi in p_dens.files_to_infer] == [h_video]
 
         # 2. Threshold changed (density same): BOTH static and video route to CPU re-filter
         p_thresh = plan_model_pass(m_cfg, files, config=cfg_v2_thresh, db=db, cache_db=cdb, force=False)
         assert p_thresh.skip_hashes == set()
         assert {fi.file_hash for fi in p_thresh.refilter_files} == {h_static, h_video}
-        assert p_thresh.gpu_files == []
+        assert p_thresh.files_to_infer == []
 
 
 # endregion

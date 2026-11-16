@@ -260,13 +260,12 @@ def print_confirmation(
         )
         if model_plans and (i - 1) < len(model_plans):
             plan = model_plans[i - 1]
-            gpu_n = len(plan.gpu_files)
+            infer_n = len(plan.files_to_infer)
             cpu_n = len(plan.refilter_files)
             skip_n = len(plan.skip_hashes)
             print(
-                # todo: change string, this print assumes GPU when inference can be on other devices too
-                f"       work plan        {_c(f'{gpu_n} GPU', YELLOW if gpu_n else DIM)}  |  "
-                f"{_c(f'{cpu_n} CPU re-filter', CYAN if cpu_n else DIM)}  |  "
+                f"       work plan        {_c(f'{infer_n} infer', YELLOW if infer_n else DIM)}  |  "
+                f"{_c(f'{cpu_n} re-filter (cpu)', CYAN if cpu_n else DIM)}  |  "
                 f"{_c(f'{skip_n} skipped', DIM)}"
             )
         # Only show output services if explicitly configured per-model
@@ -395,7 +394,7 @@ def print_run_summary(
     print(f"  Status    : {_c(run_status, GREEN if run_status == 'done' else YELLOW)}")
     print(
         f"  Files     : {total_processed} total "
-        f"({total_infer_ok} GPU inferred, {total_refiltered} CPU re-filtered, {total_skipped} skipped)"
+        f"({total_infer_ok} inferred, {total_refiltered} re-filtered (cpu), {total_skipped} skipped)"
     )
     if total_infer_err > 0:
         print(f"  Errors    : {_c(str(total_infer_err), RED)}")
@@ -420,7 +419,7 @@ def print_run_summary(
         "=== HyVis Run Summary ===\n"
         "  Status:    %s\n"
         "  Mode:      %s\n"
-        "  Processed: %d total (%d GPU inferred, %d CPU re-filtered, %d skipped)\n"
+        "  Processed: %d total (%d inferred, %d re-filtered (cpu), %d skipped)\n"
         "  Output:    %d files with tags, %d zero-tag files\n"
         "  Errors:    %d inference errors\n"
         "  Push:      %s\n"

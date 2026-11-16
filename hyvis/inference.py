@@ -1,7 +1,7 @@
 """
 inference.py Inference orchestration.
 
-infer_files()             Run a model against files (via CPU cache re-filtering and/or GPU inference),
+infer_files()             Run a model against files (via cache re-filtering and/or model inference),
                           save raw results in disposable cache.db, stage multi-model outputs in hyvis.db,
                           and atomically enqueue tags into push_queue.
                           Does NOT require Hydrus to be reachable during inference.
@@ -388,7 +388,7 @@ def build_transform_pipeline_from_vocab(
     output_filter: OutputFilterConfig,
 ) -> TransformPipeline:
     """
-    Build the TransformPipeline directly from cache.db CachedVocab without loading GPU weights.
+    Build the TransformPipeline directly from cache.db CachedVocab without loading model weights.
     """
     label_items = ((vocab.idx_to_tag[idx], vocab.idx_to_category[idx]) for idx in vocab.idx_to_tag)
     calibrated = vocab.calibrated_thresholds or None
@@ -480,7 +480,7 @@ class ModelPassPlan:
     cache_model_row: int | None
     skip_hashes: set[str]
     refilter_files: list[FileInfo]
-    gpu_files: list[FileInfo]
+    files_to_infer: list[FileInfo]
 
     def effective_filter_hash(self, fi: FileInfo) -> str:
         """Return the filter_hash matching `fi` (static vs. multi-frame)."""
@@ -501,7 +501,7 @@ def plan_model_pass(
     Classify all target files into:
       - skip_hashes: Already completed with identical filter_hash (or staged on resume).
       - refilter_files: Needs filtering, raw scores available in cache.db at deep enough floor_q (CPU).
-      - gpu_files: Needs GPU inference (not in cache.db, too shallow floor_q, or --force).
+      - files_to_infer: Needs model inference (not in cache.db, too shallow floor_q, or --force).
     """
     filter_hash = compute_filter_hash(config, model_cfg)
     video_prep_hash = config.video.prep_hash()
@@ -531,7 +531,7 @@ def plan_model_pass(
             cache_model_row=None,
             skip_hashes=skip_hashes,
             refilter_files=[],
-            gpu_files=need_work,
+            files_to_infer=need_work,
         )
 
     # Check cache.db for CPU re-filter candidates
@@ -546,7 +546,7 @@ def plan_model_pass(
             cache_model_row=None,
             skip_hashes=skip_hashes,
             refilter_files=[],
-            gpu_files=need_work,
+            files_to_infer=need_work,
         )
 
     target_model_row = candidate_rows[0]
@@ -560,7 +560,7 @@ def plan_model_pass(
     )
 
     refilter_files = [fi for fi in need_work if fi.file_hash in cached_ok]
-    gpu_files = [fi for fi in need_work if fi.file_hash not in cached_ok]
+    files_to_infer = [fi for fi in need_work if fi.file_hash not in cached_ok]
 
     return ModelPassPlan(
         model_cfg=model_cfg,
@@ -571,7 +571,7 @@ def plan_model_pass(
         cache_model_row=target_model_row if refilter_files else None,
         skip_hashes=skip_hashes,
         refilter_files=refilter_files,
-        gpu_files=gpu_files,
+        files_to_infer=files_to_infer,
     )
 
 
@@ -586,7 +586,7 @@ class PhaseStats:
     """Counters for one model pass."""
 
     model_id: str
-    ok: int = 0  # Newly inferred on GPU
+    ok: int = 0  # Newly inferred by model
     refiltered: int = 0  # Re-filtered on CPU from cache.db
     zero_tags: int = 0  # Number of files where inference/refilter succeeded, but 0 tags passed filter
     errors: int = 0
@@ -692,7 +692,7 @@ async def infer_files(
     Execute one model pass:
       1. Skip files already completed under identical filter_hash.
       2. Re-filter files present in disposable cache.db on CPU (0 GPU load).
-      3. Run GPU inference on remaining files, storing packed binary scores in cache.db.
+      3. Run model inference on remaining files, storing packed binary scores in cache.db.
       4. Stage or atomically commit completed files into push_queue + inference_log.
     """
     stats = PhaseStats(model_id=model_cfg.model_id)
@@ -716,14 +716,14 @@ async def infer_files(
         progress.tick(skipped=stats.skipped)
 
     logger.info(
-        "Model %s plan: %d GPU, %d CPU re-filter, %d skipped",
+        "Model %s plan: %d infer, %d re-filter (cpu), %d skipped",
         model_cfg.model_id,
-        len(plan.gpu_files),
+        len(plan.files_to_infer),
         len(plan.refilter_files),
         stats.skipped,
     )
 
-    if not plan.refilter_files and not plan.gpu_files:
+    if not plan.refilter_files and not plan.files_to_infer:
         return stats
 
     eff_filter = config.resolved_output_filter(model_cfg)
@@ -734,12 +734,12 @@ async def infer_files(
 
     is_dry = db.read_only
 
-    # region Pass A: CPU Re-filter from cache.db (zero GPU/vibe weight loading)
+    # region Pass A: CPU Re-filter from cache.db (zero model weight loading)
     if plan.refilter_files and plan.cache_model_row is not None:
         vocab = cache_db.get_vocab(plan.cache_model_row)
         if vocab is None:
             # Defensive fallback: move to GPU pass if vocab row disappeared unexpectedly
-            plan.gpu_files.extend(plan.refilter_files)
+            plan.files_to_infer.extend(plan.refilter_files)
             plan.refilter_files.clear()
         else:
             model_meta_by_id[model_cfg.model_id] = (vocab.variant_id, vocab.vocab_hash, plan.filter_hash)
@@ -756,7 +756,7 @@ async def infer_files(
                 try:
                     cached_pred = cache_db.get_prediction(plan.cache_model_row, fi.file_hash)
                     if cached_pred is None:
-                        plan.gpu_files.append(fi)
+                        plan.files_to_infer.append(fi)
                         continue
 
                     indices, scores, _ = cached_pred
@@ -806,8 +806,8 @@ async def infer_files(
 
             db.commit()
 
-    # region Pass B: GPU Inference (only if files still need neural net inference)
-    if not plan.gpu_files:
+    # region Pass B: Model Inference (only if files still need model inference)
+    if not plan.files_to_infer:
         return stats
 
     from hyvis.config import ANIMATABLE_IMAGE_MIMES
@@ -815,14 +815,14 @@ async def infer_files(
     from hyvis.video.extractor import is_animated_image, iter_extract_frames, probe_media
     from hyvis.video.planner import plan_frames
 
-    source = LocalFileSource(plan.gpu_files)
-    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.gpu_files}
+    source = LocalFileSource(plan.files_to_infer)
+    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.files_to_infer}
 
     static_files: list[FileInfo] = []
     multiframe_files: list[FileInfo] = []
     skipped_unprobed_anim = 0
 
-    for fi in plan.gpu_files:
+    for fi in plan.files_to_infer:
         if not source.has_path(fi.file_hash):
             logger.warning("Model %s: %s has no local path, marking missing", model_cfg.model_id, fi.file_hash[:8])
             db.upsert_file(
@@ -1263,7 +1263,7 @@ async def infer_files(
         cache_db.commit()
 
     logger.info(
-        "Model '%s' pass finished: gpu=%d, refiltered=%d, skipped=%d | zero_tags=%d, enqueued=%d tags | errors=%d",
+        "Model '%s' pass finished: inferred=%d, refiltered=%d, skipped=%d | zero_tags=%d, enqueued=%d tags | errors=%d",
         model_cfg.model_id,
         stats.ok,
         stats.refiltered,

@@ -160,7 +160,7 @@ def _verify_client_binding(
         _c(
             "  Tip: Sharing one hyvis.db across different Hydrus clients will skip files or fail pushes.\n"
             "       Use a separate --db path (e.g. '--db data/test.db') while keeping '--cache-db data/cache.db'\n"
-            "       to safely reuse your GPU prediction cache.",
+            "       to safely reuse your raw prediction cache.",
             CYAN,
         )
     )
@@ -366,7 +366,7 @@ async def main() -> int:
 
             size_mb = stats_info["size_bytes"] / (1024 * 1024)
             print(_c(f"  Warning: This will delete {count} cached prediction record(s) ({size_mb:.1f} MB).", YELLOW))
-            print("  Re-running models on uncached filter changes will require GPU inference.")
+            print("  Re-running models on uncached filter changes will require model inference.")
             if not args.yes:
                 try:
                     ans = input("  Proceed? [y/N]: ").strip().lower()
@@ -658,13 +658,13 @@ async def main() -> int:
 
             for fi in plan.refilter_files:
                 last_active_model_for_file[fi.file_hash] = m_cfg.model_id
-            for fi in plan.gpu_files:
+            for fi in plan.files_to_infer:
                 last_active_model_for_file[fi.file_hash] = m_cfg.model_id
 
-    # Start background PyTorch/ONNX imports ONLY if at least one file actually needs GPU inference
-    gpu_backends_needed = [p.model_cfg.backend for p in plans if p.gpu_files]
-    if gpu_backends_needed:
-        start_imports(gpu_backends_needed)
+    # Start background PyTorch/ONNX imports ONLY if at least one file actually needs model inference
+    infer_backends_needed = [p.model_cfg.backend for p in plans if p.files_to_infer]
+    if infer_backends_needed:
+        start_imports(infer_backends_needed)
 
     # region Confirmation print
     print_confirmation(
@@ -757,7 +757,7 @@ async def main() -> int:
         actionable_count,
     )
 
-    if gpu_backends_needed:
+    if infer_backends_needed:
         wait_for_imports()
 
     # region Database & Inference Execution
@@ -805,7 +805,7 @@ async def main() -> int:
             print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id}{var_note})', DIM)}")
             print()
 
-            infer_stats: PhaseStats | None = None
+            infer_stats: PhaseStats | None
             if mode in ("default", "infer_only", "dry_run"):
                 progress = Progress(total=actionable_count)
                 infer_stats = await infer_files(
@@ -836,7 +836,7 @@ async def main() -> int:
                 print(f"\n  {_c('Inference summary:', BOLD)}")
                 print(
                     f"    Processed : {processed_count} files "
-                    f"({infer_stats.ok} GPU inferred, {infer_stats.refiltered} CPU re-filtered, {infer_stats.skipped} skipped)"
+                    f"({infer_stats.ok} inferred, {infer_stats.refiltered} re-filtered (cpu), {infer_stats.skipped} skipped)"
                 )
                 print(f"    Enqueued  : {files_with_tags} files ({infer_stats.total_tags_enqueued} {tag_label})")
                 if infer_stats.zero_tags > 0:
