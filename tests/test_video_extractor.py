@@ -6,7 +6,7 @@ Synthesizes media containers in tmp_path to verify animated frames, rotation, se
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -169,7 +169,7 @@ def test_pyav_handles_nonzero_start_time(tmp_path: Path, monkeypatch: pytest.Mon
             for frame in self._real.decode(self._real.streams.video[0]):
                 yield _FrameProxy(frame, self._offset_s)
 
-        def __enter__(self) -> _ContainerProxy:
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, *args) -> None:
@@ -201,3 +201,43 @@ def test_pyav_applies_display_rotation(tmp_path: Path) -> None:
     # Left side must be red-dominant, right side must be blue-dominant
     assert left_pixel[0] > 180 and left_pixel[2] < 60
     assert right_pixel[2] > 180 and right_pixel[0] < 60
+
+
+def test_pyav_mid_seek_error_falls_back_sequential(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a mid-video seek() FFmpegError resumes sequentially without dropping remaining frames."""
+    av = pytest.importorskip("av")
+    mp4_path = tmp_path / "mid_seek_err.mp4"
+    _write_test_video(mp4_path, num_frames=48, fps=24)
+
+    probe = probe_media(mp4_path)
+    plan = plan_frames(probe.duration_s, probe.total_frames, config=FramePlanConfig(min_frames=4, max_frames=8))
+    assert len(plan.times_s) == 4
+
+    original_av_open = av.open
+    seek_calls = 0
+
+    class _SeekFailContainerProxy:
+        def __init__(self, real_container: Any) -> None:
+            self._real = real_container
+
+        def seek(self, *args: Any, **kwargs: Any) -> Any:
+            nonlocal seek_calls
+            seek_calls += 1
+            if seek_calls >= 2:
+                raise av.FFmpegError(-1, "Simulated mid-video seek failure")
+            return self._real.seek(*args, **kwargs)
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self._real.close()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: _SeekFailContainerProxy(original_av_open(*args, **kwargs)))
+
+    frames = list(_extract_video_seek(probe, plan))
+    assert len(frames) == 4
+    assert [f.index for f in frames] == [0, 1, 2, 3]
