@@ -615,6 +615,8 @@ def _finalize_file(
     db: Database,
     last_active_model_for_file: Mapping[str, str] | None,
     model_meta_by_id: Mapping[str, tuple[str, str, str]],
+    is_multiframe: bool = False,
+    video_filter_hashes: Mapping[str, str] | None = None,
 ) -> bool:
     """
     Stage intermediate tags in run_progress, or commit atomically if this is the final active model.
@@ -663,6 +665,8 @@ def _finalize_file(
         if staged_m_id == model_cfg.model_id:
             continue
         v_id, vh, fh = model_meta_by_id.get(staged_m_id, ("", "", ""))
+        if is_multiframe and video_filter_hashes and staged_m_id in video_filter_hashes:
+            fh = video_filter_hashes[staged_m_id]
         completed_models.append((staged_m_id, v_id, vh, fh))
     completed_models.append((model_cfg.model_id, variant_id, vocab_hash, filter_hash))
 
@@ -729,6 +733,10 @@ async def infer_files(
     eff_filter = config.resolved_output_filter(model_cfg)
     output_services = config.resolved_output_tag_services(model_cfg)
     compiled_filter = compile_output_filter(eff_filter)
+    video_filter_hashes = {
+        m.model_id: compute_filter_hash(config, m, video_prep_hash=plan.video_prep_hash)
+        for m in config.inference.models
+    }
 
     from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
 
@@ -789,6 +797,8 @@ async def infer_files(
                         db=db,
                         last_active_model_for_file=last_active_model_for_file,
                         model_meta_by_id=model_meta_by_id,
+                        is_multiframe=is_known_multiframe(fi),
+                        video_filter_hashes=video_filter_hashes,
                     )
                     if is_final and pass_a_frame_cache is not None:
                         pass_a_frame_cache.cleanup_file(fi.file_hash)
@@ -988,7 +998,7 @@ async def infer_files(
                     stats.zero_tags += 1
 
                 is_final = _finalize_file(
-                    file_hash=file_hash,
+                    file_hash=fi.file_hash,
                     model_cfg=model_cfg,
                     variant_id=resolved_variant,
                     vocab_hash=vocab_hash,
@@ -999,6 +1009,8 @@ async def infer_files(
                     db=db,
                     last_active_model_for_file=last_active_model_for_file,
                     model_meta_by_id=model_meta_by_id,
+                    is_multiframe=is_known_multiframe(fi),
+                    video_filter_hashes=video_filter_hashes,
                 )
                 return len(prefixed_tags) if is_final or prefixed_tags else 0
 
