@@ -1551,7 +1551,7 @@ class CategoryLimitEditor(QWidget):
 
         spin = QSpinBox(self)
         spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        spin.setRange(1, 9999)
+        spin.setRange(1, 2_147_483_647)
         spin.setValue(limit)
         spin.valueChanged.connect(lambda _: self.changed.emit())
         self.table.setCellWidget(row, 1, spin)
@@ -1635,7 +1635,7 @@ class TagSubsetCard(AutoRepolishMixin, QFrame):
 
         self.limit_spin = QSpinBox(self)
         self.limit_spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.limit_spin.setRange(1, 999)
+        self.limit_spin.setRange(1, 2_147_483_647)
         self.limit_spin.setValue(1)
         self.limit_spin.valueChanged.connect(lambda _: self.changed.emit())
         limit_row.addWidget(self.limit_spin)

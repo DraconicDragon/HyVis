@@ -30,6 +30,8 @@
 
 ## TODO For User Interface
 
+- stop hardcoding ui values and instead resolve cleanly from config.py pydantic models for a real single source of truth
+
 - separate window for viewing logs in a table?
   - spawned from menu bar, will show latest to oldest
   - updates automatically like vscode (streaming content?)
