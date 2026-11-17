@@ -585,12 +585,16 @@ async def main() -> int:
             logger.info("No candidate files matched queries. Exiting.")
             return 0
 
-        # Resolve local paths using known_files cache first
+        # Resolve local paths and previously discovered frame counts using known_files cache first
         with db_cls(db_path) as db:
-            cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
+            all_cand_hashes = [fi.file_hash for fi in file_infos]
+            cached_paths = db.bulk_get_known_paths(all_cand_hashes)
+            cached_frames = db.bulk_get_known_frames(all_cand_hashes)
 
         files_to_resolve_online = []
         for fi in file_infos:
+            if fi.num_frames is None and fi.file_hash in cached_frames:
+                fi.num_frames = cached_frames[fi.file_hash]
             cached_p = cached_paths.get(fi.file_hash)
             if cached_p and Path(cached_p).is_file():
                 fi.local_path = cached_p
