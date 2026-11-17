@@ -7,6 +7,8 @@ t_*.toml
 md_notes.md
 md_notes.png
 .vscode/
+dbg*
+debug*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

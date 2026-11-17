@@ -1,10 +1,15 @@
 # TODO
 
+- video: option to increase thresholds globally for multi-frame content
+  - or add a note for users to make multi-frame content tagging a separate run
+
+- print/show info of pyav and its bunlded ffmpeg in about page (maybe video page), and cli display if video stuff is enabled
+
 - reusable function to handle "file(s)" thing and correctly show either plural or singular
-- make a textinput base widget that automatically adds a browse folder/file button
-  - add a way for users to see what the final absolute path/dir is based on the input (relative path can be different based on from what dir hyvis/hyvis gui is launched)
 
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
+
+- future: theres an open pr for adding close page api endpoint, add support for that for preview
 
 - move add/remove tags to output filter?
   - also move model specific destination tag services there since it kinda doesnt fit to models page
@@ -24,6 +29,8 @@
   - Would this even be useful?
 
 ## TODO For User Interface
+
+- stop hardcoding ui values and instead resolve cleanly from config.py pydantic models for a real single source of truth
 
 - separate window for viewing logs in a table?
   - spawned from menu bar, will show latest to oldest
@@ -77,15 +84,21 @@
     - No, jtp3/hydra 3.5 is not 400m params, thats the siglip2 naflex base, jtp3's hydra head and other custom stuff makes it 501m params
   - could use jupyter notebook + google colab i guess to download each model and calc count and save
 
-- its gonna be weird but: video/animation support, could support multiple modes
-  - Best may be to have basic thing, every nth frame, optionally include keyframes, if keyframe close to nth frame, put keyframe inplace of nth frame so its not gonna process "duplicate" frames (potentially)
-    - maybe have percentage of frames to extract so it automatically gets the frames, is also video length agnostic
-      - this works nicely for longer videos but not so much for shorter/low frame ones kinda, but maybe theres some fancy math formula that automatically knows which and how many frames to get with a user-set target/average number of frames
+- make a textinput base widget that automatically adds a browse folder/file button
+  - add a way for users to see what the final absolute path/dir is based on the input (relative path can be different based on from what dir hyvis/hyvis gui is launched)
+  - also see video todo
+
+- video/animation support; multiple modes (?)
   - Other possible options i guess, though multiple options would probably be nicest:
-    - every frame (too heavy but an option, maybe for gifs/very short vids)
-    - every nth frame (could do fps percentage based or hard user-set frame intervals)
-    - keyframes only (if easily possible)
-    - do analysis and find frames with cuts or scene changes
+    - ~~every frame (too heavy but an option, maybe for gifs/very short vids)~~
+    - ~~every nth frame (could do fps percentage based or hard user-set frame intervals)~~
+    - [ ] keyframes only (if easily possible)
+    - [ ] do analysis and find frames with cuts or scene changes (too heavy likely)
+    - [ ] duplicate processing (would include loop)
+    - [ ] fade in/outs? this is not reliable so probably no, or as an experimental setting
+  - [ ] UI for selecting/dropping video to see planning for that video
+    - [ ] make new compound widget, re: textboxes with browse button, add drop support there too, show file path on there too so relative isnt a mystery
+  - [ ] ability to set quality & format for disk frame cache
 
   - !IMPORTANT! If using PyAV - It requires Python 3.12 or higher (for v19+), HyVis currently requires 3.11 or higher
 

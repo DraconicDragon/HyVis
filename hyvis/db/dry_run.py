@@ -39,6 +39,11 @@ class DryRunDatabase(Database):
         self.simulated_enqueued_tags: int = 0
         self.simulated_files_with_tags: set[str] = set()
 
+    @property
+    def read_only(self) -> bool:
+        """DryRunDatabase never writes to disk."""
+        return True
+
     def open(self) -> None:
         if self._conn is not None:
             return

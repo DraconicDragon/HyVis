@@ -47,21 +47,59 @@ def field_meta(
 
 # region Constants
 
-#: MIME types
-# todo find better solution
-ALLOWED_MIMES: frozenset[str] = frozenset(
+# todo: add other from here: https://hydrusnetwork.github.io/hydrus/filetypes.html
+#: Static-only image MIME types (never multi-frame)
+STATIC_IMAGE_MIMES: frozenset[str] = frozenset(
     {
         "image/jpeg",
         "image/jpg",
+        "image/bmp",
+        "image/x-icon",
+        "image/qoi",
+    }
+)
+
+#: Image MIME types that may contain either 1 frame (static) or >1 frames (animated / multi-page)
+ANIMATABLE_IMAGE_MIMES: frozenset[str] = frozenset(
+    {
         "image/png",
         "image/webp",
-        "image/bmp",
+        "image/gif",
+        "image/apng",
         "image/jxl",
         "image/avif",
         "image/heif",
-        # "image/gif",
+        "image/heic",
+        "image/tiff",
     }
 )
+
+#: Explicitly multi-frame animation sequence MIME types
+EXPLICIT_ANIMATED_MIMES: frozenset[str] = frozenset(
+    {
+        "image/avif-sequence",
+        "image/heic-sequence",
+        "image/heif-sequence",
+    }
+)
+
+# endregion
+
+
+def is_video_mime(mime: str) -> bool:
+    """Return True if a MIME string represents a video container or explicit animation sequence."""
+    norm = mime.strip().lower()
+    return norm.startswith("video/") or norm in EXPLICIT_ANIMATED_MIMES
+
+
+def is_supported_mime(mime: str, *, allow_video: bool = False) -> bool:
+    """Check if a Hydrus MIME type is eligible under the current video/image settings."""
+    norm = mime.strip().lower()
+    if norm in STATIC_IMAGE_MIMES or norm in ANIMATABLE_IMAGE_MIMES:
+        return True
+    if allow_video:
+        return is_video_mime(norm)
+    return False
 
 
 def _extract_model_cls(annotation: Any) -> type[BaseModel] | None:
@@ -748,6 +786,101 @@ class HyvisConfig(StrictBaseModel):
         return v
 
 
+class VideoConfig(StrictBaseModel):
+    """Settings for sampling frames from videos and animated images (GIF, APNG, WebP, AVIF, JXL)."""
+
+    enabled: bool = Field(
+        default=False,
+        title="Enable Video & Animation Processing",
+        description=(
+            "When enabled, videos and multi-frame animated images are sampled and processed across frames.\n"
+            "When disabled, videos and known multi-frame animations are skipped instead of processing only Frame 0."
+        ),
+    )
+    density_k: float = Field(
+        default=2.0,
+        gt=0.0,
+        le=60.0,
+        title="Sampling Density (k)",
+        description="Controls how many frames are sampled via N = k * sqrt(duration_s). Higher values sample more frames.",
+        examples=[2.0],
+    )
+    min_frames: int = Field(
+        default=4,
+        ge=1,
+        le=2048,
+        title="Minimum Sampled Frames",
+        description="Minimum frames sampled per video/animation (clamped to total frames if shorter).",
+        examples=[4],
+    )
+    max_frames: int = Field(
+        default=128,
+        ge=1,
+        le=7200,
+        title="Maximum Sampled Frames",
+        description="Hard upper cap on frames sampled per video to keep processing time bounded on long videos.",
+        examples=[128],
+    )
+    sparse_below_frames: int = Field(
+        default=32,
+        ge=1,
+        le=2048,
+        title="Sparse Frame Threshold",
+        description="Files with fewer total frames than this threshold use frame-count scaling instead of duration scaling.",
+        examples=[32],
+    )
+    frame_cache_mode: Literal["auto", "memory", "disk"] = Field(
+        default="auto",
+        title="Frame Cache Mode",
+        description=(
+            "Where extracted video/animation frames live during inference:\n"
+            "• auto: Streams in memory for 1 model; caches frames on disk for 2+ models.\n"
+            "• memory: Never writes extracted frames to disk (re-extracts per model).\n"
+            "• disk: Always saves extracted frames to disk until all models finish the file.\n\n"
+            "Note: When disk caching is active on multi-model runs, the first model receives the "
+            "original in-memory decoded frames while subsequent models read the disk-cached frames."
+        ),
+    )
+    frame_cache_dir: str | None = Field(
+        default=None,
+        title="Frame Disk Cache Directory",
+        description="Optional directory for temporary extracted frames when disk caching is active. Defaults to data/frame_cache.",
+        json_schema_extra=field_meta(picker="directory"),
+        examples=["data/frame_cache"],
+    )
+
+    @model_validator(mode="after")
+    def _validate_frame_bounds(self) -> VideoConfig:
+        if self.min_frames > self.max_frames:
+            raise ValueError(f"min_frames ({self.min_frames}) cannot exceed max_frames ({self.max_frames}).")
+        return self
+
+    def to_plan_config(self) -> Any:
+        """Build a FramePlanConfig instance matching these settings."""
+        from hyvis.video.planner import FramePlanConfig
+
+        return FramePlanConfig(
+            density_k=self.density_k,
+            min_frames=self.min_frames,
+            max_frames=self.max_frames,
+            sparse_below_frames=self.sparse_below_frames,
+        )
+
+    def prep_hash(self) -> str:
+        """Return a deterministic 16-char fingerprint of sampling settings affecting extracted frames."""
+        import hashlib
+        import json
+
+        payload = {
+            "density_k": float(self.density_k),
+            "min_frames": int(self.min_frames),
+            "max_frames": int(self.max_frames),
+            "sparse_below_frames": int(self.sparse_below_frames),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]
+
+
 class AppConfig(StrictBaseModel):
     hydrus: HydrusConfig = Field(
         ...,
@@ -773,6 +906,11 @@ class AppConfig(StrictBaseModel):
         default_factory=HyvisConfig,
         title="Application Settings",
         description="Application-level execution behavior and logging verbosity.",
+    )
+    video: VideoConfig = Field(
+        default_factory=VideoConfig,
+        title="Video & Animation",
+        description="Frame sampling and caching settings for videos and animated images.",
     )
 
     # region Helpers

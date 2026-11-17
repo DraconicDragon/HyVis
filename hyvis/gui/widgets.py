@@ -161,6 +161,8 @@ class SectionCard(AutoRepolishMixin, QFrame):
     Uses AutoRepolishMixin for automatic repolishing on property updates.
     """
 
+    _CONTENT_MARGINS = (6, 0, 6, 4)
+
     toggled = Signal(bool)
 
     def __init__(
@@ -184,7 +186,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
         self.setProperty(ThemeProperty.STATE, WidgetState.DEFAULT)
 
         card_layout = QVBoxLayout(self)
-        card_layout.setContentsMargins(10, 8, 10, 10)
+        card_layout.setContentsMargins(8, 6, 8, 8)
         card_layout.setSpacing(8)
 
         # Header container
@@ -219,7 +221,7 @@ class SectionCard(AutoRepolishMixin, QFrame):
         # Content container
         self._content_widget = QWidget(self)
         self._content_layout = QVBoxLayout(self._content_widget)
-        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setContentsMargins(*self._CONTENT_MARGINS)
         self._content_layout.setSpacing(6)
         card_layout.addWidget(self._content_widget)
 
@@ -248,6 +250,8 @@ class SectionCard(AutoRepolishMixin, QFrame):
 
     def setContentLayout(self, layout: QFormLayout | QVBoxLayout | QHBoxLayout) -> None:
         """Replace internal content layout with a specialized layout."""
+        if self._title or self._is_checkable:
+            layout.setContentsMargins(*self._CONTENT_MARGINS)
         QWidget().setLayout(self._content_layout)
         self._content_layout = layout
         self._content_widget.setLayout(layout)
@@ -1547,7 +1551,7 @@ class CategoryLimitEditor(QWidget):
 
         spin = QSpinBox(self)
         spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        spin.setRange(1, 9999)
+        spin.setRange(1, 2_147_483_647)
         spin.setValue(limit)
         spin.valueChanged.connect(lambda _: self.changed.emit())
         self.table.setCellWidget(row, 1, spin)
@@ -1631,7 +1635,7 @@ class TagSubsetCard(AutoRepolishMixin, QFrame):
 
         self.limit_spin = QSpinBox(self)
         self.limit_spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.limit_spin.setRange(1, 999)
+        self.limit_spin.setRange(1, 2_147_483_647)
         self.limit_spin.setValue(1)
         self.limit_spin.valueChanged.connect(lambda _: self.changed.emit())
         limit_row.addWidget(self.limit_spin)

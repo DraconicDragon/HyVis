@@ -235,6 +235,11 @@ class Database:
             raise RuntimeError("Database is not open. Call open() or use as context manager.")
         return self._conn
 
+    @property
+    def read_only(self) -> bool:
+        """Return True if this database instance is read-only (e.g. because of dry-run)."""
+        return False
+
     def commit(self) -> None:
         """Force an immediate disk commit."""
         if self._conn is not None:
@@ -304,6 +309,26 @@ class Database:
             for h, p in rows:
                 if p:
                     results[h] = p
+        return results
+
+    def bulk_get_known_frames(self, file_hashes: Sequence[str]) -> dict[str, int]:
+        """Return a mapping of {file_hash: num_frames} for files with recorded frame counts."""
+        if not file_hashes:
+            return {}
+
+        results: dict[str, int] = {}
+        for chunk in self._chunk_list(file_hashes, 900):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"""
+                SELECT file_hash, num_frames FROM known_files
+                WHERE file_hash IN ({placeholders}) AND num_frames IS NOT NULL
+                """,
+                chunk,
+            ).fetchall()
+            for h, n in rows:
+                if n is not None:
+                    results[h] = int(n)
         return results
 
     def get_all_known_hashes(self) -> list[str]:

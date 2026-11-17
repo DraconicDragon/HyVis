@@ -51,6 +51,16 @@ def _resolve_db_path(raw_path: str | Path) -> Path:
     return p if p.is_absolute() else (Path.cwd() / p)
 
 
+def _clear_video_frame_cache(cfg: AppConfig, db_path: Path) -> int:
+    """Remove temporary extracted video frames and report how many folders were removed."""
+    from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
+
+    removed = FrameDiskCache(resolve_frame_cache_dir(cfg, db_path=db_path)).clear_all()
+    if removed > 0:
+        print(_c(f"  Removed {removed} temporary video frame cache folder(s).", DIM))
+    return removed
+
+
 def _apply_cli_overrides(cfg: AppConfig, args: Any) -> AppConfig:
     if args.api_url or args.api_key:
         hydrus_updates: dict[str, str] = {}
@@ -150,7 +160,7 @@ def _verify_client_binding(
         _c(
             "  Tip: Sharing one hyvis.db across different Hydrus clients will skip files or fail pushes.\n"
             "       Use a separate --db path (e.g. '--db data/test.db') while keeping '--cache-db data/cache.db'\n"
-            "       to safely reuse your GPU prediction cache.",
+            "       to safely reuse your raw prediction cache.",
             CYAN,
         )
     )
@@ -247,6 +257,7 @@ async def main() -> int:
                     pending_n = len(db.get_run_targets(RunTargetState.PENDING))
                     if args.discard_run:
                         db.clear_active_run()
+                        _clear_video_frame_cache(cfg, db_path)
                         print(_c(f"  Discarded previous unfinished run ({pending_n} pending file(s)).\n", YELLOW))
                     elif args.yes:
                         print(
@@ -281,6 +292,7 @@ async def main() -> int:
 
                         if ans in ("d", "discard"):
                             db.clear_active_run()
+                            _clear_video_frame_cache(cfg, db_path)
                             print(_c("  Discarded previous run.\n", YELLOW))
                         elif ans in ("r", "resume"):
                             is_resume = True
@@ -335,21 +347,26 @@ async def main() -> int:
     # region Early Action: Clear Cache
     if args.clear_cache:
         logger.info("Executing action: --clear-cache on %s", cache_path)
+
         if not cache_path.is_file():
-            print("Inference cache is already empty (cache.db does not exist).")
+            removed_fc = _clear_video_frame_cache(cfg, db_path)
+            if removed_fc == 0:
+                print("Inference cache is already empty (cache.db does not exist).")
             return 0
 
         with CacheDatabase(cache_path) as cdb:
             stats_info = cdb.get_stats()
             count = int(stats_info["predictions"])
             if count == 0:
-                print("Inference cache is already empty.")
-                logger.info("Inference cache is already empty.")
+                removed_fc = _clear_video_frame_cache(cfg, db_path)
+                if removed_fc == 0:
+                    print("Inference cache is already empty.")
+                    logger.info("Inference cache is already empty.")
                 return 0
 
             size_mb = stats_info["size_bytes"] / (1024 * 1024)
             print(_c(f"  Warning: This will delete {count} cached prediction record(s) ({size_mb:.1f} MB).", YELLOW))
-            print("  Re-running models on uncached filter changes will require GPU inference.")
+            print("  Re-running models on uncached filter changes will require model inference.")
             if not args.yes:
                 try:
                     ans = input("  Proceed? [y/N]: ").strip().lower()
@@ -365,6 +382,8 @@ async def main() -> int:
             deleted = cdb.clear_cache()
             print(_c(f"\n  Successfully cleared {deleted} cached records and reclaimed disk space.", GREEN))
             logger.info("Cleared %d cached records from %s", deleted, cache_path)
+
+            _clear_video_frame_cache(cfg, db_path)
             return 0
 
     # region Early Action: Push Only
@@ -437,10 +456,20 @@ async def main() -> int:
         with Database(db_path) as db:
             pending_targets = db.get_run_targets(RunTargetState.PENDING)
             rejected_targets = db.get_run_targets(RunTargetState.REJECTED)
-            cached_paths = db.bulk_get_known_paths([h for h, _, _ in pending_targets])
+            pending_hashes = [h for h, _, _ in pending_targets]
+            cached_paths = db.bulk_get_known_paths(pending_hashes)
+            cached_frames = db.bulk_get_known_frames(pending_hashes)
 
         for h, _, m in pending_targets:
-            file_infos.append(FileInfo(file_hash=h, mime=m or "", size=0, local_path=cached_paths.get(h)))
+            file_infos.append(
+                FileInfo(
+                    file_hash=h,
+                    mime=m or "",
+                    size=0,
+                    local_path=cached_paths.get(h),
+                    num_frames=cached_frames.get(h),
+                )
+            )
 
         all_rejected_hashes = [h for h, _, _ in rejected_targets]
         rejected_mimes = {m for _, _, m in rejected_targets if m}
@@ -556,12 +585,16 @@ async def main() -> int:
             logger.info("No candidate files matched queries. Exiting.")
             return 0
 
-        # Resolve local paths using known_files cache first
+        # Resolve local paths and previously discovered frame counts using known_files cache first
         with db_cls(db_path) as db:
-            cached_paths = db.bulk_get_known_paths([fi.file_hash for fi in file_infos])
+            all_cand_hashes = [fi.file_hash for fi in file_infos]
+            cached_paths = db.bulk_get_known_paths(all_cand_hashes)
+            cached_frames = db.bulk_get_known_frames(all_cand_hashes)
 
         files_to_resolve_online = []
         for fi in file_infos:
+            if fi.num_frames is None and fi.file_hash in cached_frames:
+                fi.num_frames = cached_frames[fi.file_hash]
             cached_p = cached_paths.get(fi.file_hash)
             if cached_p and Path(cached_p).is_file():
                 fi.local_path = cached_p
@@ -629,13 +662,13 @@ async def main() -> int:
 
             for fi in plan.refilter_files:
                 last_active_model_for_file[fi.file_hash] = m_cfg.model_id
-            for fi in plan.gpu_files:
+            for fi in plan.files_to_infer:
                 last_active_model_for_file[fi.file_hash] = m_cfg.model_id
 
-    # Start background PyTorch/ONNX imports ONLY if at least one file actually needs GPU inference
-    gpu_backends_needed = [p.model_cfg.backend for p in plans if p.gpu_files]
-    if gpu_backends_needed:
-        start_imports(gpu_backends_needed)
+    # Start background PyTorch/ONNX imports ONLY if at least one file actually needs model inference
+    infer_backends_needed = [p.model_cfg.backend for p in plans if p.files_to_infer]
+    if infer_backends_needed:
+        start_imports(infer_backends_needed)
 
     # region Confirmation print
     print_confirmation(
@@ -728,7 +761,7 @@ async def main() -> int:
         actionable_count,
     )
 
-    if gpu_backends_needed:
+    if infer_backends_needed:
         wait_for_imports()
 
     # region Database & Inference Execution
@@ -776,7 +809,7 @@ async def main() -> int:
             print(f"  Using model: {_c(display_name, BOLD, CYAN)} {_c(f'(ID: {model_cfg.model_id}{var_note})', DIM)}")
             print()
 
-            infer_stats: PhaseStats | None = None
+            infer_stats: PhaseStats | None
             if mode in ("default", "infer_only", "dry_run"):
                 progress = Progress(total=actionable_count)
                 infer_stats = await infer_files(
@@ -807,7 +840,7 @@ async def main() -> int:
                 print(f"\n  {_c('Inference summary:', BOLD)}")
                 print(
                     f"    Processed : {processed_count} files "
-                    f"({infer_stats.ok} GPU inferred, {infer_stats.refiltered} CPU re-filtered, {infer_stats.skipped} skipped)"
+                    f"({infer_stats.ok} inferred, {infer_stats.refiltered} re-filtered (cpu), {infer_stats.skipped} skipped)"
                 )
                 print(f"    Enqueued  : {files_with_tags} files ({infer_stats.total_tags_enqueued} {tag_label})")
                 if infer_stats.zero_tags > 0:

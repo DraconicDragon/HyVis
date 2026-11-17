@@ -178,7 +178,7 @@ class HydrusPage(BaseConfigPage):
         add_form_row(prev_layout, prev_fields["page_name"], self.prev_name_edit)
 
         self.prev_index_spin = QSpinBox(self)
-        self.prev_index_spin.setRange(0, 99)
+        self.prev_index_spin.setRange(0, 2_147_483_647)
         self.prev_index_spin.setSpecialValueText("None (0)")
         self.prev_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(prev_layout, prev_fields["page_index"], self.prev_index_spin)
@@ -188,7 +188,7 @@ class HydrusPage(BaseConfigPage):
         add_form_row(prev_layout, prev_fields["rejected_page_name"], self.prev_rej_edit)
 
         self.prev_rej_index_spin = QSpinBox(self)
-        self.prev_rej_index_spin.setRange(0, 99)
+        self.prev_rej_index_spin.setRange(0, 2_147_483_647)
         self.prev_rej_index_spin.setSpecialValueText("None (0)")
         self.prev_rej_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(prev_layout, prev_fields["rejected_page_index"], self.prev_rej_index_spin)

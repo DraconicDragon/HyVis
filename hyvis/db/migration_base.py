@@ -50,7 +50,13 @@ def run_migrations(
     row = conn.execute("PRAGMA user_version").fetchone()
     current_version = int(row[0]) if row else 0
 
-    if current_version >= latest_version:
+    if current_version > latest_version:
+        raise RuntimeError(
+            f"{label} schema version v{current_version} is newer than this version of HyVis supports "
+            f"(max v{latest_version}). Please upgrade HyVis."
+        )
+
+    if current_version == latest_version:
         return current_version
 
     logger.debug("%s user_version=%d (target=%d)", label, current_version, latest_version)
@@ -77,7 +83,9 @@ def run_migrations(
             conn.execute(f"PRAGMA user_version = {target_version}")
             conn.execute("COMMIT")
         except Exception:
-            conn.execute("ROLLBACK")
+            if conn.in_transaction:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.execute("ROLLBACK")
             logger.exception(
                 "%s migration %d -> %d failed; rolled back all changes.",
                 label,

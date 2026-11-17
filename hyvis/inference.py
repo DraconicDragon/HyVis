@@ -1,7 +1,7 @@
 """
 inference.py Inference orchestration.
 
-infer_files()             Run a model against files (via CPU cache re-filtering and/or GPU inference),
+infer_files()             Run a model against files (via cache re-filtering and/or model inference),
                           save raw results in disposable cache.db, stage multi-model outputs in hyvis.db,
                           and atomically enqueue tags into push_queue.
                           Does NOT require Hydrus to be reachable during inference.
@@ -19,9 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import queue
 import sys
 import threading
-from collections.abc import Iterable, Mapping
+import time
+from collections import deque
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -385,7 +388,7 @@ def build_transform_pipeline_from_vocab(
     output_filter: OutputFilterConfig,
 ) -> TransformPipeline:
     """
-    Build the TransformPipeline directly from cache.db CachedVocab without loading GPU weights.
+    Build the TransformPipeline directly from cache.db CachedVocab without loading model weights.
     """
     label_items = ((vocab.idx_to_tag[idx], vocab.idx_to_category[idx]) for idx in vocab.idx_to_tag)
     calibrated = vocab.calibrated_thresholds or None
@@ -411,19 +414,40 @@ def build_transform_pipeline_from_vocab(
 # region Planning & Filter Fingerprinting
 
 
-def compute_filter_hash(config: AppConfig, model_cfg: ModelConfig) -> str:
+def compute_filter_hash(
+    config: AppConfig,
+    model_cfg: ModelConfig,
+    *,
+    video_prep_hash: str = "",
+) -> str:
     """
     Compute a deterministic 16-char SHA-256 fingerprint of all settings that affect
     tag output or destination routing for `model_cfg`.
+
+    When `video_prep_hash` is non-empty (videos / animated images), sampling parameters
+    are folded in so changing video density invalidates multi-frame files without
+    touching static image completion records.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "output_filter": config.resolved_output_filter(model_cfg).model_dump(mode="json"),
         "output_tag_services": config.resolved_output_tag_services(model_cfg),
         "add_tags": [a.model_dump(mode="json") for a in config.hydrus.add_tags],
         "remove_tags": [r.model_dump(mode="json") for r in config.hydrus.remove_tags],
     }
+    if video_prep_hash:
+        payload["video_prep_hash"] = video_prep_hash
+
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def is_known_multiframe(fi: FileInfo) -> bool:
+    """Return True if Hydrus metadata already identifies `fi` as a video or multi-frame animation."""
+    from hyvis.config import is_video_mime
+
+    if is_video_mime(fi.mime):
+        return True
+    return fi.num_frames is not None and fi.num_frames > 1
 
 
 def resolve_model_variant_id(model_cfg: ModelConfig) -> str:
@@ -450,11 +474,17 @@ class ModelPassPlan:
 
     model_cfg: ModelConfig
     filter_hash: str
+    video_filter_hash: str
+    video_prep_hash: str
     resolved_variant_id: str
     cache_model_row: int | None
     skip_hashes: set[str]
     refilter_files: list[FileInfo]
-    gpu_files: list[FileInfo]
+    files_to_infer: list[FileInfo]
+
+    def effective_filter_hash(self, fi: FileInfo) -> str:
+        """Return the filter_hash matching `fi` (static vs. multi-frame)."""
+        return self.video_filter_hash if is_known_multiframe(fi) else self.filter_hash
 
 
 def plan_model_pass(
@@ -471,9 +501,11 @@ def plan_model_pass(
     Classify all target files into:
       - skip_hashes: Already completed with identical filter_hash (or staged on resume).
       - refilter_files: Needs filtering, raw scores available in cache.db at deep enough floor_q (CPU).
-      - gpu_files: Needs GPU inference (not in cache.db, too shallow floor_q, or --force).
+      - files_to_infer: Needs model inference (not in cache.db, too shallow floor_q, or --force).
     """
     filter_hash = compute_filter_hash(config, model_cfg)
+    video_prep_hash = config.video.prep_hash()
+    video_filter_hash = compute_filter_hash(config, model_cfg, video_prep_hash=video_prep_hash)
     resolved_variant = resolve_model_variant_id(model_cfg)
 
     staged_hashes = db.get_staged_hashes_for_model(model_cfg.model_id) if is_resume else set()
@@ -483,7 +515,8 @@ def plan_model_pass(
     need_work: list[FileInfo] = []
 
     for fi in file_infos:
-        if fi.file_hash in staged_hashes or not force and logged.get(fi.file_hash) == filter_hash:
+        expected_fh = video_filter_hash if is_known_multiframe(fi) else filter_hash
+        if fi.file_hash in staged_hashes or (not force and logged.get(fi.file_hash) == expected_fh):
             skip_hashes.add(fi.file_hash)
         else:
             need_work.append(fi)
@@ -492,11 +525,13 @@ def plan_model_pass(
         return ModelPassPlan(
             model_cfg=model_cfg,
             filter_hash=filter_hash,
+            video_filter_hash=video_filter_hash,
+            video_prep_hash=video_prep_hash,
             resolved_variant_id=resolved_variant,
             cache_model_row=None,
             skip_hashes=skip_hashes,
             refilter_files=[],
-            gpu_files=need_work,
+            files_to_infer=need_work,
         )
 
     # Check cache.db for CPU re-filter candidates
@@ -505,32 +540,38 @@ def plan_model_pass(
         return ModelPassPlan(
             model_cfg=model_cfg,
             filter_hash=filter_hash,
+            video_filter_hash=video_filter_hash,
+            video_prep_hash=video_prep_hash,
             resolved_variant_id=resolved_variant,
             cache_model_row=None,
             skip_hashes=skip_hashes,
             refilter_files=[],
-            gpu_files=need_work,
+            files_to_infer=need_work,
         )
 
     target_model_row = candidate_rows[0]
     max_floor_q = quantize_floor(config.database.min_cache_score)
+    prep_hashes_by_file = {fi.file_hash: (video_prep_hash if is_known_multiframe(fi) else "") for fi in need_work}
     cached_ok = cache_db.filter_cached_hashes(
         target_model_row,
         [fi.file_hash for fi in need_work],
         max_floor_q=max_floor_q,
+        prep_hashes_by_file=prep_hashes_by_file,
     )
 
     refilter_files = [fi for fi in need_work if fi.file_hash in cached_ok]
-    gpu_files = [fi for fi in need_work if fi.file_hash not in cached_ok]
+    files_to_infer = [fi for fi in need_work if fi.file_hash not in cached_ok]
 
     return ModelPassPlan(
         model_cfg=model_cfg,
         filter_hash=filter_hash,
+        video_filter_hash=video_filter_hash,
+        video_prep_hash=video_prep_hash,
         resolved_variant_id=resolved_variant,
         cache_model_row=target_model_row if refilter_files else None,
         skip_hashes=skip_hashes,
         refilter_files=refilter_files,
-        gpu_files=gpu_files,
+        files_to_infer=files_to_infer,
     )
 
 
@@ -545,7 +586,7 @@ class PhaseStats:
     """Counters for one model pass."""
 
     model_id: str
-    ok: int = 0  # Newly inferred on GPU
+    ok: int = 0  # Newly inferred by model
     refiltered: int = 0  # Re-filtered on CPU from cache.db
     zero_tags: int = 0  # Number of files where inference/refilter succeeded, but 0 tags passed filter
     errors: int = 0
@@ -574,8 +615,13 @@ def _finalize_file(
     db: Database,
     last_active_model_for_file: Mapping[str, str] | None,
     model_meta_by_id: Mapping[str, tuple[str, str, str]],
-) -> None:
-    """Stage intermediate tags in run_progress, or commit atomically if this is the final active model."""
+    is_multiframe: bool = False,
+    video_filter_hashes: Mapping[str, str] | None = None,
+) -> bool:
+    """
+    Stage intermediate tags in run_progress, or commit atomically if this is the final active model.
+    Returns True if this call performed the final atomic commit for `file_hash`.
+    """
     my_service_tags: dict[str, list[str]] = (
         {svc_key: list(prefixed_tags) for svc_key in output_services} if prefixed_tags else {}
     )
@@ -584,7 +630,7 @@ def _finalize_file(
 
     if not is_final:
         db.stage_model_progress(file_hash, model_cfg.model_id, my_service_tags)
-        return
+        return False
 
     # Final active model for this file: merge any staged payloads + current tags
     staged = db.get_staged_progress(file_hash)
@@ -619,6 +665,8 @@ def _finalize_file(
         if staged_m_id == model_cfg.model_id:
             continue
         v_id, vh, fh = model_meta_by_id.get(staged_m_id, ("", "", ""))
+        if is_multiframe and video_filter_hashes and staged_m_id in video_filter_hashes:
+            fh = video_filter_hashes[staged_m_id]
         completed_models.append((staged_m_id, v_id, vh, fh))
     completed_models.append((model_cfg.model_id, variant_id, vocab_hash, filter_hash))
 
@@ -628,6 +676,7 @@ def _finalize_file(
         add_by_service=add_by_service,
         delete_by_service=delete_by_service,
     )
+    return True
 
 
 async def infer_files(
@@ -647,7 +696,7 @@ async def infer_files(
     Execute one model pass:
       1. Skip files already completed under identical filter_hash.
       2. Re-filter files present in disposable cache.db on CPU (0 GPU load).
-      3. Run GPU inference on remaining files, storing packed binary scores in cache.db.
+      3. Run model inference on remaining files, storing packed binary scores in cache.db.
       4. Stage or atomically commit completed files into push_queue + inference_log.
     """
     stats = PhaseStats(model_id=model_cfg.model_id)
@@ -671,30 +720,41 @@ async def infer_files(
         progress.tick(skipped=stats.skipped)
 
     logger.info(
-        "Model %s plan: %d GPU, %d CPU re-filter, %d skipped",
+        "Model %s plan: %d infer, %d re-filter (cpu), %d skipped",
         model_cfg.model_id,
-        len(plan.gpu_files),
+        len(plan.files_to_infer),
         len(plan.refilter_files),
         stats.skipped,
     )
 
-    if not plan.refilter_files and not plan.gpu_files:
+    if not plan.refilter_files and not plan.files_to_infer:
         return stats
 
     eff_filter = config.resolved_output_filter(model_cfg)
     output_services = config.resolved_output_tag_services(model_cfg)
     compiled_filter = compile_output_filter(eff_filter)
+    video_filter_hashes = {
+        m.model_id: compute_filter_hash(config, m, video_prep_hash=plan.video_prep_hash)
+        for m in config.inference.models
+    }
 
-    # region Pass A: CPU Re-filter from cache.db (zero GPU/vibe weight loading)
+    from hyvis.video.frame_cache import FrameDiskCache, resolve_frame_cache_dir
+
+    is_dry = db.read_only
+
+    # region Pass A: CPU Re-filter from cache.db (zero model weight loading)
     if plan.refilter_files and plan.cache_model_row is not None:
         vocab = cache_db.get_vocab(plan.cache_model_row)
         if vocab is None:
             # Defensive fallback: move to GPU pass if vocab row disappeared unexpectedly
-            plan.gpu_files.extend(plan.refilter_files)
+            plan.files_to_infer.extend(plan.refilter_files)
             plan.refilter_files.clear()
         else:
             model_meta_by_id[model_cfg.model_id] = (vocab.variant_id, vocab.vocab_hash, plan.filter_hash)
             cpu_pipeline = build_transform_pipeline_from_vocab(vocab, eff_filter)
+
+            fc_dir = resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None))
+            pass_a_frame_cache = FrameDiskCache(fc_dir) if (not is_dry and fc_dir.is_dir()) else None
 
             print(_c(f"  Re-filtering {len(plan.refilter_files)} cached item(s) on CPU (cache.db)...", GREEN))
             print()
@@ -704,7 +764,7 @@ async def infer_files(
                 try:
                     cached_pred = cache_db.get_prediction(plan.cache_model_row, fi.file_hash)
                     if cached_pred is None:
-                        plan.gpu_files.append(fi)
+                        plan.files_to_infer.append(fi)
                         continue
 
                     indices, scores, _ = cached_pred
@@ -725,25 +785,29 @@ async def infer_files(
                     if not prefixed_tags:
                         stats.zero_tags += 1
 
-                    _finalize_file(
+                    is_final = _finalize_file(
                         file_hash=fi.file_hash,
                         model_cfg=model_cfg,
                         variant_id=vocab.variant_id,
                         vocab_hash=vocab.vocab_hash,
-                        filter_hash=plan.filter_hash,
+                        filter_hash=plan.effective_filter_hash(fi),
                         prefixed_tags=prefixed_tags,
                         output_services=output_services,
                         config=config,
                         db=db,
                         last_active_model_for_file=last_active_model_for_file,
                         model_meta_by_id=model_meta_by_id,
+                        is_multiframe=is_known_multiframe(fi),
+                        video_filter_hashes=video_filter_hashes,
                     )
+                    if is_final and pass_a_frame_cache is not None:
+                        pass_a_frame_cache.cleanup_file(fi.file_hash)
 
                     stats.refiltered += 1
                     stats.total_tags_enqueued += len(prefixed_tags)
 
                     if idx % 25 == 0 or idx == len(plan.refilter_files) - 1:
-                        progress.set_last_file_info(fi.file_hash, model_cfg.model_id, len(prefixed_tags))
+                        progress.set_last_file_info(fi.file_hash, model_cfg.model_id, len(prefixed_tags), redraw=False)
                     progress.tick(processed=1)
 
                 except Exception as exc:
@@ -752,15 +816,23 @@ async def infer_files(
 
             db.commit()
 
-    # region Pass B: GPU Inference (only if files still need neural net inference)
-    if not plan.gpu_files:
+    # region Pass B: Model Inference (only if files still need model inference)
+    if not plan.files_to_infer:
         return stats
 
-    source = LocalFileSource(plan.gpu_files)
-    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.gpu_files}
+    from hyvis.config import ANIMATABLE_IMAGE_MIMES
+    from hyvis.video.aggregator import FrameMaxAggregator
+    from hyvis.video.extractor import is_animated_image, iter_extract_frames, probe_media
+    from hyvis.video.planner import plan_frames
 
-    valid_process: list[FileInfo] = []
-    for fi in plan.gpu_files:
+    source = LocalFileSource(plan.files_to_infer)
+    file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.files_to_infer}
+
+    static_files: list[FileInfo] = []
+    multiframe_files: list[FileInfo] = []
+    skipped_unprobed_anim = 0
+
+    for fi in plan.files_to_infer:
         if not source.has_path(fi.file_hash):
             logger.warning("Model %s: %s has no local path, marking missing", model_cfg.model_id, fi.file_hash[:8])
             db.upsert_file(
@@ -772,10 +844,47 @@ async def infer_files(
             )
             progress.tick(errors=1)
             stats.errors += 1
-        else:
-            valid_process.append(fi)
+            continue
 
-    if not valid_process:
+        if is_known_multiframe(fi):
+            if config.video.enabled:
+                multiframe_files.append(fi)
+            else:
+                logger.warning(
+                    "Skipping multi-frame file %s (%s) because video.enabled=False.",
+                    fi.file_hash[:8],
+                    fi.mime,
+                )
+                skipped_unprobed_anim += 1
+            continue
+
+        # Header-only animation guard when Hydrus metadata omitted num_frames on PNG/WebP/AVIF/JXL.
+        if fi.num_frames is None and fi.mime.strip().lower() in ANIMATABLE_IMAGE_MIMES:
+            assert fi.local_path is not None
+            try:
+                if is_animated_image(fi.local_path):
+                    if config.video.enabled:
+                        fi.num_frames = 2  # Refined by probe_media() during extraction.
+                        multiframe_files.append(fi)
+                    else:
+                        logger.warning(
+                            "Skipping animated %s (%s) because video.enabled=False.",
+                            fi.file_hash[:8],
+                            fi.mime,
+                        )
+                        skipped_unprobed_anim += 1
+                    continue
+                fi.num_frames = 1
+            except Exception as exc:
+                logger.debug("Header animation check failed for %s: %s", fi.file_hash[:8], exc)
+
+        static_files.append(fi)
+
+    if skipped_unprobed_anim:
+        stats.skipped += skipped_unprobed_anim
+        progress.tick(skipped=skipped_unprobed_anim)
+
+    if not static_files and not multiframe_files:
         return stats
 
     print()
@@ -784,8 +893,6 @@ async def infer_files(
     if stats.skipped != 0:
         print(f"  {stats.skipped} items skipped (up-to-date)")
         print()
-
-    inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in valid_process}
 
     load_kwargs: dict[str, Any] = {
         "source": model_cfg.source,
@@ -822,7 +929,7 @@ async def infer_files(
                 except Exception:
                     pass
 
-                runtime_str = f"PyTorch on {device_str} │ Weights: {weight_dt} │ Compute: {compute_dt}{autocast}"
+                runtime_str = f"PyTorch on {device_str} | Weights: {weight_dt} | Compute: {compute_dt}{autocast}"
 
             elif session.backend == vibe.Backend.ONNX:
                 providers = runtime.get("providers", [])
@@ -862,93 +969,285 @@ async def infer_files(
 
             listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
 
-            async for chunk in session.infer_async(inputs, batch_size=model_cfg.batch_size):
-                batch_processed = 0
-                batch_errors = 0
-                last_file_hash = None
-                last_tag_count = 0
+            def _commit_inferred_result(fi: FileInfo, raw_result: TagResult) -> int:
+                """Persist raw scores, filter tags, and stage/commit file completion."""
+                file_hash = fi.file_hash
+                db.upsert_file(
+                    file_hash,
+                    file_path=fi.local_path,
+                    mime=fi.mime,
+                    num_frames=fi.num_frames,
+                    status=FileStatus.ACTIVE,
+                )
 
-                for item in chunk:
-                    file_hash: str = str(item.input_ref)
-                    fi = file_info_map[file_hash]
+                if cache_raw_enabled and cache_model_row >= 0:
+                    indices, scores = raw_result.to_indexed_scores(catalog, min_score=min_cache_score)
+                    cache_db.save_prediction(
+                        cache_model_row,
+                        file_hash,
+                        indices,
+                        scores,
+                        min_cache_score=min_cache_score,
+                        prep_hash=plan.video_prep_hash if is_known_multiframe(fi) else "",
+                    )
+
+                filtered_result = pipeline(raw_result)
+                tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
+                prefixed_tags = [tr.prefixed_tag for tr in tag_records]
+                if not prefixed_tags:
+                    stats.zero_tags += 1
+
+                is_final = _finalize_file(
+                    file_hash=fi.file_hash,
+                    model_cfg=model_cfg,
+                    variant_id=resolved_variant,
+                    vocab_hash=vocab_hash,
+                    filter_hash=plan.effective_filter_hash(fi),
+                    prefixed_tags=prefixed_tags,
+                    output_services=output_services,
+                    config=config,
+                    db=db,
+                    last_active_model_for_file=last_active_model_for_file,
+                    model_meta_by_id=model_meta_by_id,
+                    is_multiframe=is_known_multiframe(fi),
+                    video_filter_hashes=video_filter_hashes,
+                )
+                return len(prefixed_tags) if is_final or prefixed_tags else 0
+
+            # Sub-pass B1: static images use the ordinary Vibe file loader.
+            if static_files:
+                static_inputs = {fi.file_hash: source.get_input(fi.file_hash) for fi in static_files}
+                async for chunk in session.infer_async(static_inputs, batch_size=model_cfg.batch_size):
+                    batch_processed = 0
+                    batch_errors = 0
+                    last_file_hash = None
+                    last_tag_count = 0
+
+                    for item in chunk:
+                        file_hash = str(item.input_ref)
+                        fi = file_info_map[file_hash]
+                        try:
+                            raw_result = item.result
+                            if not isinstance(raw_result, TagResult):
+                                raise TypeError(
+                                    f"Expected TagResult from tagger model, got {type(raw_result).__name__}"
+                                )
+                            tag_count = _commit_inferred_result(fi, raw_result)
+                            consecutive_errors = 0
+                            stats.ok += 1
+                            stats.total_tags_enqueued += tag_count
+                            batch_processed += 1
+                            last_file_hash = file_hash
+                            last_tag_count = tag_count
+                        except Exception as exc:
+                            _handle_infer_error(exc=exc, file_hash=file_hash, fi=fi, db=db, stats=stats)
+                            consecutive_errors += 1
+                            batch_errors += 1
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                                stats.aborted_early = True
+                                stats.abort_reason = f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                                return stats
+
+                    if last_file_hash is not None:
+                        progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count, redraw=False)
+                    if batch_processed or batch_errors:
+                        progress.tick(processed=batch_processed, errors=batch_errors)
+
+            # Sub-Pass B2: Videos & Animated Images (lazy frame streaming + max-score merge)
+            if multiframe_files:
+                fc_mode = config.video.frame_cache_mode
+                # NOTE: In "auto" mode, len(models) > 1 enables disk caching even on a --resume run
+                # where only the final model remains (writes cached frames and deletes them immediately
+                # after commit). Harmless and safe; keeping the check simple avoids guessing remaining passes.
+                use_disk_cache = (not is_dry) and (
+                    fc_mode == "disk" or (fc_mode == "auto" and len(config.inference.models) > 1)
+                )
+                frame_cache = (
+                    FrameDiskCache(resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None)))
+                    if use_disk_cache
+                    else None
+                )
+                plan_cfg = config.video.to_plan_config()
+                prep_hash = plan.video_prep_hash
+
+                pending_refs: deque[tuple[str, int, int]] = deque()
+                decode_errors: queue.SimpleQueue[tuple[FileInfo, Exception]] = queue.SimpleQueue()
+                failed_decode_hashes: set[str] = set()
+
+                def _multiframe_image_stream() -> Iterator[Any]:
+                    for fi in multiframe_files:
+                        if session.is_cancellation_requested():
+                            break
+                        assert fi.local_path is not None
+                        try:
+                            probe = probe_media(fi.local_path)
+                            if probe.total_frames is not None:
+                                fi.num_frames = probe.total_frames
+                            f_plan = plan_frames(probe.duration_s, probe.total_frames, config=plan_cfg)
+                            expected_n = f_plan.target_count
+
+                            if frame_cache is not None and frame_cache.validate_frames(fi.file_hash, prep_hash):
+                                frame_iter = frame_cache.load_frames(fi.file_hash, prep_hash)
+                            else:
+                                raw_iter = iter_extract_frames(
+                                    fi.local_path,
+                                    config=plan_cfg,
+                                    probe=probe,
+                                    plan=f_plan,
+                                )
+                                if frame_cache is not None:
+                                    frame_iter = frame_cache.save_and_yield_frames(fi.file_hash, prep_hash, raw_iter)
+                                else:
+                                    frame_iter = raw_iter
+
+                            for frame in frame_iter:
+                                pending_refs.append((fi.file_hash, frame.index, expected_n))
+                                yield frame.image
+
+                        except ImportError as exc:
+                            # Environment/dependency failure: stop immediately instead of blaming files
+                            decode_errors.put((fi, exc))
+                            return
+                        except Exception as exc:
+                            failed_decode_hashes.add(fi.file_hash)
+                            decode_errors.put((fi, exc))
+
+                def _multiframe_ref_stream() -> Iterator[tuple[str, int, int]]:
+                    while pending_refs:
+                        yield pending_refs.popleft()
+
+                active_hash: str | None = None
+                active_agg: FrameMaxAggregator | None = None
+                active_expected = 0
+                total_frames_inferred = 0
+                multiframe_t0 = time.monotonic()
+
+                def _flush_active_video() -> None:
+                    nonlocal active_hash, active_agg, active_expected, consecutive_errors
+                    if active_hash is None or active_agg is None:
+                        return
+                    fh = active_hash
+                    agg = active_agg
+                    expected = active_expected
+                    active_hash = None
+                    active_agg = None
+                    active_expected = 0
+                    fi = file_info_map[fh]
+
+                    if fh in failed_decode_hashes:
+                        progress.set_sub_status("", redraw=False)
+                        return
 
                     try:
-                        raw_result = item.result
-                        if not isinstance(raw_result, TagResult):
-                            raise TypeError(f"Expected TagResult from tagger model, got {type(raw_result).__name__}")
-
-                        # 1. Upsert known_files FIRST to satisfy FK constraints
-                        db.upsert_file(
-                            file_hash,
-                            file_path=fi.local_path,
-                            mime=fi.mime,
-                            num_frames=fi.num_frames,
-                            status=FileStatus.ACTIVE,
-                        )
-
-                        # 2. Save packed sparse predictions into disposable cache.db
-                        if cache_raw_enabled and cache_model_row >= 0:
-                            indices, scores = raw_result.to_indexed_scores(catalog, min_score=min_cache_score)
-                            cache_db.save_prediction(
-                                cache_model_row,
-                                file_hash,
-                                indices,
-                                scores,
-                                min_cache_score=min_cache_score,
+                        if expected >= 4 and agg.frame_count < expected / 2:
+                            logger.warning(
+                                "Video %s yielded significantly fewer frames than planned (%d/%d).",
+                                fh[:8],
+                                agg.frame_count,
+                                expected,
                             )
 
-                        # 3. Apply VRT transform pipeline on the full raw result
-                        filtered_result = pipeline(raw_result)
-
-                        # 4. Extract final tags using the pre-compiled filter
-                        tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
-                        prefixed_tags = [tr.prefixed_tag for tr in tag_records]
-
-                        if not prefixed_tags:
-                            stats.zero_tags += 1
-
-                        # 5. Stage in run_progress or atomically commit to push_queue + inference_log
-                        _finalize_file(
-                            file_hash=file_hash,
-                            model_cfg=model_cfg,
-                            variant_id=resolved_variant,
-                            vocab_hash=vocab_hash,
-                            filter_hash=plan.filter_hash,
-                            prefixed_tags=prefixed_tags,
-                            output_services=output_services,
-                            config=config,
-                            db=db,
-                            last_active_model_for_file=last_active_model_for_file,
-                            model_meta_by_id=model_meta_by_id,
-                        )
+                        merged = agg.finalize()
+                        tag_count = _commit_inferred_result(fi, merged)
+                        if frame_cache is not None and (
+                            last_active_model_for_file is None
+                            or last_active_model_for_file.get(fh) == model_cfg.model_id
+                        ):
+                            frame_cache.cleanup_file(fh)
 
                         consecutive_errors = 0
                         stats.ok += 1
-                        stats.total_tags_enqueued += len(prefixed_tags)
-                        batch_processed += 1
-                        last_file_hash = file_hash
-                        last_tag_count = len(prefixed_tags)
-
+                        stats.total_tags_enqueued += tag_count
+                        progress.set_sub_status("", redraw=False)
+                        progress.set_last_file_info(fh, model_cfg.model_id, tag_count, redraw=False)
+                        progress.tick(processed=1)
                     except Exception as exc:
+                        _handle_infer_error(exc=exc, file_hash=fh, fi=fi, db=db, stats=stats)
+                        consecutive_errors += 1
+                        progress.set_sub_status("", redraw=False)
+                        progress.tick(errors=1)
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                            raise RuntimeError(
+                                f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
+                            ) from exc
+
+                def _drain_decode_errors() -> None:
+                    while not decode_errors.empty():
+                        bad_fi, exc = decode_errors.get_nowait()
+                        if isinstance(exc, ImportError):
+                            raise exc
+
+                        # Per-file media/decode errors mark the file as ERROR without counting
+                        # toward MAX_CONSECUTIVE_ERRORS (reserved for inference/runtime failures).
                         _handle_infer_error(
                             exc=exc,
-                            file_hash=file_hash,
-                            fi=fi,
+                            file_hash=bad_fi.file_hash,
+                            fi=bad_fi,
                             db=db,
                             stats=stats,
                         )
-                        consecutive_errors += 1
-                        batch_errors += 1
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            stats.aborted_early = True
-                            stats.abort_reason = f"Aborted: {consecutive_errors} consecutive errors (last: {exc})"
-                            return stats
-                        continue
+                        if frame_cache is not None:
+                            frame_cache.cleanup_file(bad_fi.file_hash)
+                        progress.tick(errors=1)
 
-                if last_file_hash is not None:
-                    progress.set_last_file_info(last_file_hash, model_cfg.model_id, last_tag_count)
-                if batch_processed or batch_errors:
-                    progress.tick(processed=batch_processed, errors=batch_errors)
+                try:
+                    async for chunk in session.infer_async(
+                        _multiframe_image_stream(),
+                        refs=_multiframe_ref_stream(),
+                        batch_size=model_cfg.batch_size,
+                    ):
+                        _drain_decode_errors()
+
+                        for item in chunk:
+                            file_hash, _frame_idx, expected_n = item.input_ref
+                            if active_hash is not None and file_hash != active_hash:
+                                _flush_active_video()
+
+                            if file_hash in failed_decode_hashes:
+                                continue
+
+                            if active_hash is None:
+                                active_hash = file_hash
+                                active_agg = FrameMaxAggregator()
+                                active_expected = expected_n
+
+                            raw_result = item.result
+                            if not isinstance(raw_result, TagResult):
+                                failed_decode_hashes.add(file_hash)
+                                decode_errors.put(
+                                    (
+                                        file_info_map[file_hash],
+                                        TypeError(f"Expected TagResult, got {type(raw_result).__name__}"),
+                                    )
+                                )
+                                continue
+
+                            assert active_agg is not None
+                            active_agg.update(raw_result)
+                            total_frames_inferred += 1
+
+                        if active_hash is not None and active_agg is not None:
+                            fr_elapsed = max(time.monotonic() - multiframe_t0, 0.1)
+                            fr_rate = total_frames_inferred / fr_elapsed
+                            progress.set_sub_status(
+                                f"Video {active_hash[:8]} ({active_agg.frame_count}/{active_expected}) "
+                                f"│ Frames: {total_frames_inferred} ({fr_rate:.1f} fr/s)"
+                            )
+
+                    _flush_active_video()
+                    _drain_decode_errors()
+                except ImportError as imp_exc:
+                    stats.aborted_early = True
+                    stats.abort_reason = f"Aborted: {imp_exc}"
+                    return stats
+                except RuntimeError as abort_exc:
+                    if str(abort_exc).startswith("Aborted:"):
+                        stats.aborted_early = True
+                        stats.abort_reason = str(abort_exc)
+                        return stats
+                    raise
+                finally:
+                    progress.set_sub_status("")
 
             db.commit()
             cache_db.commit()
@@ -976,7 +1275,7 @@ async def infer_files(
         cache_db.commit()
 
     logger.info(
-        "Model '%s' pass finished: gpu=%d, refiltered=%d, skipped=%d | zero_tags=%d, enqueued=%d tags | errors=%d",
+        "Model '%s' pass finished: inferred=%d, refiltered=%d, skipped=%d | zero_tags=%d, enqueued=%d tags | errors=%d",
         model_cfg.model_id,
         stats.ok,
         stats.refiltered,

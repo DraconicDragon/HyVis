@@ -134,7 +134,7 @@ def test_plan_model_pass_3way_routing(tmp_path: Path) -> None:
 
         assert plan.skip_hashes == {h_skip}
         assert [f.file_hash for f in plan.refilter_files] == [h_cpu]
-        assert [f.file_hash for f in plan.gpu_files] == [h_shallow, h_missing]
+        assert [f.file_hash for f in plan.files_to_infer] == [h_shallow, h_missing]
 
 
 def test_cpu_refilter_multimodel_and_only_if_tags_emitted(tmp_path: Path) -> None:
@@ -214,7 +214,7 @@ def test_cpu_refilter_multimodel_and_only_if_tags_emitted(tmp_path: Path) -> Non
         cdb.commit()
 
         plans = [plan_model_pass(m, files, config=cfg, db=db, cache_db=cdb, force=False) for m in cfg.inference.models]
-        assert all(len(p.refilter_files) == 2 and not p.gpu_files for p in plans)
+        assert all(len(p.refilter_files) == 2 and not p.files_to_infer for p in plans)
 
         last_active = {fi.file_hash: "model_b" for fi in files}
         meta_by_id: dict[str, tuple[str, str, str]] = {}

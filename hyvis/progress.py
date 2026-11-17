@@ -39,6 +39,7 @@ class Progress:
         self._last_file_hash = ""
         self._last_model_id = ""
         self._last_tag_count = 0
+        self._sub_status = ""
 
         self._samples = deque()  # (timestamp, active_items)
         self._recent_active = 0
@@ -84,12 +85,27 @@ class Progress:
 
         return self._recent_active / elapsed
 
-    def set_last_file_info(self, file_hash: str, model_id: str, tag_count: int) -> None:
-        """Record and display the last processed file in the progress line."""
+    def set_last_file_info(
+        self,
+        file_hash: str,
+        model_id: str,
+        tag_count: int,
+        *,
+        redraw: bool = True,
+    ) -> None:
+        """Record and optionally display the last processed file in the progress line."""
         self._last_file_hash = file_hash
         self._last_model_id = model_id
         self._last_tag_count = tag_count
-        self._redraw()
+        if redraw:
+            self._redraw()
+
+    def set_sub_status(self, text: str, *, redraw: bool = True) -> None:
+        """Display an optional inline sub-status (e.g. active video frame progress)."""
+        if self._sub_status != text:
+            self._sub_status = text
+            if redraw:
+                self._redraw()
 
     def print_message(self, msg: str) -> None:
         """
@@ -127,6 +143,8 @@ class Progress:
             parts.append(f"✗ {self._errors} error{'s' if self._errors != 1 else ''}")
         if self._skipped:
             parts.append(f"↷ {self._skipped} cached")
+        if self._sub_status:
+            parts.append(self._sub_status)
         if self._processed > 0 and self._last_file_hash:
             short_hash = self._last_file_hash[:8]
             tag_label = "tag" if self._last_tag_count == 1 else "tags"

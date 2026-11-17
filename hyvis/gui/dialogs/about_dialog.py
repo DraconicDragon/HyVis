@@ -140,10 +140,10 @@ class AboutDialog(QDialog):
                 name_lbl = QLabel(f"{item.name}:", group_box)
                 val_lbl = QLabel(group_box)
 
-                # Format git commit hash with subtle grey color without changing font size or weight
-                if " (git-" in item.version:
-                    base, git_part = item.version.split(" (git-", 1)
-                    val_lbl.setText(f"{base} <span style='color: #888;'> (git-{git_part}</span>")
+                # Format parenthetical details with subtle grey color
+                base, separator, detail = item.version.partition(" (")
+                if separator and detail.endswith(")"):
+                    val_lbl.setText(f"{base}<span style='color: #888;'>{separator}{detail}</span>")
                 else:
                     val_lbl.setText(item.version)
 

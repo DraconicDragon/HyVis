@@ -303,7 +303,7 @@ class ModelsPage(BaseConfigPage):
 
         # Batch Size
         self.batch_spin = QSpinBox()
-        self.batch_spin.setRange(1, 128)
+        self.batch_spin.setRange(1, 2_147_483_647)
         self.batch_spin.setValue(1)
         self.batch_spin.valueChanged.connect(self._on_field_changed)
         add_form_row(runtime_layout, m_fields, "batch_size", self.batch_spin)

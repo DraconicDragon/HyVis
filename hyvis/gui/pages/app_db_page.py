@@ -153,7 +153,7 @@ class AppDbPage(BaseConfigPage):
         app_layout.addRow("", self.infer_only_chk)
 
         self.max_log_files_spin = QSpinBox(container)
-        self.max_log_files_spin.setRange(1, 100)
+        self.max_log_files_spin.setRange(1, 1000)
         self.max_log_files_spin.setValue(20)
         self.max_log_files_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(app_layout, hy_fields, "max_log_files", self.max_log_files_spin)
