@@ -532,6 +532,19 @@ def test_multimodel_mixed_static_and_animated_end_to_end(tmp_path: Path, monkeyp
         ).fetchone()
         assert row is not None and row[0] == cfg.video.prep_hash()
 
+        # Verify BOTH model_1 and model_2 recorded video_filter_hash (not static_filter_hash)
+        # and skip cleanly on a subsequent run when num_frames is restored from known_files.
+        known_frames = db.bulk_get_known_frames([h_static, h_anim])
+        next_run_files = [
+            FileInfo(h_static, "image/png", 100, str(static_path), num_frames=known_frames.get(h_static)),
+            FileInfo(h_anim, "image/webp", 200, str(anim_path), num_frames=known_frames.get(h_anim)),
+        ]
+        for m_cfg in cfg.inference.models:
+            next_plan = plan_model_pass(m_cfg, next_run_files, config=cfg, db=db, cache_db=cdb, force=False)
+            assert next_plan.skip_hashes == {h_static, h_anim}
+            assert next_plan.refilter_files == []
+            assert next_plan.files_to_infer == []
+
 
 def test_frame_cache_corruption_recovery_and_pass_a_cleanup(
     tmp_path: Path,
