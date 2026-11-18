@@ -5,6 +5,7 @@ models_page.py — Model session management with dynamic discovery from vibe.
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,12 +14,10 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -37,10 +36,10 @@ from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import CardTheme, TextRole, ThemeProperty
 from hyvis.gui.widgets import (
+    PathPickerWidget,
     SectionCard,
     TagServiceListEditor,
     add_form_row,
-    bind_field_metadata,
     set_combo_value,
     setup_field_tooltip,
 )
@@ -183,22 +182,16 @@ class ModelsPage(BaseConfigPage):
         add_form_row(artifacts_form, m_fields, "variant_id", self.variant_combo)
 
         # Source Path / Repo
-        source_box = QWidget()
-        source_row = QHBoxLayout(source_box)
-        source_row.setContentsMargins(0, 0, 0, 0)
-        source_row.setSpacing(6)
-
-        self.source_edit = QLineEdit(source_box)
-        bind_field_metadata(self.source_edit, m_fields["source"])
-
-        self.source_edit.textChanged.connect(self._on_field_changed)
-        source_row.addWidget(self.source_edit, stretch=1)
-
-        self.browse_src_btn = QPushButton("Browse Folder...", source_box)
-        self.browse_src_btn.clicked.connect(self._on_browse_source)
-        source_row.addWidget(self.browse_src_btn)
-
-        add_form_row(artifacts_form, m_fields, "source", source_box)
+        self.source_picker = PathPickerWidget(
+            mode="directory",
+            dialog_title="Select Local Model Directory",
+            path_prefix="local:",
+            empty_display="Resolves to: Default Hugging Face repository",
+            custom_resolver=self._describe_model_source,
+            parent=self.artifacts_card,
+        )
+        self.source_picker.textChanged.connect(lambda _: self._on_field_changed())
+        add_form_row(artifacts_form, m_fields, "source", self.source_picker)
         self.artifacts_card.content_layout.addLayout(artifacts_form)
 
         # Model Details Nested SectionCard
@@ -309,7 +302,6 @@ class ModelsPage(BaseConfigPage):
         self.form_layout.addWidget(self.runtime_card)
 
         # Card 3: Model Output Services Override
-        svc_title = m_fields["output_tag_services"].title or "Destination Tag Services"
         self.svc_card = SectionCard(
             field_info=m_fields["output_tag_services"],
             field_name="output_tag_services",
@@ -504,6 +496,19 @@ class ModelsPage(BaseConfigPage):
         self._update_model_details(model_id)
 
     @staticmethod
+    def _describe_model_source(raw: str) -> str:
+        if raw.startswith("local:"):
+            local_part = raw.removeprefix("local:").strip()
+            if not local_part:
+                return "Resolves locally to: (empty local path)"
+            return f"Resolves locally to: {os.path.abspath(os.path.expanduser(local_part))}"
+        if any(raw.startswith(p) for p in ("/", "./", "../", "~", "\\")) or (
+            len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha()
+        ):
+            return f"Resolves locally to: {os.path.abspath(os.path.expanduser(raw))}"
+        return f"Resolves to Hugging Face repo: {raw}"
+
+    @staticmethod
     def _make_detail_label(text: str) -> QLabel:
         """Create a clean, subtle key label for the details form."""
         lbl = QLabel(text)
@@ -613,7 +618,7 @@ class ModelsPage(BaseConfigPage):
             self.mismatch_card.setVisible(False)
             return
 
-        source = self.source_edit.text().strip() or None
+        source = self.source_picker.text().strip() or None
         variant_id = self.variant_combo.currentData()
         backend_val = self.backend_combo.currentText().strip()
         device_val = self.device_combo.currentText().strip()
@@ -794,7 +799,7 @@ class ModelsPage(BaseConfigPage):
 
     def _get_effective_repo_id(self, model_id: str, variant_id: str | None = None) -> str:
         """Resolve effective Hugging Face repo ID for size checking and metadata display."""
-        src = self.source_edit.text().strip()
+        src = self.source_picker.text().strip()
         # If user entered an online custom repo (e.g. username/repo), query that custom repo
         if src and not src.startswith("local:") and not any(src.startswith(p) for p in ("/", "./", "../", "~", "\\")):
             return src
@@ -978,7 +983,7 @@ class ModelsPage(BaseConfigPage):
                 preferred_variant=str(variant_val) if variant_val else None,
             )
 
-            self.source_edit.setText(str(m.get("source") or ""))
+            self.source_picker.setText(str(m.get("source") or ""))
             set_combo_value(self.device_combo, str(m.get("device") or "auto"))
             set_combo_value(self.precision_combo, str(m.get("precision") or "auto"))
             self.batch_spin.setValue(int(m.get("batch_size", 1)))
@@ -1088,7 +1093,7 @@ class ModelsPage(BaseConfigPage):
             m["backend"] = None if backend_text in ("auto", "") else backend_text
 
         m["variant_id"] = self.variant_combo.currentData()
-        m["source"] = self.source_edit.text().strip() or None
+        m["source"] = self.source_picker.text().strip() or None
 
         device_val = self.device_combo.currentText().strip()
         m["device"] = device_val
@@ -1113,14 +1118,6 @@ class ModelsPage(BaseConfigPage):
     def _on_svc_card_toggled(self, checked: bool) -> None:
         del checked
         self._on_field_changed()
-
-    def _on_browse_source(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Local Model Directory")
-        if folder:
-            # Automatically prepend 'local:' so vibe treats it as offline local storage
-            formatted_source = f"local:{folder}"
-            self.source_edit.setText(formatted_source)
-            self._on_field_changed()
 
     def _update_filter_status_card(self, m: dict[str, Any]) -> None:
         """Update the filter status card label based on active overrides."""

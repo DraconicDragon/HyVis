@@ -4,17 +4,15 @@ video_page.py — Configuration page for [video] frame sampling and frame cachin
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -24,7 +22,7 @@ from hyvis.config import AppConfig, VideoConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SemanticLabel
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import TextRole
-from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, set_combo_value
+from hyvis.gui.widgets import PathPickerWidget, SectionCard, add_form_row, bind_field_metadata, set_combo_value
 from hyvis.video.planner import FramePlanConfig, plan_frames
 
 
@@ -33,6 +31,7 @@ class VideoPage(BaseConfigPage):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._db_path_hint: str = "data/hyvis.db"
         self._setup_ui()
 
     def refresh_theme(self) -> None:
@@ -129,23 +128,17 @@ class VideoPage(BaseConfigPage):
         add_form_row(cache_form, v_fields, "frame_cache_mode", self.cache_mode_combo)
 
         # Frame Cache Directory Row
-        dir_box = QWidget(self.cache_card)
-        dir_row = QHBoxLayout(dir_box)
-        dir_row.setContentsMargins(0, 0, 0, 0)
-        dir_row.setSpacing(6)
-
-        self.cache_dir_edit = QLineEdit(dir_box)
-        bind_field_metadata(self.cache_dir_edit, v_fields["frame_cache_dir"], set_placeholder=False)
-        self.cache_dir_edit.setPlaceholderText("Auto (frame_cache directory beside database path)")
-        self.cache_dir_edit.textChanged.connect(lambda _: self.emit_changed())
-        dir_row.addWidget(self.cache_dir_edit, stretch=1)
-
-        self.browse_cache_dir_btn = QPushButton("Browse Folder...", dir_box)
-        self.browse_cache_dir_btn.clicked.connect(self._on_browse_cache_dir)
-        dir_row.addWidget(self.browse_cache_dir_btn)
-
-        self._cache_dir_label = add_form_row(cache_form, v_fields, "frame_cache_dir", dir_box, set_placeholder=False)
-        self._cache_dir_box = dir_box
+        self.cache_dir_picker = PathPickerWidget(
+            mode="directory",
+            dialog_title="Select Frame Cache Directory",
+            empty_display=self._auto_frame_cache_display,
+            parent=self.cache_card,
+        )
+        self.cache_dir_picker.setPlaceholderText("Auto (frame_cache directory beside database path)")
+        self.cache_dir_picker.textChanged.connect(lambda _: self.emit_changed())
+        self._cache_dir_label = add_form_row(
+            cache_form, v_fields, "frame_cache_dir", self.cache_dir_picker, set_placeholder=False
+        )
 
         cache_outer.addLayout(cache_form)
 
@@ -168,6 +161,16 @@ class VideoPage(BaseConfigPage):
 
     # region Handlers & Live Helpers
 
+    def _auto_frame_cache_display(self) -> str:
+        db_raw = self._db_path_hint.strip() or "data/hyvis.db"
+        db_abs = Path(os.path.abspath(os.path.expanduser(db_raw)))
+        return f"Resolves to: {db_abs.parent / 'frame_cache'} (auto beside database.path)"
+
+    def set_database_path(self, db_path: str) -> None:
+        """Update the fallback database.path hint when edited on AppDbPage."""
+        self._db_path_hint = db_path.strip() or "data/hyvis.db"
+        self.cache_dir_picker.refresh_resolved_path()
+
     def _sync_enabled_states(self) -> None:
         is_enabled = self.enabled_chk.isChecked()
         self.sampling_card.setEnabled(is_enabled)
@@ -176,7 +179,7 @@ class VideoPage(BaseConfigPage):
         mode = str(self.cache_mode_combo.currentData() or "auto")
         dir_active = is_enabled and (mode != "memory")
         self._cache_dir_label.setEnabled(dir_active)
-        self._cache_dir_box.setEnabled(dir_active)
+        self.cache_dir_picker.setEnabled(dir_active)
 
     def _update_sampling_preview(self) -> None:
         min_f = self.min_frames_spin.value()
@@ -216,12 +219,6 @@ class VideoPage(BaseConfigPage):
         self._sync_enabled_states()
         self.emit_changed()
 
-    def _on_browse_cache_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Frame Cache Directory")
-        if folder:
-            self.cache_dir_edit.setText(folder)
-            self.emit_changed()
-
     # endregion
 
     # region Config Lifecycle
@@ -229,6 +226,7 @@ class VideoPage(BaseConfigPage):
     def load_config(self, cfg: AppConfig) -> None:
         with self.suppress_changes():
             v = cfg.video
+            self._db_path_hint = cfg.database.path
             self.enabled_chk.setChecked(v.enabled)
             self.density_k_spin.setValue(float(v.density_k))
             self.min_frames_spin.setValue(int(v.min_frames))
@@ -236,7 +234,8 @@ class VideoPage(BaseConfigPage):
             self.sparse_below_spin.setValue(int(v.sparse_below_frames))
 
             set_combo_value(self.cache_mode_combo, v.frame_cache_mode)
-            self.cache_dir_edit.setText(v.frame_cache_dir or "")
+            self.cache_dir_picker.setText(v.frame_cache_dir or "")
+            self.cache_dir_picker.refresh_resolved_path()
 
             self._sync_enabled_states()
             self._update_sampling_preview()
@@ -249,6 +248,6 @@ class VideoPage(BaseConfigPage):
         v_dict["max_frames"] = int(self.max_frames_spin.value())
         v_dict["sparse_below_frames"] = int(self.sparse_below_spin.value())
         v_dict["frame_cache_mode"] = str(self.cache_mode_combo.currentData() or "auto")
-        v_dict["frame_cache_dir"] = self.cache_dir_edit.text().strip() or None
+        v_dict["frame_cache_dir"] = self.cache_dir_picker.text().strip() or None
 
     # endregion

@@ -590,6 +590,7 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
         self.filters_page.changed.connect(
             lambda: self.models_page.update_filter_overrides(self.filters_page._models_data)
         )
+        self.app_db_page.db_path_picker.textChanged.connect(self.video_page.set_database_path)
 
         # Universal page modification tracking
         for page in self.pages:
