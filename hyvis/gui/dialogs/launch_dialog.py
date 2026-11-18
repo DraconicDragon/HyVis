@@ -40,7 +40,7 @@ from hyvis.gui.launcher import format_cli_command_str, launch_in_external_termin
 from hyvis.gui.theme import CardTheme, ThemeSubscriberMixin
 from hyvis.gui.widgets import SectionCard
 from hyvis.hydrus import HydrusClient, HydrusError
-from hyvis.preflight import PreflightResult, inspect_preview_page, run_preflight
+from hyvis.preflight import PagePreviewInfo, PreflightResult, inspect_preview_page, run_preflight
 
 logger = logging.getLogger(__name__)
 
@@ -811,6 +811,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         cand_count = len(self._result.candidate_hashes)
         rej_count = len(self._result.rejected_hashes)
         v_num = _parse_hydrus_version_num(self._result.hydrus_version)
+        can_close = v_num is not None and v_num >= 696
 
         # 1. Candidate Preview
         if self.has_candidate_preview and self._result.candidate_preview:
@@ -818,9 +819,14 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             btn_prefix = "👁 Re-send" if self._candidate_preview_sent else "👁 Send"
 
             if cp.status == "dirty":
-                self.cand_status_label.setText(
-                    f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
-                )
+                if can_close:
+                    self.cand_status_label.setText(
+                        f"<span style='color: {self.tokens.status_success};'>Page '{cp.page_name}' is ready.</span>"
+                    )
+                else:
+                    self.cand_status_label.setText(
+                        f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{cp.page_name}' contains {cp.num_files} files. Clear it before sending.</span>"
+                    )
                 self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
                 self.send_cand_btn.setEnabled(cand_count > 0)
 
@@ -851,9 +857,14 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             btn_prefix = "👁 Re-send" if self._rejected_preview_sent else "👁 Send"
 
             if rp.status == "dirty":
-                self.rej_status_label.setText(
-                    f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
-                )
+                if can_close:
+                    self.rej_status_label.setText(
+                        f"<span style='color: {self.tokens.status_success};'>Page '{rp.page_name}' is ready.</span>"
+                    )
+                else:
+                    self.rej_status_label.setText(
+                        f"<span style='color: {self.tokens.status_warning};'>⚠ Page '{rp.page_name}' contains {rp.num_files} files. Clear it before sending.</span>"
+                    )
             elif rp.status == "ready":
                 self.rej_status_label.setText(
                     f"<span style='color: {self.tokens.status_success};'>Page '{rp.page_name}' is empty and ready.</span>"
@@ -909,57 +920,111 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
         self.recheck_btn.setEnabled(True)
         QMessageBox.warning(self, "Preview Check Failed", f"Could not check preview pages:\n\n{err_msg}")
 
-    def _on_send_candidate_clicked(self) -> None:
+    def _send_preview_to_hydrus(
+        self,
+        page_name: str,
+        page_index: int | None,
+        hashes: list[str],
+        *,
+        label: str,
+        status_label: QLabel,
+        send_btn: QPushButton,
+        is_rejected: bool,
+    ) -> None:
         eff_cfg = self._effective_cfg_for_preview()
-        p = eff_cfg.hydrus.preview
+        count = len(hashes)
+        already_sent = self._rejected_preview_sent if is_rejected else self._candidate_preview_sent
+        btn_prefix = "👁 Re-send" if already_sent else "👁 Send"
+
+        send_btn.setEnabled(False)
+        send_btn.setText("Sending...")
+
+        try:
+            hydrus = HydrusClient(eff_cfg.hydrus.api_url, eff_cfg.hydrus.api_key)
+            v_num = _parse_hydrus_version_num(self._result.hydrus_version) if self._result else None
+            can_close = v_num is not None and v_num >= 696
+            replace_non_empty = False
+
+            live_info = inspect_preview_page(hydrus, page_name, page_index)
+            if live_info is not None and live_info.status == "dirty" and can_close:
+                ans = QMessageBox.question(
+                    self,
+                    "Preview Page Not Empty",
+                    f"Page '{page_name}' is not empty (currently holds {live_info.num_files} file(s)).\n\n"
+                    "HyVis would like to close the existing page and open a new preview page in its place.\n\n"
+                    "Do you want to proceed?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if ans != QMessageBox.StandardButton.Yes:
+                    send_btn.setText(f"{btn_prefix} {label} ({count} files)")
+                    send_btn.setEnabled(True)
+                    return
+                replace_non_empty = True
+
+            pk = hydrus.setup_preview_page(
+                page_name,
+                hashes,
+                page_index,
+                focus=True,
+                replace_if_non_empty=replace_non_empty,
+            )
+
+            if is_rejected:
+                self._rejected_preview_sent = True
+            else:
+                self._candidate_preview_sent = True
+
+            if self._result is not None:
+                updated_info = PagePreviewInfo(
+                    page_name=page_name,
+                    page_index=page_index,
+                    status="dirty",
+                    num_files=count,
+                    page_key=pk,
+                )
+                if is_rejected:
+                    self._result.rejected_preview = updated_info
+                else:
+                    self._result.candidate_preview = updated_info
+
+            status_label.setText(
+                f"<span style='color: {self.tokens.status_success};'>✓ {count} files sent to '{page_name}'.</span>"
+            )
+            send_btn.setText(f"👁 Re-send {label} ({count} files)")
+            send_btn.setEnabled(True)
+        except HydrusError as exc:
+            QMessageBox.warning(self, f"{label} Setup Failed", str(exc))
+            send_btn.setText(f"{btn_prefix} {label} ({count} files)")
+            send_btn.setEnabled(True)
+
+    def _on_send_candidate_clicked(self) -> None:
+        p = self._effective_cfg_for_preview().hydrus.preview
         if not p or not p.page_name or not self._result or not self._result.candidate_hashes:
             return
-
-        cand_count = len(self._result.candidate_hashes)
-        self.send_cand_btn.setEnabled(False)
-        self.send_cand_btn.setText("Sending...")
-
-        try:
-            hydrus = HydrusClient(eff_cfg.hydrus.api_url, eff_cfg.hydrus.api_key)
-            hydrus.setup_preview_page(p.page_name, self._result.candidate_hashes, p.page_index, focus=True)
-            self._candidate_preview_sent = True
-            self.cand_status_label.setText(
-                f"<span style='color: {self.tokens.status_success};'>✓ {cand_count} files sent to '{p.page_name}'.</span>"
-            )
-            self.send_cand_btn.setText(f"👁 Re-send Candidate Preview ({cand_count} files)")
-            self.send_cand_btn.setEnabled(True)
-        except HydrusError as exc:
-            QMessageBox.warning(self, "Candidate Preview Setup Failed", str(exc))
-            btn_prefix = "👁 Re-send" if self._candidate_preview_sent else "👁 Send"
-            self.send_cand_btn.setText(f"{btn_prefix} Candidate Preview ({cand_count} files)")
-            self.send_cand_btn.setEnabled(True)
+        self._send_preview_to_hydrus(
+            p.page_name,
+            p.page_index,
+            self._result.candidate_hashes,
+            label="Candidate Preview",
+            status_label=self.cand_status_label,
+            send_btn=self.send_cand_btn,
+            is_rejected=False,
+        )
 
     def _on_send_rejected_clicked(self) -> None:
-        eff_cfg = self._effective_cfg_for_preview()
-        p = eff_cfg.hydrus.preview
+        p = self._effective_cfg_for_preview().hydrus.preview
         if not p or not p.rejected_page_name or not self._result or not self._result.rejected_hashes:
             return
-
-        rej_count = len(self._result.rejected_hashes)
-        self.send_rej_btn.setEnabled(False)
-        self.send_rej_btn.setText("Sending...")
-
-        try:
-            hydrus = HydrusClient(eff_cfg.hydrus.api_url, eff_cfg.hydrus.api_key)
-            hydrus.setup_preview_page(
-                p.rejected_page_name, self._result.rejected_hashes, p.rejected_page_index, focus=True
-            )
-            self._rejected_preview_sent = True
-            self.rej_status_label.setText(
-                f"<span style='color: {self.tokens.status_success};'>✓ {rej_count} files sent to '{p.rejected_page_name}'.</span>"
-            )
-            self.send_rej_btn.setText(f"👁 Re-send Rejected Preview ({rej_count} files)")
-            self.send_rej_btn.setEnabled(True)
-        except HydrusError as exc:
-            QMessageBox.warning(self, "Rejected Preview Setup Failed", str(exc))
-            btn_prefix = "👁 Re-send" if self._rejected_preview_sent else "👁 Send"
-            self.send_rej_btn.setText(f"{btn_prefix} Rejected Preview ({rej_count} files)")
-            self.send_rej_btn.setEnabled(True)
+        self._send_preview_to_hydrus(
+            p.rejected_page_name,
+            p.rejected_page_index,
+            self._result.rejected_hashes,
+            label="Rejected Preview",
+            status_label=self.rej_status_label,
+            send_btn=self.send_rej_btn,
+            is_rejected=True,
+        )
 
     def _build_effective_args(self) -> list[str]:
         args: list[str] = []
