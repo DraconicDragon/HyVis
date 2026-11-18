@@ -770,7 +770,7 @@ class LaunchDialog(ThemeSubscriberMixin, QDialog):
             if not self.cfg.video.enabled and any(is_video_mime(m) or "(animated)" in m for m in result.rejected_mimes):
                 msg_lines.append(
                     f"<span style='color: {self.tokens.text_muted};'>"
-                    "Tip: Enable Video &amp; Animation Processing on the Video &amp; Animation page to process these."
+                    "Tip: To process video and animated formats, enable Video &amp; Animation Processing on the Video &amp; Animation page."
                     "</span>"
                 )
         self.files_label.setText("<br>".join(msg_lines))
