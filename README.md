@@ -44,26 +44,24 @@ HyVis reads files directly from your disk using paths retrieved from Hydrus file
 <table align="center">
   <tr>
     <td align="center"><b>Main Page</b></td>
+    <td align="center"><b>Video &amp; Animation Page</b></td>
     <td align="center"><b>Models Page</b></td>
   </tr>
   <tr>
-    <td><img src=".assets/gui_hydrus_page.png" alt="Main Page" width="100%"></td>
-    <td><img src=".assets/gui_models_page.png" alt="Models Page" width="100%"></td>
+    <td><a href=".assets/gui_hydrus_page.png"><img src=".assets/gui_hydrus_page.png" alt="Main Page" width="100%"></a></td>
+    <td><a href=".assets/gui_video_page.png"><img src=".assets/gui_video_page.png" alt="Video &amp; Animation Page" width="100%"></a></td>
+    <td><a href=".assets/gui_models_page.png"><img src=".assets/gui_models_page.png" alt="Models Page" width="100%"></a></td>
   </tr>
 </table>
 
 <table align="center">
-  <p align="center">
-    <b>Video &amp; Animation Page</b><br>
-    <img src=".assets/gui_video_page.png" alt="Video &amp; Animation Page" width="50%">
-  </p>
   <tr>
     <td align="center"><b>Output Filter + Error</b></td>
     <td align="center"><b>Launch Dialog</b></td>
   </tr>
   <tr>
-    <td><img src=".assets/gui_filters_page.png" alt="Output Filter Page Including Error" width="100%"></td>
-    <td><img src=".assets/gui_preflight_launch_dialog.png" alt="Preflight Launch Dialog" width="100%"></td>
+    <td><a href=".assets/gui_filters_page.png"><img src=".assets/gui_filters_page.png" alt="Output Filter Page Including Error" width="100%"></a></td>
+    <td><a href=".assets/gui_preflight_launch_dialog.png"><img src=".assets/gui_preflight_launch_dialog.png" alt="Preflight Launch Dialog" width="100%"></a></td>
   </tr>
 </table>
 
