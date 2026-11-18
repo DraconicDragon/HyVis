@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import difflib
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
@@ -28,18 +29,21 @@ def field_meta(
     *,
     source: FieldSource | None = None,
     picker: FieldPicker | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Helper returning a typed dict[str, Any] for Field(json_schema_extra=...).
 
-    Provides type-checked discovery of UI sources and pickers without
-    triggering TypedDict invariance errors with type checkers.
+    Provides type-checked discovery of UI sources, pickers, and static Literal display labels
+    without triggering TypedDict invariance errors with type checkers.
     """
     meta: dict[str, Any] = {}
     if source is not None:
         meta["source"] = source
     if picker is not None:
         meta["picker"] = picker
+    if labels is not None:
+        meta["labels"] = dict(labels)
     return meta
 
 
@@ -839,6 +843,13 @@ class VideoConfig(StrictBaseModel):
             "• disk: Always saves extracted frames to disk until all models finish the file.\n\n"
             "Note: When disk caching is active on multi-model runs, the first model receives the "
             "original in-memory decoded frames while subsequent models read the disk-cached frames."
+        ),
+        json_schema_extra=field_meta(
+            labels={
+                "auto": "Auto (Memory for 1 model, Disk for 2+)",
+                "memory": "Memory Only (No disk writes; re-extracts per model)",
+                "disk": "Disk Cache (Save frames until all models finish)",
+            }
         ),
     )
     frame_cache_dir: str | None = Field(
