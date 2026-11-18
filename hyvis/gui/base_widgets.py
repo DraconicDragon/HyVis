@@ -92,6 +92,10 @@ class FloatSpinBox(QDoubleSpinBox):
         super().__init__(parent)
         self._extra_decimals = extra_decimals
         self._step_scale = step_scale
+        self._bound_ge: float | None = None
+        self._bound_gt: float | None = None
+        self._bound_le: float | None = None
+        self._bound_lt: float | None = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Initialize from current persistent preferences
@@ -101,9 +105,43 @@ class FloatSpinBox(QDoubleSpinBox):
         # Subscribe to live preference broadcasts
         settings_signals.spinbox_format_changed.connect(self._apply_format)
 
+    def set_schema_bounds(
+        self,
+        *,
+        ge: float | None = None,
+        gt: float | None = None,
+        le: float | None = None,
+        lt: float | None = None,
+    ) -> None:
+        """Bind numeric Pydantic bounds (including strict gt/lt) to this spinbox."""
+        self._bound_ge = ge
+        self._bound_gt = gt
+        self._bound_le = le
+        self._bound_lt = lt
+        self._apply_bounds(self.decimals())
+
+    def _apply_bounds(self, eff_decimals: int) -> None:
+        eps = 10.0 ** (-eff_decimals)
+        min_candidates: list[float] = []
+        if self._bound_ge is not None:
+            min_candidates.append(float(self._bound_ge))
+        if self._bound_gt is not None:
+            min_candidates.append(float(self._bound_gt) + eps)
+        if min_candidates:
+            self.setMinimum(max(min_candidates))
+
+        max_candidates: list[float] = []
+        if self._bound_le is not None:
+            max_candidates.append(float(self._bound_le))
+        if self._bound_lt is not None:
+            max_candidates.append(float(self._bound_lt) - eps)
+        if max_candidates:
+            self.setMaximum(min(max_candidates))
+
     def _apply_format(self, decimals: int, step: float) -> None:
         eff_decimals = decimals + self._extra_decimals
         self.setDecimals(eff_decimals)
+        self._apply_bounds(eff_decimals)
         eff_step = round(step * self._step_scale, eff_decimals)
         self.setSingleStep(max(10 ** (-eff_decimals), eff_step))
 
