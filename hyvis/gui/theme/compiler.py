@@ -260,6 +260,9 @@ QPushButton[btnVariant]:disabled {{
     color: {t.text_disabled};
 }}
 
+/* NOTE: [state="error"] is intentionally omitted for QLineEdit/SpinBox/ComboBox/List/Table inputs
+   to avoid excessive red visual noise */
+
 /* Targeted Form State Highlights */
 QLineEdit[state="overridden"],
 QAbstractSpinBox[state="overridden"],
