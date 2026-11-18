@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# region Patches
+
+
 # PATCH: temporary for new_page endpoint to hydrus_api lib until its available in the official release
 def _new_page(
     self,
@@ -81,6 +84,18 @@ def _new_page(
 
 if not hasattr(hydrus_api.Client, "new_page"):
     hydrus_api.Client.new_page = _new_page  # ty:ignore[unresolved-attribute]
+
+
+def _close_page(self, page_key: str) -> None:
+    # 200 returns an empty body ("no content"), so we don't call .json()
+    self._api_request("POST", "/manage_pages/close_page", json={"page_key": page_key})
+
+
+if not hasattr(hydrus_api.Client, "close_page"):
+    hydrus_api.Client.close_page = _close_page  # ty:ignore[unresolved-attribute]
+
+
+# endregion
 
 
 # region Exceptions
@@ -292,8 +307,33 @@ class HydrusClient:
         return set(hashes)
 
     @_handle_hydrus_errors
-    def setup_preview_page(self, name: str, hashes: list[str], index: int | None = None, focus: bool = True) -> str:
-        """Find an existing empty page or create a new one, and populate it with files."""
+    def close_page(self, page_key: str) -> None:
+        """Close an existing page in the Hydrus GUI (requires Hydrus v696+)."""
+        try:
+            self._client.close_page(page_key=page_key)  # ty:ignore[unresolved-attribute]
+        except hydrus_api.APIError as exc:
+            if exc.response.status_code == HTTPStatus.NOT_FOUND:
+                raise HydrusError(
+                    f"Could not close page '{page_key}' (HTTP 404). "
+                    "Closing pages via API requires Hydrus v696+ and a valid page key."
+                ) from exc
+            raise
+
+    @_handle_hydrus_errors
+    def setup_preview_page(
+        self,
+        name: str,
+        hashes: list[str],
+        index: int | None = None,
+        focus: bool = True,
+        *,
+        replace_if_non_empty: bool = False,
+    ) -> str:
+        """
+        Find an existing empty page or create a new one, and populate it with files.
+        When `replace_if_non_empty` is True (Hydrus v696+), closes a non-empty matching
+        page first and creates a fresh one in its place.
+        """
         root_data = self.get_pages()
         keys = self._find_pages_by_name(root_data.get("pages", {}), name)
 
@@ -314,16 +354,17 @@ class HydrusClient:
             info_data = self.get_page_info(target_key, simple=True)
             media_info = info_data.get("media", {}) or info_data.get("page_info", {}).get("media", {})
             if media_info.get("num_files", 0) > 0:
-                raise HydrusError(
-                    f"The page '{name}' is not empty.\n"
-                    + "Due to API limitations HyVis cannot close or clear it automatically.\n"
-                    + "Please close it manually or clear it first (select all > right click > remove > selected)."
-                )
-
-            self.add_files_to_page(target_key, hashes)
-            if focus:
-                self.focus_page(target_key)
-            return target_key
+                if not replace_if_non_empty:
+                    raise HydrusError(
+                        f"The page '{name}' is not empty.\n"
+                        + "Please close it manually or clear it first (select all > right click > remove > selected)."
+                    )
+                self.close_page(target_key)
+            else:
+                self.add_files_to_page(target_key, hashes)
+                if focus:
+                    self.focus_page(target_key)
+                return target_key
 
         # Attempt to create page (Hydrus v676+)
         try:
