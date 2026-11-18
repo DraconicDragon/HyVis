@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFrame,
+    QLabel,
     QScrollArea,
     QScrollBar,
     QTableWidget,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.settings import get_gui_settings, settings_signals
+from hyvis.gui.theme import AutoRepolishMixin, TextRole, ThemeProperty
 
 # region Divider
 
@@ -45,6 +47,27 @@ class Divider(QFrame):
 
         if shadow is not None:
             self.setFrameShadow(shadow)
+
+
+# endregion
+
+# region SemanticLabel
+
+
+class SemanticLabel(AutoRepolishMixin, QLabel):
+    """A label with a semantic text role and word wrapping enabled by default."""
+
+    def __init__(
+        self,
+        text: str = "",
+        role: TextRole = TextRole.MUTED,
+        parent: QWidget | None = None,
+        *,
+        word_wrap: bool = True,
+    ) -> None:
+        super().__init__(text, parent)
+        self.setWordWrap(word_wrap)
+        self.setProperty(ThemeProperty.TEXT_ROLE, role)
 
 
 # endregion
