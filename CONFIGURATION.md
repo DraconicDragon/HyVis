@@ -20,7 +20,7 @@ This document outlines all available settings for your HyVis configuration TOML 
 HyVis application settings.
 
 > [!TIP]
-> Log level can be overwritten using the `--log-level` flag.
+> Log level can be overridden using the `--log-level` flag.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |
