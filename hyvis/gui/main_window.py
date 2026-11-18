@@ -36,7 +36,15 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.cli import get_version
-from hyvis.config import AppConfig
+from hyvis.config import (
+    AppConfig,
+    DatabaseConfig,
+    HydrusConfig,
+    HyvisConfig,
+    ModelConfig,
+    OutputFilterConfig,
+    VideoConfig,
+)
 from hyvis.gui.base_widgets import Divider, install_smooth_scroll
 from hyvis.gui.devtools import DevToolsStrip
 from hyvis.gui.dialogs import (
@@ -81,62 +89,38 @@ class ValidationIssue:
     model_index: int | None = None
 
 
+_SIMPLE_ERROR_SECTIONS: dict[str, tuple[PageIndex, str, type[Any]]] = {
+    "hydrus": (PageIndex.HYDRUS, "Hydrus", HydrusConfig),
+    "video": (PageIndex.VIDEO, "Video & Animation", VideoConfig),
+    "output_filter": (PageIndex.FILTERS, "Output Filter", OutputFilterConfig),
+    "database": (PageIndex.APP_DB, "Database & App", DatabaseConfig),
+    "hyvis": (PageIndex.APP_DB, "Database & App", HyvisConfig),
+}
+
+
+def _format_field_msg(model_cls: type[Any], field_name: str, msg: str) -> str:
+    field_info = model_cls.model_fields.get(field_name)
+    title = field_info.title if field_info and field_info.title else field_name
+    return f"{title}: {msg}"
+
+
 def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
     loc = err.get("loc", ())
     msg = err.get("msg", "Invalid value")
 
     top_section = str(loc[0]) if loc else ""
-    page_idx: int = PageIndex.HYDRUS
+    page_idx: PageIndex = PageIndex.HYDRUS
     section_title = "General"
-    field_name = None
-    model_idx = None
+    field_name: str | None = None
+    model_idx: int | None = None
 
-    if top_section == "hydrus":
-        page_idx = PageIndex.HYDRUS
-        section_title = "Hydrus"
+    if top_section in _SIMPLE_ERROR_SECTIONS:
+        page_idx, section_title, model_cls = _SIMPLE_ERROR_SECTIONS[top_section]
         if len(loc) > 1:
             field_name = str(loc[1])
-            from hyvis.config import HydrusConfig
-
-            field_info = HydrusConfig.model_fields.get(field_name)
-            title = field_info.title if field_info and field_info.title else field_name
-            msg = f"{title}: {msg}"
-
-    elif top_section == "video":
-        page_idx = PageIndex.VIDEO
-        section_title = "Video & Animation"
-        if len(loc) > 1:
-            field_name = str(loc[1])
-            from hyvis.config import VideoConfig
-
-            field_info = VideoConfig.model_fields.get(field_name)
-            title = field_info.title if field_info and field_info.title else field_name
-            msg = f"{title}: {msg}"
-        elif "min_frames" in msg:
+            msg = _format_field_msg(model_cls, field_name, msg)
+        elif top_section == "video" and "min_frames" in msg:
             field_name = "min_frames"
-
-    elif top_section == "output_filter":
-        page_idx = PageIndex.FILTERS
-        section_title = "Output Filter"
-        if len(loc) > 1:
-            field_name = str(loc[1])
-            from hyvis.config import OutputFilterConfig
-
-            field_info = OutputFilterConfig.model_fields.get(field_name)
-            title = field_info.title if field_info and field_info.title else field_name
-            msg = f"{title}: {msg}"
-
-    elif top_section in ("database", "hyvis"):
-        page_idx = PageIndex.APP_DB
-        section_title = "Database & App"
-        if len(loc) > 1:
-            field_name = str(loc[1])
-            from hyvis.config import DatabaseConfig, HyvisConfig
-
-            fields = DatabaseConfig.model_fields if top_section == "database" else HyvisConfig.model_fields
-            field_info = fields.get(field_name)
-            title = field_info.title if field_info and field_info.title else field_name
-            msg = f"{title}: {msg}"
 
     elif top_section == "inference":
         if len(loc) >= 3 and str(loc[1]) == "models":
@@ -149,21 +133,13 @@ def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
                 page_idx = PageIndex.FILTERS
                 section_title = f"Model #{model_idx + 1} Filter" if model_idx is not None else "Model Filter"
                 field_name = str(loc[4])
-                from hyvis.config import OutputFilterConfig
-
-                field_info = OutputFilterConfig.model_fields.get(field_name)
-                title = field_info.title if field_info and field_info.title else field_name
-                msg = f"{title}: {msg}"
+                msg = _format_field_msg(OutputFilterConfig, field_name, msg)
             else:
                 page_idx = PageIndex.MODELS
                 section_title = f"Model #{model_idx + 1}" if model_idx is not None else "Inference Models"
                 if len(loc) >= 4:
                     field_name = str(loc[3])
-                    from hyvis.config import ModelConfig
-
-                    field_info = ModelConfig.model_fields.get(field_name)
-                    title = field_info.title if field_info and field_info.title else field_name
-                    msg = f"{title}: {msg}"
+                    msg = _format_field_msg(ModelConfig, field_name, msg)
         else:
             page_idx = PageIndex.MODELS
             section_title = "Inference Models"
