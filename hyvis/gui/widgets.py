@@ -51,15 +51,18 @@ HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY = "616c6c206b6e6f776e2074616773"
 
 
 class SemanticLabel(AutoRepolishMixin, QLabel):
-    """A label with a semantic text role for shared styling."""
+    """A label with a semantic text role and word wrapping enabled by default."""
 
     def __init__(
         self,
         text: str = "",
         role: TextRole = TextRole.MUTED,
         parent: QWidget | None = None,
+        *,
+        word_wrap: bool = True,
     ) -> None:
         super().__init__(text, parent)
+        self.setWordWrap(word_wrap)
         self.setProperty(ThemeProperty.TEXT_ROLE, role)
 
 
