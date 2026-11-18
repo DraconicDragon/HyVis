@@ -144,9 +144,9 @@ Optional setting to send the files (and/or rejected files) to a specific open pa
 > If you want to skip previews without commenting in/removing the `[hydrus.preview]` section from the config, you can use the `--no-preview` flag.
 
 > [!IMPORTANT]
-> **For Hydrus v676 or newer:** HyVis will automatically create the preview pages for you if they do not already exist. If a page with the configured name already exists, HyVis will use it.
-> **For older Hydrus versions:** You must manually create the page(s) in Hydrus. This is an API limitation.
-> *In both cases the pages must be empty and cleared manually if they aren't (select all -> right click -> remove)*
+> **For Hydrus v696 or newer:** Missing preview pages are created automatically. If an existing preview page is not empty, HyVis can close it and open a fresh one upon user confirmation.
+> **For Hydrus v676 - v695:** Missing preview pages are created automatically, but existing pages must be closed or emptied manually first (e.g.: select all -> right click -> remove).
+> **For older Hydrus versions:** Preview pages must be both created and cleared manually.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |

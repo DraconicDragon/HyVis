@@ -10,7 +10,7 @@ import shlex
 import signal
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 
@@ -196,6 +196,80 @@ def _verify_client_binding(
 
     print(_c("\nAborted.", YELLOW))
     return False
+
+
+def _parse_hydrus_version_num(v_str: str) -> int | None:
+    clean = str(v_str).strip().lstrip("vV")
+    try:
+        return int(clean.split(".")[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _setup_single_cli_preview(
+    hydrus: Any,
+    page_name: str,
+    page_index: int | None,
+    hashes: list[str],
+    *,
+    label: str,
+    focus: bool,
+    allow_prompt: bool,
+    can_close_pages: bool,
+) -> Literal["sent", "skipped", "aborted"]:
+    """Send hashes to a Hydrus preview page, prompting on non-empty pages in interactive mode."""
+    from hyvis.preflight import inspect_preview_page
+
+    replace_non_empty = False
+
+    while True:
+        if allow_prompt and not replace_non_empty:
+            info = inspect_preview_page(hydrus, page_name, page_index)
+            if info is not None and info.status == "dirty":
+                print(
+                    _c(
+                        f"  ⚠ {label} page '{page_name}' is not empty ({info.num_files} file(s)).",
+                        YELLOW,
+                    )
+                )
+                try:
+                    if can_close_pages:
+                        ans = (
+                            input("  [C]lose & replace / [S]kip preview / [R]etry / [A]bort [c/s/r/A]: ")
+                            .strip()
+                            .lower()
+                        )
+                        if ans in ("c", "close"):
+                            replace_non_empty = True
+                        elif ans in ("s", "skip"):
+                            print(_c(f"  Skipped {label.lower()} preview.", DIM))
+                            return "skipped"
+                        elif ans in ("r", "retry"):
+                            continue
+                        else:
+                            return "aborted"
+                    else:
+                        ans = input("  [S]kip preview / [R]etry / [A]bort [s/r/A]: ").strip().lower()
+                        if ans in ("s", "skip"):
+                            print(_c(f"  Skipped {label.lower()} preview.", DIM))
+                            return "skipped"
+                        elif ans in ("r", "retry"):
+                            continue
+                        else:
+                            return "aborted"
+                except (KeyboardInterrupt, EOFError):
+                    return "aborted"
+
+        print(_c(f"  Sending {len(hashes)} file(s) to {label.lower()} page '{page_name}'...", DIM))
+        hydrus.setup_preview_page(
+            page_name,
+            hashes,
+            page_index,
+            focus=focus,
+            replace_if_non_empty=replace_non_empty,
+        )
+        print(_c("    Done.", GREEN))
+        return "sent"
 
 
 # region Main coroutine
@@ -700,6 +774,10 @@ async def main() -> int:
     # region Previewing
     if cfg.hydrus.preview and not args.no_preview and hydrus is not None:
         p = cfg.hydrus.preview
+        v_num = _parse_hydrus_version_num(hydrus_version)
+        can_close_pages = v_num is not None and v_num >= 696
+        allow_prompt = not args.yes
+
         try:
             preview_hashes = [fi.file_hash for fi in actionable_files]
             focused_any = False
@@ -708,33 +786,50 @@ async def main() -> int:
                 print("Setting up preview...")
 
             if p.page_name and preview_hashes:
-                print(_c(f"  Sending {len(preview_hashes)} file(s) to preview page '{p.page_name}'...", DIM))
-                pk = hydrus.setup_preview_page(p.page_name, preview_hashes, p.page_index, focus=False)
-                hydrus.focus_page(pk)
-                focused_any = True
-                print(_c("    Done.", GREEN))
-                logger.info("Sent %d files to preview page '%s'", len(preview_hashes), p.page_name)
+                res = _setup_single_cli_preview(
+                    hydrus,
+                    p.page_name,
+                    p.page_index,
+                    preview_hashes,
+                    label="Preview",
+                    focus=True,
+                    allow_prompt=allow_prompt,
+                    can_close_pages=can_close_pages,
+                )
+                if res == "aborted":
+                    print(_c("\nAborted.", YELLOW))
+                    logger.info("Execution aborted at preview prompt.")
+                    return 0
+                if res == "sent":
+                    focused_any = True
+                    logger.info("Sent %d files to preview page '%s'", len(preview_hashes), p.page_name)
 
             if p.rejected_page_name and all_rejected_hashes:
-                print(
-                    _c(
-                        f"  Sending {len(all_rejected_hashes)} file(s) "
-                        + f"to rejected preview page '{p.rejected_page_name}'...",
-                        DIM,
+                res = _setup_single_cli_preview(
+                    hydrus,
+                    p.rejected_page_name,
+                    p.rejected_page_index,
+                    all_rejected_hashes,
+                    label="Rejected preview",
+                    focus=not focused_any,
+                    allow_prompt=allow_prompt,
+                    can_close_pages=can_close_pages,
+                )
+                if res == "aborted":
+                    print(_c("\nAborted.", YELLOW))
+                    logger.info("Execution aborted at rejected preview prompt.")
+                    return 0
+                if res == "sent":
+                    logger.info(
+                        "Sent %d files to rejected preview page '%s'", len(all_rejected_hashes), p.rejected_page_name
                     )
-                )
-                rpk = hydrus.setup_preview_page(
-                    p.rejected_page_name, all_rejected_hashes, p.rejected_page_index, focus=False
-                )
-                if not focused_any:
-                    hydrus.focus_page(rpk)
-                print(_c("    Done.", GREEN))
-                logger.info(
-                    "Sent %d files to rejected preview page '%s'", len(all_rejected_hashes), p.rejected_page_name
-                )
 
         except HydrusError as exc:
             print(_c(f"\nERROR: Failed to set up preview page: {exc}", RED), file=sys.stderr)
+            if args.yes:
+                print(
+                    _c("  Tip: You can pass --no-preview to skip previewing pages.", DIM), file=sys.stderr
+                )
             logger.error("Failed to set up preview page: %s", exc)
             return 1
 
