@@ -182,55 +182,55 @@ def bind_field_metadata(
         if getattr(item, "max_length", None) is not None:
             max_len = int(item.max_length)
 
-    if isinstance(widget, QSpinBox):
-        min_v = int(ge) if ge is not None else (int(gt) + 1 if gt is not None else widget.minimum())
-        max_v = int(le) if le is not None else (int(lt) - 1 if lt is not None else _QT_INT_MAX)
-        widget.setRange(max(_QT_INT_MIN, min_v), min(_QT_INT_MAX, max_v))
-        if apply_default and has_default and isinstance(default_val, int) and not isinstance(default_val, bool):
-            widget.setValue(default_val)
+    was_blocked = widget.signalsBlocked()
+    widget.blockSignals(True)
+    try:
+        if isinstance(widget, QSpinBox):
+            min_v = int(ge) if ge is not None else (int(gt) + 1 if gt is not None else widget.minimum())
+            max_v = int(le) if le is not None else (int(lt) - 1 if lt is not None else _QT_INT_MAX)
+            widget.setRange(max(_QT_INT_MIN, min_v), min(_QT_INT_MAX, max_v))
+            if apply_default and has_default and isinstance(default_val, int) and not isinstance(default_val, bool):
+                widget.setValue(default_val)
 
-    elif isinstance(widget, FloatSpinBox):
-        widget.set_schema_bounds(
-            ge=float(ge) if ge is not None else None,
-            gt=float(gt) if gt is not None else None,
-            le=float(le) if le is not None else None,
-            lt=float(lt) if lt is not None else None,
-        )
-        if (
-            apply_default
-            and has_default
-            and isinstance(default_val, (int, float))
-            and not isinstance(default_val, bool)
-        ):
-            widget.setValue(float(default_val))
+        elif isinstance(widget, FloatSpinBox):
+            widget.set_schema_bounds(
+                ge=float(ge) if ge is not None else None,
+                gt=float(gt) if gt is not None else None,
+                le=float(le) if le is not None else None,
+                lt=float(lt) if lt is not None else None,
+            )
+            if (
+                apply_default
+                and has_default
+                and isinstance(default_val, (int, float))
+                and not isinstance(default_val, bool)
+            ):
+                widget.setValue(float(default_val))
 
-    elif isinstance(widget, QCheckBox):
-        if not widget.text():
-            widget.setText(str(field_info.title).replace("&", "&&"))
-        if apply_default and has_default and isinstance(default_val, bool):
-            widget.setChecked(default_val)
+        elif isinstance(widget, QCheckBox):
+            if not widget.text():
+                widget.setText(str(field_info.title).replace("&", "&&"))
+            if apply_default and has_default and isinstance(default_val, bool):
+                widget.setChecked(default_val)
 
-    elif isinstance(widget, QComboBox):
-        if not widget.isEditable() and choices is not None:
-            was_blocked = widget.signalsBlocked()
-            widget.blockSignals(True)
-            try:
+        elif isinstance(widget, QComboBox):
+            if not widget.isEditable() and choices is not None:
                 widget.clear()
                 for opt in choices:
                     widget.addItem(labels[opt] if labels is not None else str(opt), userData=opt)
                 if apply_default and has_default and default_val is not None:
                     set_combo_value(widget, default_val)
-            finally:
-                widget.blockSignals(was_blocked)
 
-    elif isinstance(widget, QLineEdit):
-        if max_len is not None:
-            widget.setMaxLength(max_len)
-        examples = getattr(field_info, "examples", None)
-        if set_placeholder and examples and isinstance(examples[0], (str, int, float)):
-            widget.setPlaceholderText(str(examples[0]))
-        if apply_default and has_default and isinstance(default_val, str) and not widget.text():
-            widget.setText(default_val)
+        elif isinstance(widget, QLineEdit):
+            if max_len is not None:
+                widget.setMaxLength(max_len)
+            examples = getattr(field_info, "examples", None)
+            if set_placeholder and examples and isinstance(examples[0], (str, int, float)):
+                widget.setPlaceholderText(str(examples[0]))
+            if apply_default and has_default and isinstance(default_val, str) and not widget.text():
+                widget.setText(default_val)
+    finally:
+        widget.blockSignals(was_blocked)
 
 
 def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bool = False) -> None:
