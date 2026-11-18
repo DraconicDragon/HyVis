@@ -41,6 +41,7 @@ from hyvis.gui.widgets import (
     TagServiceListEditor,
     add_form_row,
     bind_field_metadata,
+    set_combo_value,
     setup_field_tooltip,
 )
 
@@ -94,7 +95,6 @@ class ModelsPage(BaseConfigPage):
         self._writable_tag_services: dict[str, str] = {}
         self._remote_sizes_cache: dict[str, dict[str, int]] = {}
         self._active_size_worker: _HfSizeWorker | None = None
-        self._is_loading_ui: bool = False
         self._setup_ui()
 
     def refresh_theme(self) -> None:
@@ -190,8 +190,7 @@ class ModelsPage(BaseConfigPage):
 
         self.source_edit = QLineEdit(source_box)
         bind_field_metadata(self.source_edit, m_fields["source"])
-        if not self.source_edit.placeholderText():
-            self.source_edit.setPlaceholderText("Default HF repo (or 'local:/path' or 'user/repo')")
+
         self.source_edit.textChanged.connect(self._on_field_changed)
         source_row.addWidget(self.source_edit, stretch=1)
 
@@ -303,8 +302,6 @@ class ModelsPage(BaseConfigPage):
 
         # Batch Size
         self.batch_spin = QSpinBox()
-        self.batch_spin.setRange(1, 2_147_483_647)
-        self.batch_spin.setValue(1)
         self.batch_spin.valueChanged.connect(self._on_field_changed)
         add_form_row(runtime_layout, m_fields, "batch_size", self.batch_spin)
 
@@ -313,7 +310,11 @@ class ModelsPage(BaseConfigPage):
 
         # Card 3: Model Output Services Override
         svc_title = m_fields["output_tag_services"].title or "Destination Tag Services"
-        self.svc_card = SectionCard(title=svc_title, field_name="output_tag_services", parent=right_container)
+        self.svc_card = SectionCard(
+            field_info=m_fields["output_tag_services"],
+            field_name="output_tag_services",
+            parent=right_container,
+        )
         self.svc_card.setCheckable(True)
         self.svc_card.setChecked(False)
         self.svc_card.toggled.connect(self._on_svc_card_toggled)
@@ -930,12 +931,9 @@ class ModelsPage(BaseConfigPage):
         self._on_field_changed()
 
     def load_config(self, cfg: AppConfig) -> None:
-        self._is_loading_ui = True
-        try:
-            # 1. Reset current selection index so the first model cleanly loads
+        with self.suppress_changes():
             self._current_index = -1
 
-            # 2. Extract models while strictly preserving explicitly declared overrides
             cleaned_models: list[dict[str, Any]] = []
             for m in cfg.inference.models:
                 m_dict = m.model_dump(mode="json")
@@ -949,21 +947,113 @@ class ModelsPage(BaseConfigPage):
 
             self._models_data = cleaned_models
 
-            # 3. Repopulate sidebar model list under signal block
             self.model_list.blockSignals(True)
             self.model_list.clear()
             for m in self._models_data:
                 self.model_list.addItem(QListWidgetItem(str(m.get("model_id", "unnamed"))))
             self.model_list.blockSignals(False)
 
-            # 4. Load the first model
             if self._models_data:
                 self.model_list.blockSignals(True)
                 self.model_list.setCurrentRow(0)
                 self.model_list.blockSignals(False)
                 self._load_model_to_form(0)
-        finally:
-            self._is_loading_ui = False
+
+    def _load_model_to_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._models_data):
+            return
+
+        with self.suppress_changes():
+            self._current_index = index
+            m = self._models_data[index]
+
+            model_id = str(m.get("model_id", ""))
+            set_combo_value(self.model_id_combo, model_id)
+
+            backend_val = m.get("backend")
+            variant_val = m.get("variant_id")
+            self._update_backend_and_variants(
+                model_id,
+                preferred_backend=str(backend_val) if backend_val else "auto",
+                preferred_variant=str(variant_val) if variant_val else None,
+            )
+
+            self.source_edit.setText(str(m.get("source") or ""))
+            set_combo_value(self.device_combo, str(m.get("device") or "auto"))
+            set_combo_value(self.precision_combo, str(m.get("precision") or "auto"))
+            self.batch_spin.setValue(int(m.get("batch_size", 1)))
+
+            self._update_device_constraints()
+            self._update_backend_constraints()
+
+            svcs = m.get("output_tag_services")
+            if svcs is not None:
+                self.svc_card.setChecked(True)
+                keys = svcs.get("keys", []) if isinstance(svcs, dict) else getattr(svcs, "keys", [])
+                self.model_services_editor.set_items(keys)
+            else:
+                self.svc_card.setChecked(False)
+                self.model_services_editor.set_items([])
+
+            if self._writable_tag_services:
+                self.model_services_editor.set_available_services(self._writable_tag_services)
+
+            self._update_filter_status_card(m)
+            self._update_availability(model_id)
+
+    def _on_add_model(self) -> None:
+        if 0 <= self._current_index < len(self._models_data):
+            self._save_form_to_model(self._current_index)
+
+        new_model = {
+            "model_id": "wd-swinv2-v3",
+            "variant_id": None,
+            "source": None,
+            "backend": None,
+            "device": "auto",
+            "precision": "auto",
+            "batch_size": 1,
+            "output_tag_services": None,
+        }
+        self._models_data.append(new_model)
+
+        new_row = len(self._models_data) - 1
+        with self.suppress_changes():
+            self.model_list.blockSignals(True)
+            self.model_list.addItem(QListWidgetItem("wd-swinv2-v3"))
+            self.model_list.setCurrentRow(new_row)
+            self.model_list.blockSignals(False)
+
+            self._load_model_to_form(new_row)
+
+        self.changed.emit()
+
+    def _on_remove_model(self) -> None:
+        row = self.model_list.currentRow()
+        if row < 0 or len(self._models_data) <= 1:
+            return
+
+        with self.suppress_changes():
+            self._models_data.pop(row)
+
+            self.model_list.blockSignals(True)
+            self.model_list.takeItem(row)
+
+            next_row = min(row, len(self._models_data) - 1)
+            self.model_list.setCurrentRow(next_row)
+            self.model_list.blockSignals(False)
+
+            self._load_model_to_form(next_row)
+
+        self.changed.emit()
+
+    def _on_field_changed(self) -> None:
+        if self._is_loading_ui:
+            return
+        self._save_form_to_model(self._current_index)
+        model_id = self.model_id_combo.currentText().strip()
+        self._update_availability(model_id)
+        self.emit_changed()
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         self._save_form_to_model(self._current_index)
@@ -981,67 +1071,6 @@ class ModelsPage(BaseConfigPage):
             self._save_form_to_model(self._current_index)
 
         self._load_model_to_form(row)
-
-    def _load_model_to_form(self, index: int) -> None:
-        if index < 0 or index >= len(self._models_data):
-            return
-
-        was_loading = self._is_loading_ui
-        self._is_loading_ui = True
-        try:
-            self._current_index = index
-            m = self._models_data[index]
-
-            model_id = str(m.get("model_id", ""))
-            mid_idx = self.model_id_combo.findText(model_id)
-            if mid_idx >= 0:
-                self.model_id_combo.setCurrentIndex(mid_idx)
-            else:  # todo: maybe make a base widget so this behaviour is reused and consistent
-                self.model_id_combo.setCurrentText(model_id)
-
-            backend_val = m.get("backend")
-            variant_val = m.get("variant_id")
-            self._update_backend_and_variants(
-                model_id,
-                preferred_backend=str(backend_val) if backend_val else "auto",
-                preferred_variant=str(variant_val) if variant_val else None,
-            )
-
-            self.source_edit.setText(str(m.get("source") or ""))
-
-            # Device: use setCurrentIndex if present
-            device_val = str(m.get("device") or "auto")
-            dev_idx = self.device_combo.findText(device_val)
-            if dev_idx >= 0:
-                self.device_combo.setCurrentIndex(dev_idx)
-            else:
-                self.device_combo.setCurrentText(device_val)
-
-            self.precision_combo.setCurrentText(str(m.get("precision") or "auto"))
-            self.batch_spin.setValue(int(m.get("batch_size", 1)))
-
-            # Enforce dynamic reactive constraints
-            self._update_device_constraints()
-            self._update_backend_constraints()
-
-            svcs = m.get("output_tag_services")
-            if svcs is not None:
-                self.svc_card.setChecked(True)
-                keys = svcs.get("keys", []) if isinstance(svcs, dict) else getattr(svcs, "keys", [])
-                self.model_services_editor.set_items(keys)
-            else:
-                self.svc_card.setChecked(False)
-                self.model_services_editor.set_items([])
-
-            if self._writable_tag_services:
-                self.model_services_editor.set_available_services(self._writable_tag_services)
-
-            self._update_filter_status_card(m)
-
-            # Evaluate availability AFTER source_edit and variant_combo are loaded
-            self._update_availability(model_id)
-        finally:
-            self._is_loading_ui = was_loading
 
     def _save_form_to_model(self, index: int) -> None:
         if index < 0 or index >= len(self._models_data):
@@ -1081,74 +1110,9 @@ class ModelsPage(BaseConfigPage):
         if item and model_id:
             item.setText(model_id)
 
-    def _on_add_model(self) -> None:
-        # Save current active form state first
-        if 0 <= self._current_index < len(self._models_data):
-            self._save_form_to_model(self._current_index)
-
-        new_model = {
-            "model_id": "wd-swinv2-v3",
-            "variant_id": None,
-            "source": None,
-            "backend": None,
-            "device": "auto",
-            "precision": "auto",
-            "batch_size": 1,
-            "output_tag_services": None,
-        }
-        self._models_data.append(new_model)
-
-        self._is_loading_ui = True
-        new_row = len(self._models_data) - 1
-        try:
-            self.model_list.blockSignals(True)
-            self.model_list.addItem(QListWidgetItem("wd-swinv2-v3"))
-            self.model_list.setCurrentRow(new_row)
-            self.model_list.blockSignals(False)
-
-            self._load_model_to_form(new_row)
-        finally:
-            self._is_loading_ui = False
-
-        self.changed.emit()
-
-    def _on_remove_model(self) -> None:
-        row = self.model_list.currentRow()
-        if row < 0 or len(self._models_data) <= 1:
-            return  # Must maintain at least one model
-
-        self._is_loading_ui = True
-        try:
-            # 1. Remove model from internal data list without saving the form
-            self._models_data.pop(row)
-
-            # 2. Block list widget signals while adjusting the UI row
-            self.model_list.blockSignals(True)
-            self.model_list.takeItem(row)
-
-            # 3. Select the next available model
-            next_row = min(row, len(self._models_data) - 1)
-            self.model_list.setCurrentRow(next_row)
-            self.model_list.blockSignals(False)
-
-            # 4. Safely load the newly selected model into the form
-            self._load_model_to_form(next_row)
-        finally:
-            self._is_loading_ui = False
-
-        self.changed.emit()
-
     def _on_svc_card_toggled(self, checked: bool) -> None:
         del checked
         self._on_field_changed()
-
-    def _on_field_changed(self) -> None:
-        if self._is_loading_ui:
-            return
-        self._save_form_to_model(self._current_index)
-        model_id = self.model_id_combo.currentText().strip()
-        self._update_availability(model_id)
-        self.changed.emit()
 
     def _on_browse_source(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Local Model Directory")

@@ -33,6 +33,7 @@ from hyvis.gui.widgets import (
     TagSubsetListEditor,
     ThresholdTableEditor,
     add_form_row,
+    bind_field_metadata,
     set_widget_override_state,
 )
 
@@ -68,7 +69,6 @@ class FiltersPage(BaseConfigPage):
         self._models_data: list[dict[str, Any]] = []
         self._current_scope: int = 0  # 0 = Global, 1..N = Model index + 1
         self._model_draft_overrides: dict[int, dict[str, Any]] = {}
-        self._is_loading_ui: bool = False  # Signal-leak protection guard
 
         self._card_meta: dict[SectionCard, tuple[str, list[str]]] = {}
         self._setup_ui()
@@ -148,20 +148,19 @@ class FiltersPage(BaseConfigPage):
         thresh_layout.setSpacing(8)
 
         self.default_thresh_spin = FloatSpinBox(self)
-        self.default_thresh_spin.setRange(0.0, 1.0)
-        self.default_thresh_spin.setValue(0.40)
         self.default_thresh_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(thresh_layout, of_fields, "default_threshold", self.default_thresh_spin)
 
-        self.prefer_tlt_chk = QCheckBox(of_fields["prefer_tag_level_thresholds"].title, self)
-        self.prefer_tlt_chk.setObjectName("prefer_tag_level_thresholds")
-        self.prefer_tlt_chk.setChecked(True)
+        self.prefer_tlt_chk = QCheckBox(self)
+        bind_field_metadata(
+            self.prefer_tlt_chk,
+            of_fields["prefer_tag_level_thresholds"],
+            field_name="prefer_tag_level_thresholds",
+        )
         self.prefer_tlt_chk.toggled.connect(lambda _: self._on_field_changed())
         thresh_layout.addRow("", self.prefer_tlt_chk)
 
         self.tlt_offset_spin = FloatSpinBox(self)
-        self.tlt_offset_spin.setRange(-1.0, 1.0)
-        self.tlt_offset_spin.setValue(0.00)
         self.tlt_offset_spin.valueChanged.connect(lambda _: self._on_field_changed())
         add_form_row(thresh_layout, of_fields, "tag_level_threshold_relative_offset", self.tlt_offset_spin)
 
@@ -169,11 +168,14 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.thresh_card)
 
         # Card 2: Allowed Categories (Dynamic & Checkable in Global Scope)
-        cat_title = of_fields["allowed_categories"].title or "Allowed Categories"
-        self.cat_card = SectionCard(cat_title, field_name="allowed_categories", parent=container)
+        self.cat_card = SectionCard(
+            field_info=of_fields["allowed_categories"],
+            field_name="allowed_categories",
+            parent=container,
+        )
         self.cat_card.setCheckable(True)
         self.cat_card.setChecked(False)
-        self._card_meta[self.cat_card] = (cat_title, ["allowed_categories"])
+        self._card_meta[self.cat_card] = (str(of_fields["allowed_categories"].title), ["allowed_categories"])
         self.cat_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_card, chk))
         cat_layout = QVBoxLayout()
         self.cat_editor = CategoryTagEditor(self)
@@ -187,9 +189,12 @@ class FiltersPage(BaseConfigPage):
         inc_exc_row.setSpacing(12)
 
         # Card 3: Include Tags
-        inc_title = of_fields["include_tags"].title or "Include Tags"
-        self.inc_card = SectionCard(inc_title, field_name="include_tags", parent=container)
-        self._card_meta[self.inc_card] = (inc_title, ["include_tags"])
+        self.inc_card = SectionCard(
+            field_info=of_fields["include_tags"],
+            field_name="include_tags",
+            parent=container,
+        )
+        self._card_meta[self.inc_card] = (str(of_fields["include_tags"].title), ["include_tags"])
         self.inc_card.toggled.connect(lambda chk: self._on_card_toggled(self.inc_card, chk))
         inc_layout = QVBoxLayout()
         self.include_editor = StringListEditor(placeholder="Add always-included tag...", parent=self)
@@ -199,9 +204,12 @@ class FiltersPage(BaseConfigPage):
         inc_exc_row.addWidget(self.inc_card, stretch=1)
 
         # Card 4: Exclude Tags
-        exc_title = of_fields["exclude_tags"].title or "Exclude Tags"
-        self.exc_card = SectionCard(exc_title, field_name="exclude_tags", parent=container)
-        self._card_meta[self.exc_card] = (exc_title, ["exclude_tags"])
+        self.exc_card = SectionCard(
+            field_info=of_fields["exclude_tags"],
+            field_name="exclude_tags",
+            parent=container,
+        )
+        self._card_meta[self.exc_card] = (str(of_fields["exclude_tags"].title), ["exclude_tags"])
         self.exc_card.toggled.connect(lambda chk: self._on_card_toggled(self.exc_card, chk))
         exc_layout = QVBoxLayout()
         self.exclude_editor = StringListEditor(placeholder="Add always-excluded tag...", parent=self)
@@ -213,9 +221,15 @@ class FiltersPage(BaseConfigPage):
         layout.addLayout(inc_exc_row)
 
         # Card 5: Category Threshold Overrides (Editable Category ComboBox in Col 0)
-        cat_thresh_title = of_fields["category_thresholds"].title or "Category Threshold Overrides"
-        self.cat_thresh_card = SectionCard(cat_thresh_title, field_name="category_thresholds", parent=container)
-        self._card_meta[self.cat_thresh_card] = (cat_thresh_title, ["category_thresholds"])
+        self.cat_thresh_card = SectionCard(
+            field_info=of_fields["category_thresholds"],
+            field_name="category_thresholds",
+            parent=container,
+        )
+        self._card_meta[self.cat_thresh_card] = (
+            str(of_fields["category_thresholds"].title),
+            ["category_thresholds"],
+        )
         self.cat_thresh_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_thresh_card, chk))
         cat_thresh_layout = QVBoxLayout()
         self.cat_thresh_editor = ThresholdTableEditor(
@@ -229,9 +243,12 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.cat_thresh_card)
 
         # Card 6: Tag Threshold Overrides
-        tag_thresh_title = of_fields["tag_thresholds"].title or "Tag Threshold Overrides"
-        self.tag_thresh_card = SectionCard(tag_thresh_title, field_name="tag_thresholds", parent=container)
-        self._card_meta[self.tag_thresh_card] = (tag_thresh_title, ["tag_thresholds"])
+        self.tag_thresh_card = SectionCard(
+            field_info=of_fields["tag_thresholds"],
+            field_name="tag_thresholds",
+            parent=container,
+        )
+        self._card_meta[self.tag_thresh_card] = (str(of_fields["tag_thresholds"].title), ["tag_thresholds"])
         self.tag_thresh_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_thresh_card, chk))
         tag_thresh_layout = QVBoxLayout()
         self.tag_thresh_editor = ThresholdTableEditor(target_header="Raw Tag Name", parent=self)
@@ -241,9 +258,15 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.tag_thresh_card)
 
         # Card 7: Category Tag Prefix Mapping (Editable Category ComboBox in Col 0)
-        cat_pfx_title = of_fields["category_tag_prefix_mapping"].title or "Category Tag Prefix Mapping"
-        self.cat_pfx_card = SectionCard(cat_pfx_title, field_name="category_tag_prefix_mapping", parent=container)
-        self._card_meta[self.cat_pfx_card] = (cat_pfx_title, ["category_tag_prefix_mapping"])
+        self.cat_pfx_card = SectionCard(
+            field_info=of_fields["category_tag_prefix_mapping"],
+            field_name="category_tag_prefix_mapping",
+            parent=container,
+        )
+        self._card_meta[self.cat_pfx_card] = (
+            str(of_fields["category_tag_prefix_mapping"].title),
+            ["category_tag_prefix_mapping"],
+        )
         self.cat_pfx_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_pfx_card, chk))
         cat_pfx_layout = QVBoxLayout()
         self.cat_prefix_editor = KeyValueEditor(
@@ -258,9 +281,15 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.cat_pfx_card)
 
         # Card 8: Tag Prefix Overrides
-        tag_pfx_title = of_fields["tag_prefix_overrides"].title or "Tag Prefix Overrides"
-        self.tag_pfx_card = SectionCard(tag_pfx_title, field_name="tag_prefix_overrides", parent=container)
-        self._card_meta[self.tag_pfx_card] = (tag_pfx_title, ["tag_prefix_overrides"])
+        self.tag_pfx_card = SectionCard(
+            field_info=of_fields["tag_prefix_overrides"],
+            field_name="tag_prefix_overrides",
+            parent=container,
+        )
+        self._card_meta[self.tag_pfx_card] = (
+            str(of_fields["tag_prefix_overrides"].title),
+            ["tag_prefix_overrides"],
+        )
         self.tag_pfx_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_pfx_card, chk))
         tag_pfx_layout = QVBoxLayout()
         self.tag_prefix_editor = KeyValueEditor(key_header="Raw Tag", val_header="Prefix", parent=self)
@@ -270,9 +299,12 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.tag_pfx_card)
 
         # Card 9: Tag Replacements
-        tag_rep_title = of_fields["tag_replacements"].title or "Tag Replacements"
-        self.tag_rep_card = SectionCard(tag_rep_title, field_name="tag_replacements", parent=container)
-        self._card_meta[self.tag_rep_card] = (tag_rep_title, ["tag_replacements"])
+        self.tag_rep_card = SectionCard(
+            field_info=of_fields["tag_replacements"],
+            field_name="tag_replacements",
+            parent=container,
+        )
+        self._card_meta[self.tag_rep_card] = (str(of_fields["tag_replacements"].title), ["tag_replacements"])
         self.tag_rep_card.toggled.connect(lambda chk: self._on_card_toggled(self.tag_rep_card, chk))
         rep_layout = QVBoxLayout()
         self.tag_replacements_editor = KeyValueEditor(key_header="Original Tag", val_header="Replacement", parent=self)
@@ -282,9 +314,15 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.tag_rep_card)
 
         # Card 10: Max Tags Per Category
-        cat_lim_title = of_fields["max_tags_per_category"].title or "Max Tags Per Category"
-        self.cat_limit_card = SectionCard(cat_lim_title, field_name="max_tags_per_category", parent=container)
-        self._card_meta[self.cat_limit_card] = (cat_lim_title, ["max_tags_per_category"])
+        self.cat_limit_card = SectionCard(
+            field_info=of_fields["max_tags_per_category"],
+            field_name="max_tags_per_category",
+            parent=container,
+        )
+        self._card_meta[self.cat_limit_card] = (
+            str(of_fields["max_tags_per_category"].title),
+            ["max_tags_per_category"],
+        )
         self.cat_limit_card.toggled.connect(lambda chk: self._on_card_toggled(self.cat_limit_card, chk))
         cat_limit_layout = QVBoxLayout()
         self.cat_limit_editor = CategoryLimitEditor(self)
@@ -294,9 +332,12 @@ class FiltersPage(BaseConfigPage):
         layout.addWidget(self.cat_limit_card)
 
         # Card 11: Joint Subset Limits (Stacked Cards avoiding comma bugs)
-        subset_title = of_fields["max_tags_per_subset"].title or "Joint Subset Limits"
-        self.subset_card = SectionCard(subset_title, field_name="max_tags_per_subset", parent=container)
-        self._card_meta[self.subset_card] = (subset_title, ["max_tags_per_subset"])
+        self.subset_card = SectionCard(
+            field_info=of_fields["max_tags_per_subset"],
+            field_name="max_tags_per_subset",
+            parent=container,
+        )
+        self._card_meta[self.subset_card] = (str(of_fields["max_tags_per_subset"].title), ["max_tags_per_subset"])
         self.subset_card.toggled.connect(lambda chk: self._on_card_toggled(self.subset_card, chk))
         subset_layout = QVBoxLayout()
         self.subset_editor = TagSubsetListEditor(self)
@@ -400,8 +441,7 @@ class FiltersPage(BaseConfigPage):
 
     def load_config(self, cfg: AppConfig) -> None:
         """Populate baseline global filter and all per-model overrides from AppConfig."""
-        self._is_loading_ui = True
-        try:
+        with self.suppress_changes():
             self._global_filter = cfg.output_filter.model_dump(mode="json")
 
             # Extract models while strictly preserving only explicitly declared output_filter overrides
@@ -430,8 +470,6 @@ class FiltersPage(BaseConfigPage):
 
             self._load_active_scope_from_state()
             self._update_category_suggestions()
-        finally:
-            self._is_loading_ui = False
 
         self._update_badges_and_tooltips()
 
@@ -453,8 +491,7 @@ class FiltersPage(BaseConfigPage):
 
     def _load_active_scope_from_state(self) -> None:
         """Load the active scope (Global or Model) into the form widgets under signal guard."""
-        self._is_loading_ui = True
-        try:
+        with self.suppress_changes():
             is_global = self._current_scope == 0
             self.banner_container.setVisible(not is_global)
 
@@ -493,9 +530,6 @@ class FiltersPage(BaseConfigPage):
                     # Populate from model override if active, else from global baseline
                     src = m_filter if is_card_overridden else self._global_filter
                     self._populate_card_widgets(card, src)
-
-        finally:
-            self._is_loading_ui = False
 
         self._update_badges_and_tooltips()
 
@@ -636,8 +670,7 @@ class FiltersPage(BaseConfigPage):
         _, keys = self._card_meta[card]
         draft = self._model_draft_overrides.get(model_idx, {})
 
-        self._is_loading_ui = True
-        try:
+        with self.suppress_changes():
             if checked:
                 # Re-checked: restore previously customized values if drafted, else baseline
                 src = {k: draft[k] for k in keys if k in draft} or self._global_filter
@@ -646,8 +679,6 @@ class FiltersPage(BaseConfigPage):
                 # Unchecked: save current values into draft memory, then populate global baseline
                 self._save_active_scope_to_state()
                 self._populate_card_widgets(card, self._global_filter)
-        finally:
-            self._is_loading_ui = False
 
         self._save_active_scope_to_state()
         self._refresh_scope_combo()

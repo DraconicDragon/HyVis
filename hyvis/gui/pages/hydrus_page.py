@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
     QLineEdit,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -21,7 +20,6 @@ from hyvis.config import (
     HydrusConfig,
     PreviewConfig,
 )
-from hyvis.gui.base_widgets import SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
@@ -31,7 +29,7 @@ from hyvis.gui.widgets import (
     TagRuleListEditor,
     TagServiceListEditor,
     add_form_row,
-    setup_field_tooltip,
+    bind_field_metadata,
 )
 
 
@@ -43,21 +41,13 @@ class HydrusPage(BaseConfigPage):
         self._available_writable_services: dict[str, str] = {}
         self._available_all_services: dict[str, str] = {}
         self._available_pages: list[dict[str, Any]] = []
-        self._is_loading_ui: bool = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         h_fields = HydrusConfig.model_fields
         prev_fields = PreviewConfig.model_fields
 
-        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 12, 0, 12)
-        layout.setSpacing(12)
+        container, layout = self.create_scroll_layout()
 
         # 1. API Connection Card
         self.conn_card = SectionCard(
@@ -69,60 +59,71 @@ class HydrusPage(BaseConfigPage):
         conn_layout.setSpacing(8)
 
         self.api_url_edit = QLineEdit(self)
-        self.api_url_edit.textChanged.connect(lambda _: self._on_field_changed())
+        self.api_url_edit.textChanged.connect(lambda _: self.emit_changed())
         add_form_row(conn_layout, h_fields, "api_url", self.api_url_edit)
 
         self.api_key_edit = QLineEdit(self)
         self.api_key_edit.setPlaceholderText("Paste your Hydrus API key here")
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
-        self.api_key_edit.textChanged.connect(lambda _: self._on_field_changed())
+        self.api_key_edit.textChanged.connect(lambda _: self.emit_changed())
         add_form_row(conn_layout, h_fields, "api_key", self.api_key_edit)
 
-        self.no_wait_chk = QCheckBox(h_fields["no_wait"].title, self)
-        self.no_wait_chk.setObjectName("no_wait")
-        setup_field_tooltip(self.no_wait_chk, h_fields["no_wait"])
-        self.no_wait_chk.toggled.connect(lambda _: self._on_field_changed())
+        self.no_wait_chk = QCheckBox(self)
+        bind_field_metadata(self.no_wait_chk, h_fields["no_wait"], field_name="no_wait")
+        self.no_wait_chk.toggled.connect(lambda _: self.emit_changed())
         conn_layout.addRow("", self.no_wait_chk)
 
         self.conn_card.setContentLayout(conn_layout)
         layout.addWidget(self.conn_card)
 
         # 2. Output Tag Services (Global) Card
-        out_title = h_fields["output_tag_services"].title or "Destination Tag Services (Global)"
-        self.output_card = SectionCard(title=out_title, field_name="output_tag_services", parent=container)
+        self.output_card = SectionCard(
+            field_info=h_fields["output_tag_services"],
+            field_name="output_tag_services",
+            parent=container,
+        )
         output_layout = QVBoxLayout()
         self.output_services_editor = TagServiceListEditor(writable_only=True, parent=self)
-        self.output_services_editor.changed.connect(self._on_field_changed)
+        self.output_services_editor.changed.connect(self.emit_changed)
         output_layout.addWidget(self.output_services_editor)
 
         self.output_card.setContentLayout(output_layout)
         layout.addWidget(self.output_card)
 
         # 3. Tag Queries Card (Stacked Query Cards)
-        tag_q_title = h_fields["tag_queries"].title or "Tag Queries"
-        self.tag_q_card = SectionCard(title=tag_q_title, field_name="tag_queries", parent=container)
+        self.tag_q_card = SectionCard(
+            field_info=h_fields["tag_queries"],
+            field_name="tag_queries",
+            parent=container,
+        )
         tag_q_layout = QVBoxLayout()
         self.tag_queries_editor = TagQueryListEditor(parent=self)
-        self.tag_queries_editor.changed.connect(self._on_field_changed)
+        self.tag_queries_editor.changed.connect(self.emit_changed)
         tag_q_layout.addWidget(self.tag_queries_editor)
 
         self.tag_q_card.setContentLayout(tag_q_layout)
         layout.addWidget(self.tag_q_card)
 
         # 4. Page Queries Card (Stacked Live Page Selector)
-        page_q_title = h_fields["page_queries"].title or "Page Queries"
-        self.page_q_card = SectionCard(title=page_q_title, field_name="page_queries", parent=container)
+        self.page_q_card = SectionCard(
+            field_info=h_fields["page_queries"],
+            field_name="page_queries",
+            parent=container,
+        )
         page_q_layout = QVBoxLayout()
         self.page_queries_editor = PageQueryListEditor(parent=self)
-        self.page_queries_editor.changed.connect(self._on_field_changed)
+        self.page_queries_editor.changed.connect(self.emit_changed)
         page_q_layout.addWidget(self.page_queries_editor)
 
         self.page_q_card.setContentLayout(page_q_layout)
         layout.addWidget(self.page_q_card)
 
         # 5. Additional Post-Run Tags Card (Stacked Multi-Rule Editor)
-        add_title = h_fields["add_tags"].title or "Post-Run Additional Tags"
-        self.add_tags_card = SectionCard(title=add_title, field_name="add_tags", parent=container)
+        self.add_tags_card = SectionCard(
+            field_info=h_fields["add_tags"],
+            field_name="add_tags",
+            parent=container,
+        )
         add_layout = QVBoxLayout()
         self.add_tags_editor = TagRuleListEditor(
             title_prefix="Add Rule",
@@ -135,14 +136,17 @@ class HydrusPage(BaseConfigPage):
             empty_text="(No additional tags configured — click '+ Add Additional Tags Rule' below)",
             parent=self,
         )
-        self.add_tags_editor.changed.connect(self._on_field_changed)
+        self.add_tags_editor.changed.connect(self.emit_changed)
         add_layout.addWidget(self.add_tags_editor)
         self.add_tags_card.setContentLayout(add_layout)
         layout.addWidget(self.add_tags_card)
 
         # 6. Cleanup Tags Card (Stacked Multi-Rule Editor)
-        rem_title = h_fields["remove_tags"].title or "Post-Run Cleanup Tags"
-        self.rem_tags_card = SectionCard(title=rem_title, field_name="remove_tags", parent=container)
+        self.rem_tags_card = SectionCard(
+            field_info=h_fields["remove_tags"],
+            field_name="remove_tags",
+            parent=container,
+        )
         rem_layout = QVBoxLayout()
         self.rem_tags_editor = TagRuleListEditor(
             title_prefix="Remove Rule",
@@ -155,58 +159,39 @@ class HydrusPage(BaseConfigPage):
             empty_text="(No cleanup tags configured — click '+ Add Cleanup Tags Rule' below)",
             parent=self,
         )
-        self.rem_tags_editor.changed.connect(self._on_field_changed)
+        self.rem_tags_editor.changed.connect(self.emit_changed)
         rem_layout.addWidget(self.rem_tags_editor)
         self.rem_tags_card.setContentLayout(rem_layout)
         layout.addWidget(self.rem_tags_card)
 
         # 7. Preview Settings Card (Checkable)
-        prev_title = h_fields["preview"].title or "Client Previews"
-        self.prev_card = SectionCard(
-            title=prev_title,
-            tooltip=h_fields["preview"].description or "",
-            parent=container,
-        )
+        self.prev_card = SectionCard(field_info=h_fields["preview"], parent=container)
         self.prev_card.setCheckable(True)
         self.prev_card.setChecked(False)
-        self.prev_card.toggled.connect(lambda _: self._on_field_changed())
+        self.prev_card.toggled.connect(lambda _: self.emit_changed())
         prev_layout = QFormLayout()
         prev_layout.setSpacing(8)
 
         self.prev_name_edit = QLineEdit(self)
-        self.prev_name_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(prev_layout, prev_fields["page_name"], self.prev_name_edit)
+        self.prev_name_edit.textChanged.connect(lambda _: self.emit_changed())
+        add_form_row(prev_layout, prev_fields, "page_name", self.prev_name_edit)
 
         self.prev_index_spin = QSpinBox(self)
-        self.prev_index_spin.setRange(0, 2_147_483_647)
         self.prev_index_spin.setSpecialValueText("None (0)")
-        self.prev_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(prev_layout, prev_fields["page_index"], self.prev_index_spin)
+        self.prev_index_spin.valueChanged.connect(lambda _: self.emit_changed())
+        add_form_row(prev_layout, prev_fields, "page_index", self.prev_index_spin)
 
         self.prev_rej_edit = QLineEdit(self)
-        self.prev_rej_edit.textChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(prev_layout, prev_fields["rejected_page_name"], self.prev_rej_edit)
+        self.prev_rej_edit.textChanged.connect(lambda _: self.emit_changed())
+        add_form_row(prev_layout, prev_fields, "rejected_page_name", self.prev_rej_edit)
 
         self.prev_rej_index_spin = QSpinBox(self)
-        self.prev_rej_index_spin.setRange(0, 2_147_483_647)
         self.prev_rej_index_spin.setSpecialValueText("None (0)")
-        self.prev_rej_index_spin.valueChanged.connect(lambda _: self._on_field_changed())
-        add_form_row(prev_layout, prev_fields["rejected_page_index"], self.prev_rej_index_spin)
+        self.prev_rej_index_spin.valueChanged.connect(lambda _: self.emit_changed())
+        add_form_row(prev_layout, prev_fields, "rejected_page_index", self.prev_rej_index_spin)
 
         self.prev_card.setContentLayout(prev_layout)
         layout.addWidget(self.prev_card)
-
-        # Set scroll root
-        scroll.setWidget(container)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.addWidget(scroll)
-
-    def _on_field_changed(self) -> None:
-        if self._is_loading_ui:
-            return
-        self.changed.emit()
 
     def update_services(self, all_tags: dict[str, Any], writable_tags: dict[str, str]) -> None:
         """Update active services across all tag service editors on this page."""
@@ -225,8 +210,7 @@ class HydrusPage(BaseConfigPage):
 
     def load_config(self, cfg: AppConfig) -> None:
         """Populate widgets from AppConfig under signal guard."""
-        self._is_loading_ui = True
-        try:
+        with self.suppress_changes():
             h = cfg.hydrus
 
             self.api_url_edit.setText(h.api_url)
@@ -237,10 +221,7 @@ class HydrusPage(BaseConfigPage):
             self.tag_queries_editor.set_queries(h.tag_queries)
             self.page_queries_editor.set_queries(h.page_queries)
 
-            # Add Tags rules
             self.add_tags_editor.set_rules(h.add_tags)
-
-            # Remove Tags rules
             self.rem_tags_editor.set_rules(h.remove_tags)
 
             # Preview (disabled by default, with friendly default names pre-filled)
@@ -258,8 +239,6 @@ class HydrusPage(BaseConfigPage):
                 self.prev_index_spin.setValue(0)
                 self.prev_rej_edit.setText("hyvis rejected")
                 self.prev_rej_index_spin.setValue(0)
-        finally:
-            self._is_loading_ui = False
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         """Serialize widget states into the raw dictionary representation for AppConfig."""
@@ -273,10 +252,7 @@ class HydrusPage(BaseConfigPage):
         hydrus_dict["tag_queries"] = self.tag_queries_editor.get_queries()
         hydrus_dict["page_queries"] = self.page_queries_editor.get_queries()
 
-        # Add Tags rules list
         hydrus_dict["add_tags"] = self.add_tags_editor.get_rules()
-
-        # Remove Tags rules list
         hydrus_dict["remove_tags"] = self.rem_tags_editor.get_rules()
 
         # Preview (omitted as None if unchecked)

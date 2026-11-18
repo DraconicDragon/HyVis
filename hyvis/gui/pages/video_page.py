@@ -15,23 +15,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from hyvis.config import AppConfig, VideoConfig
-from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
+from hyvis.gui.base_widgets import FloatSpinBox, SemanticLabel
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import TextRole
-from hyvis.gui.widgets import (
-    SectionCard,
-    SemanticLabel,
-    add_form_row,
-    bind_field_metadata,
-    setup_field_tooltip,
-)
+from hyvis.gui.widgets import SectionCard, add_form_row, bind_field_metadata, set_combo_value
 from hyvis.video.planner import FramePlanConfig, plan_frames
 
 
@@ -40,7 +33,6 @@ class VideoPage(BaseConfigPage):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._is_loading_ui: bool = False
         self._setup_ui()
 
     def refresh_theme(self) -> None:
@@ -50,33 +42,15 @@ class VideoPage(BaseConfigPage):
         app_fields = AppConfig.model_fields
         v_fields = VideoConfig.model_fields
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-
-        scroll = SmoothScrollArea(self, scroll_margin=(8, 4))
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 12, 0, 12)
-        layout.setSpacing(12)
+        container, layout = self.create_scroll_layout()
 
         # 1. Master Enable Card
-        video_title = app_fields["video"].title or "Video & Animation"
-        self.enable_card = SectionCard(
-            title=video_title,
-            tooltip=app_fields["video"].description or "",
-            parent=container,
-        )
+        self.enable_card = SectionCard(field_info=app_fields["video"], parent=container)
         enable_layout = QVBoxLayout()
         enable_layout.setSpacing(6)
 
-        enabled_title = v_fields["enabled"].title or "Enable Video & Animation Processing"
-        self.enabled_chk = QCheckBox(enabled_title.replace("&", "&&"), self.enable_card)
-        self.enabled_chk.setObjectName("enabled")
-        setup_field_tooltip(self.enabled_chk, v_fields["enabled"])
-        self.enabled_chk.setChecked(False)
+        self.enabled_chk = QCheckBox(self.enable_card)
+        bind_field_metadata(self.enabled_chk, v_fields["enabled"], field_name="enabled")
         self.enabled_chk.toggled.connect(self._on_enabled_toggled)
         enable_layout.addWidget(self.enabled_chk)
 
@@ -87,7 +61,6 @@ class VideoPage(BaseConfigPage):
             role=TextRole.SECONDARY,
             parent=self.enable_card,
         )
-        desc_lbl.setWordWrap(True)
         enable_layout.addWidget(desc_lbl)
 
         note_lbl = SemanticLabel(
@@ -96,7 +69,6 @@ class VideoPage(BaseConfigPage):
             role=TextRole.WARNING,
             parent=self.enable_card,
         )
-        note_lbl.setWordWrap(True)
         enable_layout.addWidget(note_lbl)
 
         self.enable_card.setContentLayout(enable_layout)
@@ -115,26 +87,18 @@ class VideoPage(BaseConfigPage):
         sampling_form.setSpacing(8)
 
         self.density_k_spin = FloatSpinBox(self.sampling_card)
-        self.density_k_spin.setRange(0.01, 60.0)
-        self.density_k_spin.setValue(2.0)
         self.density_k_spin.valueChanged.connect(lambda _: self._on_sampling_changed())
         add_form_row(sampling_form, v_fields, "density_k", self.density_k_spin)
 
         self.min_frames_spin = QSpinBox(self.sampling_card)
-        self.min_frames_spin.setRange(1, 2048)
-        self.min_frames_spin.setValue(4)
         self.min_frames_spin.valueChanged.connect(lambda _: self._on_sampling_changed())
         add_form_row(sampling_form, v_fields, "min_frames", self.min_frames_spin)
 
         self.max_frames_spin = QSpinBox(self.sampling_card)
-        self.max_frames_spin.setRange(1, 7200)
-        self.max_frames_spin.setValue(128)
         self.max_frames_spin.valueChanged.connect(lambda _: self._on_sampling_changed())
         add_form_row(sampling_form, v_fields, "max_frames", self.max_frames_spin)
 
         self.sparse_below_spin = QSpinBox(self.sampling_card)
-        self.sparse_below_spin.setRange(1, 2048)
-        self.sparse_below_spin.setValue(32)
         self.sparse_below_spin.valueChanged.connect(lambda _: self._on_sampling_changed())
         add_form_row(sampling_form, v_fields, "sparse_below_frames", self.sparse_below_spin)
 
@@ -161,12 +125,6 @@ class VideoPage(BaseConfigPage):
         cache_form.setSpacing(8)
 
         self.cache_mode_combo = QComboBox(self.cache_card)
-        self.cache_mode_combo.setEditable(False)
-        # todo: make the descriptions into extra json data for ui in config.py?
-        # todo: could also help making comboboxes generate/populate more cleanly/automatically
-        self.cache_mode_combo.addItem("Auto (Memory for 1 model, Disk for 2+)", userData="auto")
-        self.cache_mode_combo.addItem("Memory Only (No disk writes; re-extracts per model)", userData="memory")
-        self.cache_mode_combo.addItem("Disk Cache (Save frames until all models finish)", userData="disk")
         self.cache_mode_combo.currentIndexChanged.connect(lambda _: self._on_cache_mode_changed())
         add_form_row(cache_form, v_fields, "frame_cache_mode", self.cache_mode_combo)
 
@@ -179,14 +137,14 @@ class VideoPage(BaseConfigPage):
         self.cache_dir_edit = QLineEdit(dir_box)
         bind_field_metadata(self.cache_dir_edit, v_fields["frame_cache_dir"], set_placeholder=False)
         self.cache_dir_edit.setPlaceholderText("Auto (frame_cache directory beside database path)")
-        self.cache_dir_edit.textChanged.connect(lambda _: self._on_field_changed())
+        self.cache_dir_edit.textChanged.connect(lambda _: self.emit_changed())
         dir_row.addWidget(self.cache_dir_edit, stretch=1)
 
         self.browse_cache_dir_btn = QPushButton("Browse Folder...", dir_box)
         self.browse_cache_dir_btn.clicked.connect(self._on_browse_cache_dir)
         dir_row.addWidget(self.browse_cache_dir_btn)
 
-        self._cache_dir_label = add_form_row(cache_form, v_fields, "frame_cache_dir", dir_box)
+        self._cache_dir_label = add_form_row(cache_form, v_fields, "frame_cache_dir", dir_box, set_placeholder=False)
         self._cache_dir_box = dir_box
 
         cache_outer.addLayout(cache_form)
@@ -198,15 +156,12 @@ class VideoPage(BaseConfigPage):
             role=TextRole.SECONDARY,
             parent=self.cache_card,
         )
-        self.cache_note_label.setWordWrap(True)
         cache_outer.addWidget(self.cache_note_label)
 
         self.cache_card.setContentLayout(cache_outer)
         layout.addWidget(self.cache_card)
 
         layout.addStretch(1)
-        scroll.setWidget(container)
-        root.addWidget(scroll)
 
         self._sync_enabled_states()
         self._update_sampling_preview()
@@ -251,34 +206,28 @@ class VideoPage(BaseConfigPage):
 
     def _on_enabled_toggled(self, _checked: bool) -> None:
         self._sync_enabled_states()
-        self._on_field_changed()
+        self.emit_changed()
 
     def _on_sampling_changed(self) -> None:
         self._update_sampling_preview()
-        self._on_field_changed()
+        self.emit_changed()
 
     def _on_cache_mode_changed(self) -> None:
         self._sync_enabled_states()
-        self._on_field_changed()
-
-    def _on_field_changed(self) -> None:
-        if self._is_loading_ui:
-            return
-        self.changed.emit()
+        self.emit_changed()
 
     def _on_browse_cache_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Frame Cache Directory")
         if folder:
             self.cache_dir_edit.setText(folder)
-            self._on_field_changed()
+            self.emit_changed()
 
     # endregion
 
     # region Config Lifecycle
 
     def load_config(self, cfg: AppConfig) -> None:
-        self._is_loading_ui = True
-        try:
+        with self.suppress_changes():
             v = cfg.video
             self.enabled_chk.setChecked(v.enabled)
             self.density_k_spin.setValue(float(v.density_k))
@@ -286,14 +235,11 @@ class VideoPage(BaseConfigPage):
             self.max_frames_spin.setValue(int(v.max_frames))
             self.sparse_below_spin.setValue(int(v.sparse_below_frames))
 
-            idx = self.cache_mode_combo.findData(v.frame_cache_mode)
-            self.cache_mode_combo.setCurrentIndex(max(idx, 0))
+            set_combo_value(self.cache_mode_combo, v.frame_cache_mode)
             self.cache_dir_edit.setText(v.frame_cache_dir or "")
 
             self._sync_enabled_states()
             self._update_sampling_preview()
-        finally:
-            self._is_loading_ui = False
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         v_dict: dict[str, Any] = data.setdefault("video", {})
