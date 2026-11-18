@@ -72,13 +72,17 @@ def run_gui(initial_config: Path | str | None = None, *, dev_mode: bool = False)
     _cursor_filter = CheckBoxCursorFilter(app)
     app.installEventFilter(_cursor_filter)
 
-    # Apply styling
+    # Apply saved theme & accent in a single startup pass
     from hyvis.gui.theme import theme_manager
 
-    theme_manager.init_app(app)
+    gui_settings = get_gui_settings()
+    theme_manager.init_app(
+        app,
+        theme_id=gui_settings.theme,
+        accent_hex=gui_settings.accent_color,
+    )
 
     state = ConfigState()
-    gui_settings = get_gui_settings()
 
     # Resolve startup configuration hierarchy:
     # 1. CLI argument overrides everything

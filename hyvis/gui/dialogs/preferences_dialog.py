@@ -5,8 +5,10 @@ preferences_dialog.py — Desktop preferences dialog for persistent GUI settings
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
@@ -29,7 +31,20 @@ from hyvis.gui.settings import (
     get_gui_settings,
     save_gui_settings,
 )
+from hyvis.gui.theme import ACCENT_PRESETS, BUILTIN_THEMES, theme_manager
 from hyvis.gui.widgets import SectionCard
+
+
+def _make_swatch_icon(hex_color: str) -> QIcon:
+    """Create a color swatch icon with a subtle border."""
+    pix = QPixmap(14, 14)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    painter.setPen(QColor(0, 0, 0, 90))
+    painter.setBrush(QColor(hex_color))
+    painter.drawRoundedRect(0, 0, 14, 14, 2, 2)
+    painter.end()
+    return QIcon(pix)
 
 
 class PreferencesDialog(QDialog):
@@ -39,8 +54,21 @@ class PreferencesDialog(QDialog):
         super().__init__(parent)
         self.settings: GuiSettings = settings or get_gui_settings()
 
+        # Snapshot active appearance for live-preview rollback on Cancel/Esc
+        self._initial_theme: str = theme_manager.active_preset_id
+        self._initial_accent: str | None = theme_manager.active_accent_hex
+        self._selected_accent: str | None = self._initial_accent
+        self._last_custom_hex: str | None = (
+            self._initial_accent
+            if (
+                self._initial_accent
+                and self._initial_accent.lower() not in {v.lower() for v in ACCENT_PRESETS.values()}
+            )
+            else None
+        )
+
         self.setWindowTitle("Preferences")
-        self.resize(0, 500)
+        self.resize(0, 570)
         self.setModal(True)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -128,7 +156,30 @@ class PreferencesDialog(QDialog):
         self.spinbox_card.setContentLayout(spin_layout)
         layout.addWidget(self.spinbox_card)
 
-        # 3. Developer Options Card
+        # 3. Appearance Card
+        self.appearance_card = SectionCard("Appearance", parent=container)
+        appearance_layout = QFormLayout()
+        appearance_layout.setSpacing(8)
+
+        self.theme_combo = QComboBox(container)
+        for theme_id, preset in BUILTIN_THEMES.items():
+            self.theme_combo.addItem(preset.display_name, userData=theme_id)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance_layout.addRow("Theme:", self.theme_combo)
+
+        self.accent_combo = QComboBox(container)
+        self.accent_combo.addItem("System Default", userData=None)
+        self.accent_combo.addItem("Custom...", userData="custom")
+        self.accent_combo.insertSeparator(2)
+        for name, hex_val in ACCENT_PRESETS.items():
+            self.accent_combo.addItem(_make_swatch_icon(hex_val), name, userData=hex_val)
+        self.accent_combo.activated.connect(self._on_accent_activated)
+        appearance_layout.addRow("Accent Color:", self.accent_combo)
+
+        self.appearance_card.setContentLayout(appearance_layout)
+        layout.addWidget(self.appearance_card)
+
+        # 4. Developer Options Card
         self.dev_card = SectionCard("Developer", parent=container)
         dev_layout = QFormLayout()
         dev_layout.setSpacing(8)
@@ -184,10 +235,7 @@ class PreferencesDialog(QDialog):
     def _load_from_settings(self) -> None:
         # 1. Startup behavior
         idx = self.startup_combo.findData(self.settings.startup_behavior)
-        if idx >= 0:
-            self.startup_combo.setCurrentIndex(idx)
-        else:
-            self.startup_combo.setCurrentIndex(0)
+        self.startup_combo.setCurrentIndex(max(idx, 0))
 
         self.preset_path_edit.setText(self.settings.custom_preset_path or "")
         self.auto_connect_chk.setChecked(self.settings.auto_connect_hydrus)
@@ -198,8 +246,81 @@ class PreferencesDialog(QDialog):
         self.decimals_spin.setValue(self.settings.spinbox_decimals)
         self.step_spin.setValue(self.settings.spinbox_step)
 
-        # 3. Developer
+        # 3. Appearance
+        self._sync_appearance_combos(self._initial_theme, self._initial_accent)
+
+        # 4. Developer
         self.dev_discard_chk.setChecked(self.settings.dev_auto_discard_unsaved)
+
+    def _sync_appearance_combos(self, theme_id: str, accent_hex: str | None) -> None:
+        self.theme_combo.blockSignals(True)
+        t_idx = self.theme_combo.findData(theme_id)
+        self.theme_combo.setCurrentIndex(max(t_idx, 0))
+        self.theme_combo.blockSignals(False)
+
+        self.accent_combo.blockSignals(True)
+        if not accent_hex:
+            self.accent_combo.setItemText(1, "Custom...")
+            self.accent_combo.setItemIcon(1, QIcon())
+            self.accent_combo.setCurrentIndex(0)
+        else:
+            match_idx = -1
+            for i in range(3, self.accent_combo.count()):
+                item_hex = self.accent_combo.itemData(i)
+                if isinstance(item_hex, str) and item_hex.lower() == accent_hex.lower():
+                    match_idx = i
+                    break
+
+            if match_idx >= 0:
+                self.accent_combo.setItemText(1, "Custom...")
+                self.accent_combo.setItemIcon(1, QIcon())
+                self.accent_combo.setCurrentIndex(match_idx)
+            else:
+                self._last_custom_hex = accent_hex
+                self.accent_combo.setItemText(1, f"Custom ({accent_hex})...")
+                self.accent_combo.setItemIcon(1, _make_swatch_icon(accent_hex))
+                self.accent_combo.setCurrentIndex(1)
+        self.accent_combo.blockSignals(False)
+
+    def _on_theme_changed(self) -> None:
+        theme_id = str(self.theme_combo.currentData() or "system")
+        theme_manager.set_theme(theme_id)
+
+    def _on_accent_activated(self, index: int) -> None:
+        val = self.accent_combo.itemData(index)
+
+        if val == "custom":
+            initial = (
+                QColor(self._last_custom_hex or self._selected_accent)
+                if (self._last_custom_hex or self._selected_accent)
+                else QColor()
+            )
+            color = QColorDialog.getColor(initial=initial, parent=self, title="Select Custom Accent Color")
+
+            if color.isValid():
+                hex_val = color.name()
+                self._last_custom_hex = hex_val
+                self._selected_accent = hex_val
+                self.accent_combo.setItemText(1, f"Custom ({hex_val})...")
+                self.accent_combo.setItemIcon(1, _make_swatch_icon(hex_val))
+                theme_manager.set_accent(hex_val)
+            else:
+                # Cancelled picker: revert dropdown to currently active accent
+                self._sync_appearance_combos(
+                    str(self.theme_combo.currentData() or "system"),
+                    self._selected_accent,
+                )
+        else:
+            self._selected_accent = str(val) if val else None
+            if self._last_custom_hex:
+                self.accent_combo.setItemText(1, "Custom...")
+                self.accent_combo.setItemIcon(1, QIcon())
+            theme_manager.set_accent(self._selected_accent)
+
+    def reject(self) -> None:
+        """Revert any live-previewed appearance changes when cancelling Preferences."""
+        theme_manager.set_theme_and_accent(self._initial_theme, self._initial_accent)
+        super().reject()
 
     def _on_startup_behavior_changed(self) -> None:
         behavior = self.startup_combo.currentData()
@@ -229,6 +350,9 @@ class PreferencesDialog(QDialog):
         self.settings.custom_preset_path = self.preset_path_edit.text().strip() or None
         self.settings.auto_connect_hydrus = self.auto_connect_chk.isChecked()
         self.settings.prompt_backup_before_launch = self.backup_reminder_chk.isChecked()
+
+        self.settings.theme = str(self.theme_combo.currentData() or "system")
+        self.settings.accent_color = self._selected_accent
 
         self.settings.spinbox_decimals = self.decimals_spin.value()
         self.settings.spinbox_step = float(self.step_spin.value())

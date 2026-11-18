@@ -123,15 +123,31 @@ class ThemeManager(QObject):
         self._internal_palette_change: bool = False
 
     @property
+    def active_preset_id(self) -> str:
+        return self._active_preset_id
+
+    @property
+    def active_accent_hex(self) -> str | None:
+        return self._active_accent_hex
+
+    @property
     def current_tokens(self) -> ThemeTokens:
         if self._tokens is None:
             self._recalculate_tokens()
         assert self._tokens is not None
         return self._tokens
 
-    def init_app(self, app: QApplication) -> None:
-        """Initialize palette synchronization and event listeners."""
+    def init_app(
+        self,
+        app: QApplication,
+        *,
+        theme_id: str = "system",
+        accent_hex: str | None = None,
+    ) -> None:
+        """Initialize palette synchronization, apply initial theme/accent, and install listeners."""
         self._system_palette = QPalette(app.palette())
+        self._active_preset_id = theme_id if theme_id in BUILTIN_THEMES else "system"
+        self._active_accent_hex = accent_hex.strip() if isinstance(accent_hex, str) and accent_hex.strip() else None
 
         self._palette_filter = _ApplicationPaletteFilter(self, app)
         app.installEventFilter(self._palette_filter)
@@ -146,6 +162,8 @@ class ThemeManager(QObject):
         """Apply a theme preset immediately."""
         if preset_id not in BUILTIN_THEMES:
             preset_id = "system"
+        if self._active_preset_id == preset_id:
+            return
 
         self._active_preset_id = preset_id
         self._apply_theme_state()
@@ -154,6 +172,16 @@ class ThemeManager(QObject):
         """Override the accent color across both QPalette and ThemeTokens."""
         if self._active_accent_hex == accent_hex:
             return
+        self._active_accent_hex = accent_hex
+        self._apply_theme_state()
+
+    def set_theme_and_accent(self, preset_id: str, accent_hex: str | None) -> None:
+        """Apply both theme preset and accent color in a single stylesheet pass."""
+        if preset_id not in BUILTIN_THEMES:
+            preset_id = "system"
+        if self._active_preset_id == preset_id and self._active_accent_hex == accent_hex:
+            return
+        self._active_preset_id = preset_id
         self._active_accent_hex = accent_hex
         self._apply_theme_state()
 

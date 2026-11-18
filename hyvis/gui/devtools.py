@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from hyvis.db import ActiveRunInfo, ActiveRunInspection, ClientBinding, ClientBindingInspection, RunMode
-from hyvis.gui.theme import BUILTIN_THEMES, theme_manager
+from hyvis.gui.theme import ACCENT_PRESETS, BUILTIN_THEMES, theme_manager
 
 
 class DevToolsStrip(QWidget):
@@ -76,23 +76,7 @@ class DevToolsStrip(QWidget):
         self.accent_combo.addItem("Custom...", userData="custom")
         self.accent_combo.insertSeparator(2)
 
-        catppuccin_colors = {
-            "Rosewater": "#dc8a78",
-            "Flamingo": "#dd7878",
-            "Pink": "#ea76cb",
-            "Mauve": "#8839ef",
-            "Red": "#d20f39",
-            "Maroon": "#e64553",
-            "Peach": "#fe640b",
-            "Yellow": "#df8e1d",
-            "Green": "#40a02b",
-            "Teal": "#179299",
-            "Sky": "#04a5e5",
-            "Sapphire": "#209fb5",
-            "Blue": "#1e66f5",
-            "Lavender": "#7287fd",
-        }
-        for name, hex_val in catppuccin_colors.items():
+        for name, hex_val in ACCENT_PRESETS.items():
             self.accent_combo.addItem(name, userData=hex_val)
 
         # Use activated instead of currentIndexChanged so re-selecting Custom... always prompts
@@ -104,6 +88,48 @@ class DevToolsStrip(QWidget):
         self.crash_button.setToolTip(
             "Save the current editor state, then exit abruptly. Start the GUI without a config file to test recovery."
         )
+
+        self._sync_from_theme_manager()
+        theme_manager.theme_changed.connect(self._on_external_theme_changed)
+        self.destroyed.connect(self._on_destroyed_disconnect)
+
+    def _on_destroyed_disconnect(self) -> None:
+        try:
+            theme_manager.theme_changed.disconnect(self._on_external_theme_changed)
+        except Exception:
+            pass
+
+    def _on_external_theme_changed(self, _tokens: object) -> None:
+        self._sync_from_theme_manager()
+
+    def _sync_from_theme_manager(self) -> None:
+        preset_id = theme_manager.active_preset_id
+        accent_hex = theme_manager.active_accent_hex
+
+        self.theme_combo.blockSignals(True)
+        t_idx = self.theme_combo.findData(preset_id)
+        self.theme_combo.setCurrentIndex(t_idx if t_idx >= 0 else 0)
+        self.theme_combo.blockSignals(False)
+
+        self.accent_combo.blockSignals(True)
+        if not accent_hex:
+            self.accent_combo.setItemText(1, "Custom...")
+            self.accent_combo.setCurrentIndex(0)
+        else:
+            match_idx = -1
+            for i in range(3, self.accent_combo.count()):
+                item_hex = self.accent_combo.itemData(i)
+                if isinstance(item_hex, str) and item_hex.lower() == accent_hex.lower():
+                    match_idx = i
+                    break
+            if match_idx >= 0:
+                self.accent_combo.setItemText(1, "Custom...")
+                self.accent_combo.setCurrentIndex(match_idx)
+            else:
+                self._last_custom_hex = accent_hex
+                self.accent_combo.setItemText(1, f"Custom ({accent_hex})...")
+                self.accent_combo.setCurrentIndex(1)
+        self.accent_combo.blockSignals(False)
 
     def _on_theme_changed(self) -> None:
         theme_id = self.theme_combo.currentData()

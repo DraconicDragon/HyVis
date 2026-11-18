@@ -15,7 +15,7 @@ from hyvis.gui.theme.colors import (
 )
 from hyvis.gui.theme.compiler import render_surgical_stylesheet
 from hyvis.gui.theme.manager import AutoRepolishMixin, ThemeManager, ThemeSubscriberMixin, theme_manager
-from hyvis.gui.theme.presets import BUILTIN_THEMES, ThemePreset
+from hyvis.gui.theme.presets import ACCENT_PRESETS, BUILTIN_THEMES, ThemePreset
 from hyvis.gui.theme.tokens import (
     ButtonSize,
     ButtonVariant,
@@ -47,6 +47,7 @@ class CheckBoxCursorFilter(QObject):
 
 
 __all__ = [
+    "ACCENT_PRESETS",
     "BUILTIN_THEMES",
     "AutoRepolishMixin",
     "ButtonSize",

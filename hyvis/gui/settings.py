@@ -88,9 +88,13 @@ class GuiSettings(BaseModel):
     recent_configs: list[str] = Field(default_factory=list)
     last_opened_config: str | None = None
 
-    # Future UI Preferences
+    # UI Preferences
     spinbox_decimals: int = 2
     spinbox_step: float = 0.01
+
+    # Appearance
+    theme: str = "system"
+    accent_color: str | None = None
 
     # Developer Settings
     dev_auto_discard_unsaved: bool = False
