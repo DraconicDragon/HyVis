@@ -732,3 +732,151 @@ def test_decode_error_classification_media_vs_missing_dep(
 
 
 # endregion
+
+
+def test_adjust_threshold_modes_and_clamping() -> None:
+    from hyvis.config import adjust_threshold
+
+    # Zero adjustment is an exact no-op across all modes
+    for mode in ("headroom", "additive", "multiplier"):
+        assert adjust_threshold(0.40, mode, 0.0) == pytest.approx(0.40)
+
+    # Headroom: lifts low/mid cleanly without prematurely clamping 0.85 to 1.0
+    assert adjust_threshold(0.10, "headroom", 0.20) == pytest.approx(0.28)
+    assert adjust_threshold(0.40, "headroom", 0.20) == pytest.approx(0.52)
+    assert adjust_threshold(0.85, "headroom", 0.20) == pytest.approx(0.88)
+    assert adjust_threshold(0.40, "headroom", -0.25) == pytest.approx(0.30)
+
+    # Additive: flat shift clamped to [0.0, 1.0]
+    assert adjust_threshold(0.40, "additive", 0.10) == pytest.approx(0.50)
+    assert adjust_threshold(0.95, "additive", 0.10) == pytest.approx(1.0)
+    assert adjust_threshold(0.05, "additive", -0.10) == pytest.approx(0.0)
+
+    # Multiplier: proportional shift clamped to [0.0, 1.0]
+    assert adjust_threshold(0.40, "multiplier", 0.25) == pytest.approx(0.50)
+    assert adjust_threshold(0.85, "multiplier", 0.25) == pytest.approx(1.0)
+    assert adjust_threshold(0.40, "multiplier", -0.50) == pytest.approx(0.20)
+
+
+def test_video_threshold_adjust_triggers_cpu_refilter_without_invalidating_static(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Raising video.threshold_adjust_value must:
+      1. Leave static images untouched in skip_hashes.
+      2. Keep video_prep_hash unchanged so cached videos route to Pass A (CPU re-filter).
+      3. Filter out borderline video tags on CPU without modifying raw cache.db predictions.
+    """
+    static_path = tmp_path / "static.png"
+    Image.new("RGB", (32, 32), (10, 20, 30)).save(static_path)
+
+    anim_path = tmp_path / "anim.webp"
+    _write_animated_webp(anim_path, count=4)
+
+    h_static = "1" * 64
+    h_anim = "2" * 64
+    files = [
+        FileInfo(h_static, "image/png", 100, str(static_path), num_frames=1),
+        FileInfo(h_anim, "image/webp", 200, str(anim_path), num_frames=4),
+    ]
+
+    cat = LabelCatalog(
+        labels=(LabelInfo(index=0, name="borderline_tag", category="general"),),
+        categories=("general",),
+    )
+
+    monkeypatch.setattr(
+        vibe,
+        "load",
+        lambda model_id, **_kw: _FakeSession(
+            model_id,
+            cat,
+            lambda _v, _r: TagResult.from_arrays(
+                tag_names=cat.names,
+                scores=np.array([0.45], dtype=np.float32),
+                category_indices={"general": (0,)},
+            ),
+        ),
+    )
+
+    base_cfg = AppConfig.model_validate(
+        {
+            "hydrus": {
+                "api_url": "http://127.0.0.1:45869",
+                "api_key": "k",
+                "tag_queries": [{"tags": ["a"]}],
+                "output_tag_services": {"keys": ["svc_a"]},
+            },
+            "inference": {"models": [{"model_id": "m1"}]},
+            "output_filter": {"default_threshold": 0.40, "prefer_tag_level_thresholds": False},
+            "video": {"enabled": True, "threshold_adjust_mode": "headroom", "threshold_adjust_value": 0.0},
+        }
+    )
+
+    db_path = tmp_path / "hyvis.db"
+    cache_path = tmp_path / "cache.db"
+
+    with Database(db_path) as db, CacheDatabase(cache_path) as cdb:
+        # 1. Baseline run (k=0.0): both static and anim pass 0.45 >= 0.40
+        s1 = asyncio.run(
+            infer_files(
+                base_cfg.inference.models[0],
+                files,
+                config=base_cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=2),
+                force=False,
+            )
+        )
+        assert s1.ok == 2 and s1.zero_tags == 0
+
+        # 2. Stricter video threshold (k=0.20 -> 0.40 becomes 0.52):
+        #    static skips; anim routes to CPU refilter (Pass A) and emits 0 tags (0.45 < 0.52)
+        strict_cfg = base_cfg.model_copy(
+            update={
+                "video": base_cfg.video.model_copy(
+                    update={"threshold_adjust_mode": "headroom", "threshold_adjust_value": 0.20}
+                )
+            }
+        )
+        plan_strict = plan_model_pass(
+            strict_cfg.inference.models[0],
+            files,
+            config=strict_cfg,
+            db=db,
+            cache_db=cdb,
+            force=False,
+        )
+        assert plan_strict.skip_hashes == {h_static}
+        assert [f.file_hash for f in plan_strict.refilter_files] == [h_anim]
+        assert plan_strict.files_to_infer == []
+
+        s2 = asyncio.run(
+            infer_files(
+                strict_cfg.inference.models[0],
+                files,
+                config=strict_cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=2),
+                force=False,
+                plan=plan_strict,
+            )
+        )
+        assert s2.skipped == 1 and s2.refiltered == 1 and s2.zero_tags == 1
+
+        # 3. Revert back to k=0.0: raw 0.45 is still intact in cache.db -> anim re-emits via CPU!
+        s3 = asyncio.run(
+            infer_files(
+                base_cfg.inference.models[0],
+                files,
+                config=base_cfg,
+                db=db,
+                cache_db=cdb,
+                progress=Progress(total=2),
+                force=False,
+            )
+        )
+        assert s3.skipped == 1 and s3.refiltered == 1 and s3.zero_tags == 0
