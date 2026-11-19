@@ -23,6 +23,7 @@ from pydantic import (
 
 FieldSource = Literal["hydrus:tag_services", "vibe:models"]
 FieldPicker = Literal["file", "directory"]
+ThresholdAdjustMode = Literal["headroom", "additive", "multiplier"]
 
 
 def field_meta(
@@ -88,6 +89,32 @@ EXPLICIT_ANIMATED_MIMES: frozenset[str] = frozenset(
 )
 
 # endregion
+
+
+def adjust_threshold(threshold: float, mode: ThresholdAdjustMode | str, value: float) -> float:
+    """
+    Adjust a resolved [0.0, 1.0] threshold for video/animated content.
+
+    Modes:
+      - headroom:   k >= 0 -> T + (1 - T) * k;  k < 0 -> T * (1 + k)
+      - additive:   T + k
+      - multiplier: T * (1 + k)
+    """
+    t = max(0.0, min(1.0, float(threshold)))
+    k = float(value)
+    if k == 0.0:
+        return t
+
+    if mode == "headroom":
+        raw = t + (1.0 - t) * k if k > 0.0 else t * (1.0 + k)
+    elif mode == "additive":
+        raw = t + k
+    elif mode == "multiplier":
+        raw = t * (1.0 + k)
+    else:
+        raise ValueError(f"Unsupported threshold_adjust_mode: {mode!r}")
+
+    return max(0.0, min(1.0, raw))
 
 
 def is_video_mime(mime: str) -> bool:
@@ -833,6 +860,36 @@ class VideoConfig(StrictBaseModel):
         description="Files with fewer total frames than this threshold use frame-count scaling instead of duration scaling.",
         examples=[32],
     )
+    threshold_adjust_mode: ThresholdAdjustMode = Field(
+        default="headroom",
+        title="Threshold Adjustment Mode",
+        description=(
+            "Formula used by 'Threshold Adjustment (k)' to modify resolved output thresholds for videos and animated images:\n"
+            "• headroom: Positive k shifts thresholds toward 1.0 via T + (1 - T) * k; negative k scales toward 0.0 via T * (1 + k).\n"
+            "• additive: Adds a flat offset T + k (clamped to [0.0, 1.0]).\n"
+            "• multiplier: Scales proportionally via T * (1 + k) (clamped to [0.0, 1.0])."
+        ),
+        json_schema_extra=field_meta(
+            labels={
+                "headroom": "Headroom Scaling  (T + (1 - T) · k)",
+                "additive": "Flat Additive Offset  (T + k)",
+                "multiplier": "Relative Multiplier  (T · (1 + k))",
+            }
+        ),
+    )
+    threshold_adjust_value: float = Field(
+        default=0.0,
+        ge=-1.0,
+        le=1.0,
+        title="Threshold Adjustment (k)",
+        description=(
+            "Adjustment applied to resolved thresholds for videos and animated images (-1.0 to 1.0).\n"
+            "• 0.0 = Disabled (uses Output Filter thresholds unchanged).\n"
+            "• Positive (> 0) = Stricter thresholds to suppress video false positives.\n"
+            "• Negative (< 0) = More permissive thresholds."
+        ),
+        examples=[0.0],
+    )
     frame_cache_mode: Literal["auto", "memory", "disk"] = Field(
         default="auto",
         title="Frame Cache Mode",
@@ -890,6 +947,10 @@ class VideoConfig(StrictBaseModel):
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]
+
+    def adjust_threshold(self, threshold: float) -> float:
+        """Apply this VideoConfig's threshold adjustment to a resolved threshold."""
+        return adjust_threshold(threshold, self.threshold_adjust_mode, self.threshold_adjust_value)
 
 
 class AppConfig(StrictBaseModel):
