@@ -1,5 +1,5 @@
 """
-video_page.py — Configuration page for [video] frame sampling and frame caching.
+video_page.py — Configuration page for [video] frame sampling, caching, and threshold adjustment.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.config import AppConfig, VideoConfig
+from hyvis.config import AppConfig, VideoConfig, adjust_threshold
 from hyvis.gui.base_widgets import FloatSpinBox, SemanticLabel
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.theme import TextRole
@@ -36,6 +36,7 @@ class VideoPage(BaseConfigPage):
 
     def refresh_theme(self) -> None:
         self._update_sampling_preview()
+        self._update_threshold_preview()
 
     def _setup_ui(self) -> None:
         app_fields = AppConfig.model_fields
@@ -111,7 +112,36 @@ class VideoPage(BaseConfigPage):
         self.sampling_card.setContentLayout(sampling_outer)
         layout.addWidget(self.sampling_card)
 
-        # 3. Frame Caching Card
+        # 3. Output Threshold Adjustment Card
+        self.threshold_card = SectionCard(
+            title="Output Threshold Adjustment",
+            tooltip="Optionally tighten or loosen output thresholds specifically for videos and multi-frame animations.",
+            parent=container,
+        )
+        thresh_outer = QVBoxLayout()
+        thresh_outer.setSpacing(8)
+
+        thresh_form = QFormLayout()
+        thresh_form.setSpacing(8)
+
+        self.thresh_mode_combo = QComboBox(self.threshold_card)
+        self.thresh_mode_combo.currentIndexChanged.connect(lambda _: self._on_threshold_changed())
+        add_form_row(thresh_form, v_fields, "threshold_adjust_mode", self.thresh_mode_combo)
+
+        self.thresh_val_spin = FloatSpinBox(self.threshold_card)
+        self.thresh_val_spin.valueChanged.connect(lambda _: self._on_threshold_changed())
+        add_form_row(thresh_form, v_fields, "threshold_adjust_value", self.thresh_val_spin)
+
+        thresh_outer.addLayout(thresh_form)
+
+        self.thresh_preview_label = QLabel(self.threshold_card)
+        self.thresh_preview_label.setWordWrap(True)
+        thresh_outer.addWidget(self.thresh_preview_label)
+
+        self.threshold_card.setContentLayout(thresh_outer)
+        layout.addWidget(self.threshold_card)
+
+        # 4. Frame Caching Card
         self.cache_card = SectionCard(
             title="Frame Caching",
             tooltip="Controls whether extracted frames are streamed in memory or temporarily cached on disk for multi-model runs.",
@@ -158,6 +188,7 @@ class VideoPage(BaseConfigPage):
 
         self._sync_enabled_states()
         self._update_sampling_preview()
+        self._update_threshold_preview()
 
     # region Handlers & Live Helpers
 
@@ -175,6 +206,7 @@ class VideoPage(BaseConfigPage):
         is_enabled = self.enabled_chk.isChecked()
         self.sampling_card.setEnabled(is_enabled)
         self.cache_card.setEnabled(is_enabled)
+        self.threshold_card.setEnabled(is_enabled)
 
         mode = str(self.cache_mode_combo.currentData() or "auto")
         dir_active = is_enabled and (mode != "memory")
@@ -207,6 +239,22 @@ class VideoPage(BaseConfigPage):
         self.preview_label.setText("Sample preview (24 fps):  " + "  |  ".join(parts) + " frames")
         self.preview_label.setStyleSheet(f"color: {self.tokens.text_muted};")
 
+    def _update_threshold_preview(self) -> None:
+        mode = str(self.thresh_mode_combo.currentData() or "headroom")
+        val = float(self.thresh_val_spin.value())
+
+        if abs(val) < 1e-6:
+            self.thresh_preview_label.setText("No adjustment active (uses Output Filter thresholds as-is).")
+            self.thresh_preview_label.setStyleSheet(f"color: {self.tokens.text_muted};")
+            return
+
+        direction = "Stricter" if val > 0 else "More permissive"
+        decimals = self.thresh_val_spin.decimals()
+        bases = (0.10, 0.27, 0.40, 0.75, 0.85)
+        examples = "  |  ".join(f"{b:.2f} → {adjust_threshold(b, mode, val):.{decimals}f}" for b in bases)
+        self.thresh_preview_label.setText(f"{direction} ({mode}, k={val:+.{decimals}f}):  {examples}")
+        self.thresh_preview_label.setStyleSheet(f"color: {self.tokens.text_muted};")
+
     def _on_enabled_toggled(self, _checked: bool) -> None:
         self._sync_enabled_states()
         self.emit_changed()
@@ -217,6 +265,10 @@ class VideoPage(BaseConfigPage):
 
     def _on_cache_mode_changed(self) -> None:
         self._sync_enabled_states()
+        self.emit_changed()
+
+    def _on_threshold_changed(self) -> None:
+        self._update_threshold_preview()
         self.emit_changed()
 
     # endregion
@@ -237,8 +289,12 @@ class VideoPage(BaseConfigPage):
             self.cache_dir_picker.setText(v.frame_cache_dir or "")
             self.cache_dir_picker.refresh_resolved_path()
 
+            set_combo_value(self.thresh_mode_combo, v.threshold_adjust_mode)
+            self.thresh_val_spin.setValue(float(v.threshold_adjust_value))
+
             self._sync_enabled_states()
             self._update_sampling_preview()
+            self._update_threshold_preview()
 
     def apply_to_dict(self, data: dict[str, Any]) -> None:
         v_dict: dict[str, Any] = data.setdefault("video", {})
@@ -249,5 +305,7 @@ class VideoPage(BaseConfigPage):
         v_dict["sparse_below_frames"] = int(self.sparse_below_spin.value())
         v_dict["frame_cache_mode"] = str(self.cache_mode_combo.currentData() or "auto")
         v_dict["frame_cache_dir"] = self.cache_dir_picker.text().strip() or None
+        v_dict["threshold_adjust_mode"] = str(self.thresh_mode_combo.currentData() or "headroom")
+        v_dict["threshold_adjust_value"] = float(self.thresh_val_spin.value())
 
     # endregion

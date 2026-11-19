@@ -293,6 +293,12 @@ def print_confirmation(
         print(
             f"    sampling            k={vid.density_k}  min={vid.min_frames}  max={vid.max_frames}  sparse<{vid.sparse_below_frames}"
         )
+        if vid.threshold_adjust_value != 0.0:
+            ex_after = vid.adjust_threshold(0.40)
+            print(
+                f"    threshold adjust    mode={vid.threshold_adjust_mode}  k={vid.threshold_adjust_value:+.2f}  "
+                + _c(f"(e.g. 0.40 → {ex_after:.2f})", DIM)
+            )
         print(f"    frame cache         mode={vid.frame_cache_mode}")
         if len(inf.models) > 1 and vid.frame_cache_mode in ("auto", "disk"):
             print(
