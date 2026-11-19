@@ -256,6 +256,8 @@ When `enabled` is `false` (default), videos and multi-frame animations are skipp
 | `min_frames` | Integer | No | Minimum number of frames sampled per video/animation (`1` to `2048`, must be $\le$ `max_frames`; clamped to total frames if shorter). <br> Defaults to `4`. |
 | `max_frames` | Integer | No | Hard upper cap on frames sampled per video (`1` to `7200`) to keep processing time bounded on long videos. <br> Defaults to `128`. |
 | `sparse_below_frames` | Integer | No | Files with fewer total frames than this threshold (`1` to `2048`) use frame-count scaling instead of duration scaling. <br> Defaults to `32`. |
+| `threshold_adjust_mode` | String | No | Formula used by `threshold_adjust_value` to modify resolved output thresholds for videos and animated images. Options: `"headroom"`, `"additive"`, `"multiplier"`.<br>• `"headroom"`: Positive `k` raises thresholds toward `1.0` via `T + (1 - T) * k`; negative `k` scales toward `0.0` via `T * (1 + k)`.<br>• `"additive"`: Adds a flat offset `T + k` (clamped to `[0.0, 1.0]`).<br>• `"multiplier"`: Scales proportionally via `T * (1 + k)` (clamped to `[0.0, 1.0]`). <br> Defaults to `"headroom"`. |
+| `threshold_adjust_value` | Float | No | Adjustment parameter `k` (`-1.0` to `1.0`) applied to resolved thresholds for videos/animations. Positive values raise thresholds (stricter, reduces false positives); `0.0` disables adjustment. <br> Defaults to `0.0`. |
 | `frame_cache_mode` | String | No | Where extracted frames live during inference. Options: `"auto"`, `"memory"`, `"disk"`. <br>• `"auto"`: Streams in memory for 1 model; caches frames on disk for 2+ models.<br>• `"memory"`: Never writes extracted frames to disk (re-extracts per model).<br>• `"disk"`: Always saves extracted frames to disk until all models finish the file.<br>*(Note: When disk caching is active on multi-model runs, the first model receives original in-memory decoded frames while subsequent models read disk-cached frames.)* <br> Defaults to `"auto"`. |
 | `frame_cache_dir` | String / Null | No | Optional directory for temporary extracted frames when disk caching is active. If omitted or `null`, defaults to `frame_cache` beside `database.path`. <br> Defaults to `null`. |
 
@@ -269,6 +271,8 @@ density_k = 2.0
 min_frames = 4
 max_frames = 128
 sparse_below_frames = 32
+threshold_adjust_mode = "headroom"
+threshold_adjust_value = 0.0
 frame_cache_mode = "auto"
 # frame_cache_dir = "data/frame_cache"
 ```
