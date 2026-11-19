@@ -40,7 +40,7 @@ from hyvis.db import CacheDatabase, CachedVocab, FileStatus, quantize_floor
 from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c
 
 if TYPE_CHECKING:
-    from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig
+    from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig, VideoConfig
     from hyvis.db import Database
     from hyvis.hydrus import FileInfo
     from hyvis.progress import Progress
@@ -297,15 +297,19 @@ def _resolve_effective_thresholds_from_items(
     label_items: Iterable[tuple[str, str]],
     calibrated_values: Mapping[str, float] | None,
     output_filter: OutputFilterConfig,
+    *,
+    video_cfg: VideoConfig | None = None,
 ) -> tuple[dict[str, float], float]:
     """
     Resolve exact, unambiguous per-tag thresholds honoring precedence,
-    relative offsets, override_tlt, and category/tag-level fallbacks.
+    relative offsets, override_tlt, category/tag-level fallbacks, and optional
+    video/animation threshold adjustments.
     """
     use_tlt = output_filter.prefer_tag_level_thresholds and bool(calibrated_values)
     base_calibrated = dict(calibrated_values) if (use_tlt and calibrated_values) else {}
 
     rel_scale = 1.0 + output_filter.tag_level_threshold_relative_offset
+    apply_video_adj = video_cfg is not None and video_cfg.threshold_adjust_value != 0.0
 
     # Normalized user configuration lookups
     tag_overrides = {_norm(k): v for k, v in output_filter.tag_thresholds.items()}
@@ -336,15 +340,26 @@ def _resolve_effective_thresholds_from_items(
             else:
                 thresh = output_filter.default_threshold  # Global fallback
 
+        if apply_video_adj:
+            assert video_cfg is not None
+            thresh = video_cfg.adjust_threshold(thresh)
+
         final_map[raw_name] = thresh
         final_map[norm_name] = thresh
 
-    return final_map, output_filter.default_threshold
+    fallback = (
+        video_cfg.adjust_threshold(output_filter.default_threshold)
+        if apply_video_adj and video_cfg is not None
+        else output_filter.default_threshold
+    )
+    return final_map, fallback
 
 
 def resolve_effective_thresholds(
     session: vibe.ModelSession,
     output_filter: OutputFilterConfig,
+    *,
+    video_cfg: VideoConfig | None = None,
 ) -> tuple[dict[str, float], float]:
     """Resolve effective per-tag thresholds from an active vibe ModelSession."""
     label_items = (
@@ -359,17 +374,28 @@ def resolve_effective_thresholds(
         if (TagLevelThresholds.is_supported(session) and session.tagger.thresholds)
         else None
     )
-    return _resolve_effective_thresholds_from_items(label_items, calibrated, output_filter)
+    return _resolve_effective_thresholds_from_items(
+        label_items,
+        calibrated,
+        output_filter,
+        video_cfg=video_cfg,
+    )
 
 
 def build_transform_pipeline(
     session: vibe.ModelSession,
     output_filter: OutputFilterConfig,
+    *,
+    video_cfg: VideoConfig | None = None,
 ) -> TransformPipeline:
     """
     Build the TransformPipeline for one model session using vibe-result-transforms.
     """
-    threshold_map, global_fallback = resolve_effective_thresholds(session, output_filter)
+    threshold_map, global_fallback = resolve_effective_thresholds(
+        session,
+        output_filter,
+        video_cfg=video_cfg,
+    )
 
     transforms = [
         # Relative offsets were already applied during resolution to calibrated tags only.
@@ -386,6 +412,8 @@ def build_transform_pipeline(
 def build_transform_pipeline_from_vocab(
     vocab: CachedVocab,
     output_filter: OutputFilterConfig,
+    *,
+    video_cfg: VideoConfig | None = None,
 ) -> TransformPipeline:
     """
     Build the TransformPipeline directly from cache.db CachedVocab without loading model weights.
@@ -396,6 +424,7 @@ def build_transform_pipeline_from_vocab(
         label_items,
         calibrated,
         output_filter,
+        video_cfg=video_cfg,
     )
     return TransformPipeline(
         [
@@ -409,7 +438,6 @@ def build_transform_pipeline_from_vocab(
 
 
 # endregion
-
 
 # region Planning & Filter Fingerprinting
 
@@ -436,6 +464,11 @@ def compute_filter_hash(
     }
     if video_prep_hash:
         payload["video_prep_hash"] = video_prep_hash
+        if config.video.threshold_adjust_value != 0.0:
+            payload["video_threshold_adjust"] = {
+                "mode": config.video.threshold_adjust_mode,
+                "value": float(config.video.threshold_adjust_value),
+            }
 
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
@@ -752,6 +785,12 @@ async def infer_files(
         else:
             model_meta_by_id[model_cfg.model_id] = (vocab.variant_id, vocab.vocab_hash, plan.filter_hash)
             cpu_pipeline = build_transform_pipeline_from_vocab(vocab, eff_filter)
+            has_video_adjust = config.video.enabled and config.video.threshold_adjust_value != 0.0
+            video_cpu_pipeline = (
+                build_transform_pipeline_from_vocab(vocab, eff_filter, video_cfg=config.video)
+                if has_video_adjust and any(is_known_multiframe(fi) for fi in plan.refilter_files)
+                else cpu_pipeline
+            )
 
             fc_dir = resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None))
             pass_a_frame_cache = FrameDiskCache(fc_dir) if (not is_dry and fc_dir.is_dir()) else None
@@ -769,7 +808,8 @@ async def infer_files(
 
                     indices, scores, _ = cached_pred
                     raw_result = CacheDatabase.reconstruct_tag_result(vocab, indices, scores)
-                    filtered_result = cpu_pipeline(raw_result)
+                    active_pipeline = video_cpu_pipeline if is_known_multiframe(fi) else cpu_pipeline
+                    filtered_result = active_pipeline(raw_result)
                     tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                     prefixed_tags = [tr.prefixed_tag for tr in tag_records]
 
@@ -944,6 +984,12 @@ async def infer_files(
 
             progress.reset_start_time()
             pipeline = build_transform_pipeline(session, eff_filter)
+            has_video_adjust = config.video.enabled and config.video.threshold_adjust_value != 0.0
+            video_pipeline = (
+                build_transform_pipeline(session, eff_filter, video_cfg=config.video)
+                if has_video_adjust and multiframe_files
+                else pipeline
+            )
 
             catalog = session.tagger.catalog
             resolved_variant = session.variant or ""
@@ -991,7 +1037,8 @@ async def infer_files(
                         prep_hash=plan.video_prep_hash if is_known_multiframe(fi) else "",
                     )
 
-                filtered_result = pipeline(raw_result)
+                active_pipeline = video_pipeline if is_known_multiframe(fi) else pipeline
+                filtered_result = active_pipeline(raw_result)
                 tag_records = extract_tags(filtered_result, output_filter=compiled_filter)
                 prefixed_tags = [tr.prefixed_tag for tr in tag_records]
                 if not prefixed_tags:
