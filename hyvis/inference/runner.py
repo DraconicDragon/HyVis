@@ -1,57 +1,48 @@
-"""
-inference.py Inference orchestration.
-
-infer_files()             Run a model against files (via cache re-filtering and/or model inference),
-                          save raw results in disposable cache.db, stage multi-model outputs in hyvis.db,
-                          and atomically enqueue tags into push_queue.
-                          Does NOT require Hydrus to be reachable during inference.
-
-FileSource abstraction
-----------------------
-Currently files are always local paths provided by Hydrus at startup.
-The FileSource protocol exists so that a future remote implementation
-(streaming file bytes from a remote Hydrus instance on demand) can be
-dropped in without touching the inference loop.  See FileSource below.
-"""
-
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import queue
 import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import vibe
 from vibe import InferenceCancelled, TagResult
 from vibe_result_transforms import (
-    CleanTags,
     TagLevelThresholds,
-    TransformPipeline,
 )
 
-from hyvis.db import CacheDatabase, CachedVocab, FileStatus, quantize_floor
+from hyvis.db import CacheDatabase, FileStatus
 from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c
 
 if TYPE_CHECKING:
-    from hyvis.config import AppConfig, ModelConfig, OutputFilterConfig, VideoConfig
+    from hyvis.config import AppConfig, ModelConfig
     from hyvis.db import Database
     from hyvis.hydrus import FileInfo
     from hyvis.progress import Progress
 
+from hyvis.inference.cancel import start_cancel_listener
+from hyvis.inference.planner import (
+    ModelPassPlan,
+    compute_filter_hash,
+    is_known_multiframe,
+    plan_model_pass,
+)
+from hyvis.tag_filter import (
+    build_transform_pipeline,
+    build_transform_pipeline_from_vocab,
+    compile_output_filter,
+    extract_tags,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Stop the run after this many consecutive errors (something is clearly wrong).
 MAX_CONSECUTIVE_ERRORS = 10
-
-_CLEANER = CleanTags()
 
 
 # region FileSource protocol
@@ -94,519 +85,6 @@ class LocalFileSource:
 # @dataclass
 # class RemoteFileSource:
 #     """Placeholder"""
-
-# endregion
-
-
-# region Tag extraction
-
-
-@dataclass(slots=True)
-class TagRecord:
-    """One tag destined for Hydrus, with its provenance."""
-
-    category: str
-    raw_tag: str
-    prefixed_tag: str
-    score: float
-
-
-def _norm(tag: str) -> str:
-    """Normalize tag for flexible space/underscore matching."""
-    return tag.strip().replace("_", " ")
-
-
-@dataclass(slots=True, frozen=True)
-class CompiledOutputFilter:
-    """Pre-compiled normalized lookup sets for fast tag extraction."""
-
-    filter_cfg: OutputFilterConfig
-    include_set: set[str]
-    exclude_set: set[str]
-    subset_managed_tags: set[str]
-    prefix_overrides: dict[str, str]
-    category_prefixes: dict[str, str]
-    tag_replacements: dict[str, str]
-    compiled_subsets: list[tuple[set[str], int]]
-
-
-def compile_output_filter(output_filter: OutputFilterConfig) -> CompiledOutputFilter:
-    """Compile an OutputFilterConfig once so sets/dicts aren't rebuilt on every image."""
-    return CompiledOutputFilter(
-        filter_cfg=output_filter,
-        include_set={_norm(t) for t in output_filter.include_tags},
-        exclude_set={_norm(t) for t in output_filter.exclude_tags},
-        subset_managed_tags={_norm(t) for group in output_filter.max_tags_per_subset for t in group.tags},
-        prefix_overrides={_norm(t): pfx for t, pfx in output_filter.tag_prefix_overrides.items()},
-        category_prefixes=dict(output_filter.category_tag_prefix_mapping),
-        tag_replacements={_norm(k): v for k, v in output_filter.tag_replacements.items()},
-        compiled_subsets=[({_norm(t) for t in g.tags}, g.limit) for g in output_filter.max_tags_per_subset],
-    )
-
-
-def extract_tags(
-    result_input: TagResult | dict[str, Any],
-    *,
-    output_filter: OutputFilterConfig | CompiledOutputFilter,
-) -> list[TagRecord]:
-    """
-    Convert a TagResult or dictionary representation into TagRecord objects.
-
-    Follows a strict Two-Stage architecture:
-      Stage 1 (Decision Engine): Evaluates exclusions, inclusions, categories,
-              subsets, and category limits using the model's native vocabulary.
-      Stage 2 (Presentation Layer): Cleans underscores to spaces, applies tag
-              replacements, deduplicates by max score, and applies namespace prefixes.
-    """
-    # Accept either raw config or pre-compiled filter
-    if isinstance(output_filter, CompiledOutputFilter):
-        compiled = output_filter
-        filter_cfg = output_filter.filter_cfg
-    else:
-        compiled = compile_output_filter(output_filter)
-        filter_cfg = output_filter
-
-    # Normalize input into {category: {tag: score}} mapping
-    tags_by_category: dict[str, dict[str, float]] = {}
-    if isinstance(result_input, TagResult):
-        for cat_name, entries in result_input.categories.items():
-            tags_by_category[cat_name] = {e.tag: float(e.score) for e in entries}
-    elif isinstance(result_input, dict):
-        raw_cats = result_input.get("categories") or result_input.get("tags") or {}
-        if isinstance(raw_cats, dict):
-            for cat_name, entries in raw_cats.items():
-                if isinstance(entries, list):
-                    tags_by_category[cat_name] = {
-                        e["tag"]: float(e.get("score", 0.0)) for e in entries if isinstance(e, dict) and "tag" in e
-                    }
-                elif isinstance(entries, dict):
-                    tags_by_category[cat_name] = {t: float(s) for t, s in entries.items()}
-
-    categories = filter_cfg.allowed_categories
-    include_set = compiled.include_set
-    exclude_set = compiled.exclude_set
-    subset_managed_tags = compiled.subset_managed_tags
-
-    prefix_overrides = compiled.prefix_overrides
-    category_prefixes = compiled.category_prefixes
-    tag_replacements = compiled.tag_replacements
-
-    # region Stage 1
-    # Decision engine
-
-    standard_records_by_category: dict[str, list[TagRecord]] = {}
-    subset_records: list[TagRecord] = []
-
-    for category, tag_scores in tags_by_category.items():
-        standard_records_by_category[category] = []
-
-        for raw_tag, score in tag_scores.items():
-            norm_tag = _norm(raw_tag)
-
-            # 1. Exclusions: Drop if explicitly excluded
-            if norm_tag in exclude_set:
-                continue
-
-            # 2. Inclusions: Always keep if explicitly included
-            is_allowed = norm_tag in include_set
-
-            # 3. Category Whitelist: If not explicitly included, check category allowance
-            if not is_allowed and (categories is not None and category not in categories):
-                continue
-
-            record = TagRecord(
-                category=category,
-                raw_tag=raw_tag,
-                prefixed_tag=raw_tag,  # Formatted in Stage 2
-                score=float(score),
-            )
-
-            # Isolate subset-managed tags from standard category limits
-            if norm_tag in subset_managed_tags:
-                subset_records.append(record)
-            else:
-                standard_records_by_category[category].append(record)
-
-    surviving_records: list[TagRecord] = []
-
-    # apply category limits
-    for category, cat_records in standard_records_by_category.items():
-        limit = filter_cfg.max_tags_per_category.get(category)
-        if limit is not None:
-            # sort descending by score, keep top-N
-            cat_records.sort(key=lambda r: r.score, reverse=True)
-            cat_records = cat_records[:limit]
-        surviving_records.extend(cat_records)
-
-    # apply subset limits to isolated tags using pre-compiled tag sets
-    for group_tags_set, limit in compiled.compiled_subsets:
-        matching_subset_records = [r for r in subset_records if _norm(r.raw_tag) in group_tags_set]
-
-        if len(matching_subset_records) > limit:
-            matching_subset_records.sort(key=lambda r: r.score, reverse=True)
-            matching_subset_records = matching_subset_records[:limit]
-
-        surviving_records.extend(matching_subset_records)
-
-        # Purge ALL records belonging to this subset group so dropped ones cannot leak into fallback
-        subset_records = [r for r in subset_records if _norm(r.raw_tag) not in group_tags_set]
-
-    # Add any remaining subset records that were not covered by a defined group
-    surviving_records.extend(subset_records)
-
-    # region Stage 2
-    # Presentation layer
-
-    formatted_map: dict[str, TagRecord] = {}
-
-    for r in surviving_records:
-        norm_raw = _norm(r.raw_tag)
-
-        # 1. Clean underscores to spaces while preserving kaomojis
-        cleaned_tag = _CLEANER.clean_text(r.raw_tag)
-        norm_cleaned = _norm(cleaned_tag)
-
-        # 2. Tag replacement (checks both normalized raw and cleaned versions)
-        replaced_tag = tag_replacements.get(norm_cleaned, tag_replacements.get(norm_raw, cleaned_tag))
-
-        # 3. Namespace prefixing (individual overrides take precedence over category prefixes)
-        prefix = prefix_overrides.get(
-            norm_raw, prefix_overrides.get(norm_cleaned, category_prefixes.get(r.category, ""))
-        )
-        prefixed_tag = f"{prefix}{replaced_tag}"
-
-        # 4. Merge duplicates by taking the maximum confidence score
-        if prefixed_tag not in formatted_map or r.score > formatted_map[prefixed_tag].score:
-            formatted_map[prefixed_tag] = TagRecord(
-                category=r.category,
-                raw_tag=replaced_tag,
-                prefixed_tag=prefixed_tag,
-                score=r.score,
-            )
-
-    return list(formatted_map.values())
-
-
-# endregion
-
-
-# region Processor chain
-
-
-def _resolve_effective_thresholds_from_items(
-    label_items: Iterable[tuple[str, str]],
-    calibrated_values: Mapping[str, float] | None,
-    output_filter: OutputFilterConfig,
-    *,
-    video_cfg: VideoConfig | None = None,
-) -> tuple[dict[str, float], float]:
-    """
-    Resolve exact, unambiguous per-tag thresholds honoring precedence,
-    relative offsets, override_tlt, category/tag-level fallbacks, and optional
-    video/animation threshold adjustments.
-    """
-    use_tlt = output_filter.prefer_tag_level_thresholds and bool(calibrated_values)
-    base_calibrated = dict(calibrated_values) if (use_tlt and calibrated_values) else {}
-
-    rel_scale = 1.0 + output_filter.tag_level_threshold_relative_offset
-    apply_video_adj = video_cfg is not None and video_cfg.threshold_adjust_value != 0.0
-
-    # Normalized user configuration lookups
-    tag_overrides = {_norm(k): v for k, v in output_filter.tag_thresholds.items()}
-    cat_overrides = output_filter.category_thresholds
-
-    final_map: dict[str, float] = {}
-
-    for raw_name, cat_name in label_items:
-        norm_name = _norm(raw_name)
-        tag_cfg = tag_overrides.get(norm_name)
-        cat_cfg = cat_overrides.get(cat_name)
-
-        # Case A: Tag has a model-calibrated threshold
-        if raw_name in base_calibrated:
-            if tag_cfg and tag_cfg.override_tlt:
-                thresh = tag_cfg.threshold  # User tag override (unscaled)
-            elif cat_cfg and cat_cfg.override_tlt:
-                thresh = cat_cfg.threshold  # User category override (unscaled)
-            else:
-                thresh = base_calibrated[raw_name] * rel_scale  # Calibrated model value (scaled)
-
-        # Case B: Tag has NO calibrated threshold (fallback path)
-        else:
-            if tag_cfg:
-                thresh = tag_cfg.threshold  # Tag-specific fallback
-            elif cat_cfg:
-                thresh = cat_cfg.threshold  # Category-specific fallback
-            else:
-                thresh = output_filter.default_threshold  # Global fallback
-
-        if apply_video_adj:
-            assert video_cfg is not None
-            thresh = video_cfg.adjust_threshold(thresh)
-
-        final_map[raw_name] = thresh
-        final_map[norm_name] = thresh
-
-    fallback = (
-        video_cfg.adjust_threshold(output_filter.default_threshold)
-        if apply_video_adj and video_cfg is not None
-        else output_filter.default_threshold
-    )
-    return final_map, fallback
-
-
-def resolve_effective_thresholds(
-    session: vibe.ModelSession,
-    output_filter: OutputFilterConfig,
-    *,
-    video_cfg: VideoConfig | None = None,
-) -> tuple[dict[str, float], float]:
-    """Resolve effective per-tag thresholds from an active vibe ModelSession."""
-    label_items = (
-        (
-            info.name,
-            info.category.value if hasattr(info.category, "value") else str(info.category),
-        )
-        for info in (session.tagger.catalog.labels if session.tagger.catalog else ())
-    )
-    calibrated = (
-        session.tagger.thresholds.values
-        if (TagLevelThresholds.is_supported(session) and session.tagger.thresholds)
-        else None
-    )
-    return _resolve_effective_thresholds_from_items(
-        label_items,
-        calibrated,
-        output_filter,
-        video_cfg=video_cfg,
-    )
-
-
-def build_transform_pipeline(
-    session: vibe.ModelSession,
-    output_filter: OutputFilterConfig,
-    *,
-    video_cfg: VideoConfig | None = None,
-) -> TransformPipeline:
-    """
-    Build the TransformPipeline for one model session using vibe-result-transforms.
-    """
-    threshold_map, global_fallback = resolve_effective_thresholds(
-        session,
-        output_filter,
-        video_cfg=video_cfg,
-    )
-
-    transforms = [
-        # Relative offsets were already applied during resolution to calibrated tags only.
-        # Passing relative_offset=0.0 prevents double-scaling or scaling explicit user values.
-        TagLevelThresholds(
-            threshold_map=threshold_map,
-            fallback=global_fallback,
-        ),
-        CleanTags(),
-    ]
-    return TransformPipeline(transforms)
-
-
-def build_transform_pipeline_from_vocab(
-    vocab: CachedVocab,
-    output_filter: OutputFilterConfig,
-    *,
-    video_cfg: VideoConfig | None = None,
-) -> TransformPipeline:
-    """
-    Build the TransformPipeline directly from cache.db CachedVocab without loading model weights.
-    """
-    label_items = ((vocab.idx_to_tag[idx], vocab.idx_to_category[idx]) for idx in vocab.idx_to_tag)
-    calibrated = vocab.calibrated_thresholds or None
-    threshold_map, global_fallback = _resolve_effective_thresholds_from_items(
-        label_items,
-        calibrated,
-        output_filter,
-        video_cfg=video_cfg,
-    )
-    return TransformPipeline(
-        [
-            TagLevelThresholds(
-                threshold_map=threshold_map,
-                fallback=global_fallback,
-            ),
-            CleanTags(),
-        ]
-    )
-
-
-# endregion
-
-# region Planning & Filter Fingerprinting
-
-
-def compute_filter_hash(
-    config: AppConfig,
-    model_cfg: ModelConfig,
-    *,
-    video_prep_hash: str = "",
-) -> str:
-    """
-    Compute a deterministic 16-char SHA-256 fingerprint of all settings that affect
-    tag output or destination routing for `model_cfg`.
-
-    When `video_prep_hash` is non-empty (videos / animated images), sampling parameters
-    are folded in so changing video density invalidates multi-frame files without
-    touching static image completion records.
-    """
-    payload: dict[str, Any] = {
-        "output_filter": config.resolved_output_filter(model_cfg).model_dump(mode="json"),
-        "output_tag_services": config.resolved_output_tag_services(model_cfg),
-        "add_tags": [a.model_dump(mode="json") for a in config.hydrus.add_tags],
-        "remove_tags": [r.model_dump(mode="json") for r in config.hydrus.remove_tags],
-    }
-    if video_prep_hash:
-        payload["video_prep_hash"] = video_prep_hash
-        if config.video.threshold_adjust_value != 0.0:
-            payload["video_threshold_adjust"] = {
-                "mode": config.video.threshold_adjust_mode,
-                "value": float(config.video.threshold_adjust_value),
-            }
-
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:16]
-
-
-def is_known_multiframe(fi: FileInfo) -> bool:
-    """Return True if Hydrus metadata already identifies `fi` as a video or multi-frame animation."""
-    from hyvis.config import is_video_mime
-
-    if is_video_mime(fi.mime):
-        return True
-    return fi.num_frames is not None and fi.num_frames > 1
-
-
-def resolve_model_variant_id(model_cfg: ModelConfig) -> str:
-    """Dry-run variant resolver returning the exact variant_id vibe will select without loading weights."""
-    try:
-        from vibe.registry import model_registry
-
-        model_registry.ensure_discovered()
-        plugin_cls = model_registry.get(model_cfg.model_id)
-        resolved = vibe.resolve_variant(
-            plugin_cls,
-            backend=model_cfg.backend,
-            variant=model_cfg.variant_id,
-            device=model_cfg.device,
-        )
-        return resolved.variant_id or ""
-    except Exception:
-        return model_cfg.variant_id or ""
-
-
-@dataclass
-class ModelPassPlan:
-    """Pre-computed routing buckets for one model pass."""
-
-    model_cfg: ModelConfig
-    filter_hash: str
-    video_filter_hash: str
-    video_prep_hash: str
-    resolved_variant_id: str
-    cache_model_row: int | None
-    skip_hashes: set[str]
-    refilter_files: list[FileInfo]
-    files_to_infer: list[FileInfo]
-
-    def effective_filter_hash(self, fi: FileInfo) -> str:
-        """Return the filter_hash matching `fi` (static vs. multi-frame)."""
-        return self.video_filter_hash if is_known_multiframe(fi) else self.filter_hash
-
-
-def plan_model_pass(
-    model_cfg: ModelConfig,
-    file_infos: list[FileInfo],
-    *,
-    config: AppConfig,
-    db: Database,
-    cache_db: CacheDatabase,
-    force: bool,
-    is_resume: bool = False,
-) -> ModelPassPlan:
-    """
-    Classify all target files into:
-      - skip_hashes: Already completed with identical filter_hash (or staged on resume).
-      - refilter_files: Needs filtering, raw scores available in cache.db at deep enough floor_q (CPU).
-      - files_to_infer: Needs model inference (not in cache.db, too shallow floor_q, or --force).
-    """
-    filter_hash = compute_filter_hash(config, model_cfg)
-    video_prep_hash = config.video.prep_hash()
-    video_filter_hash = compute_filter_hash(config, model_cfg, video_prep_hash=video_prep_hash)
-    resolved_variant = resolve_model_variant_id(model_cfg)
-
-    staged_hashes = db.get_staged_hashes_for_model(model_cfg.model_id) if is_resume else set()
-    logged = db.get_inference_filter_hashes([fi.file_hash for fi in file_infos], model_cfg.model_id)
-
-    skip_hashes: set[str] = set()
-    need_work: list[FileInfo] = []
-
-    for fi in file_infos:
-        expected_fh = video_filter_hash if is_known_multiframe(fi) else filter_hash
-        if fi.file_hash in staged_hashes or (not force and logged.get(fi.file_hash) == expected_fh):
-            skip_hashes.add(fi.file_hash)
-        else:
-            need_work.append(fi)
-
-    if force or not need_work:
-        return ModelPassPlan(
-            model_cfg=model_cfg,
-            filter_hash=filter_hash,
-            video_filter_hash=video_filter_hash,
-            video_prep_hash=video_prep_hash,
-            resolved_variant_id=resolved_variant,
-            cache_model_row=None,
-            skip_hashes=skip_hashes,
-            refilter_files=[],
-            files_to_infer=need_work,
-        )
-
-    # Check cache.db for CPU re-filter candidates
-    candidate_rows = cache_db.find_model_rows(model_cfg.model_id, resolved_variant)
-    if not candidate_rows:
-        return ModelPassPlan(
-            model_cfg=model_cfg,
-            filter_hash=filter_hash,
-            video_filter_hash=video_filter_hash,
-            video_prep_hash=video_prep_hash,
-            resolved_variant_id=resolved_variant,
-            cache_model_row=None,
-            skip_hashes=skip_hashes,
-            refilter_files=[],
-            files_to_infer=need_work,
-        )
-
-    target_model_row = candidate_rows[0]
-    max_floor_q = quantize_floor(config.database.min_cache_score)
-    prep_hashes_by_file = {fi.file_hash: (video_prep_hash if is_known_multiframe(fi) else "") for fi in need_work}
-    cached_ok = cache_db.filter_cached_hashes(
-        target_model_row,
-        [fi.file_hash for fi in need_work],
-        max_floor_q=max_floor_q,
-        prep_hashes_by_file=prep_hashes_by_file,
-    )
-
-    refilter_files = [fi for fi in need_work if fi.file_hash in cached_ok]
-    files_to_infer = [fi for fi in need_work if fi.file_hash not in cached_ok]
-
-    return ModelPassPlan(
-        model_cfg=model_cfg,
-        filter_hash=filter_hash,
-        video_filter_hash=video_filter_hash,
-        video_prep_hash=video_prep_hash,
-        resolved_variant_id=resolved_variant,
-        cache_model_row=target_model_row if refilter_files else None,
-        skip_hashes=skip_hashes,
-        refilter_files=refilter_files,
-        files_to_infer=files_to_infer,
-    )
-
 
 # endregion
 
@@ -1013,7 +491,7 @@ async def infer_files(
                     calibrated_thresholds=calibrated,
                 )
 
-            listener, stop_cancel = _start_cancel_listener(session, model_cfg.model_id)
+            listener, stop_cancel = start_cancel_listener(session, model_cfg.model_id)
 
             def _commit_inferred_result(fi: FileInfo, raw_result: TagResult) -> int:
                 """Persist raw scores, filter tags, and stage/commit file completion."""
@@ -1365,86 +843,6 @@ def _handle_infer_error(
     except Exception as db_exc:
         logger.error("Failed to update status for %s in DB: %s", file_hash[:8], db_exc)
     stats.errors += 1
-
-
-def _start_cancel_listener(
-    session: Any,
-    model_id: str,
-) -> tuple[threading.Thread | None, threading.Event]:
-    stop_event = threading.Event()
-
-    if not sys.stdin.isatty():
-        return None, stop_event
-
-    # Use platform-appropriate method
-    if sys.platform == "win32":
-        return _start_cancel_listener_windows(session, model_id, stop_event)
-    else:
-        return _start_cancel_listener_unix(session, model_id, stop_event)
-
-
-def _start_cancel_listener_unix(
-    session: Any,
-    model_id: str,
-    stop_event: threading.Event,
-) -> tuple[threading.Thread | None, threading.Event]:
-    import termios
-    import tty
-
-    def _listen() -> None:
-        fd = sys.stdin.fileno()
-        try:
-            old_attrs = termios.tcgetattr(fd)
-        except Exception:
-            return
-
-        try:
-            tty.setcbreak(fd)
-            while not stop_event.is_set():
-                char = sys.stdin.read(1)
-                if stop_event.is_set():
-                    break
-                if char in ("q", "Q"):
-                    logger.warning("Cancel requested for model %s ('q' key)", model_id)
-                    session.cancel_current_inference()
-                    break
-        except Exception:
-            logger.debug("Cancel listener error for model %s", model_id, exc_info=True)
-        finally:
-            try:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-            except Exception:
-                pass
-
-    thread = threading.Thread(target=_listen, name="cancel-key-listener", daemon=True)
-    thread.start()
-    return thread, stop_event
-
-
-def _start_cancel_listener_windows(
-    session: Any,
-    model_id: str,
-    stop_event: threading.Event,
-) -> tuple[threading.Thread | None, threading.Event]:
-    import msvcrt
-
-    def _listen() -> None:
-        try:
-            while not stop_event.is_set():
-                if msvcrt.kbhit():  # ty:ignore[unresolved-attribute]
-                    char = msvcrt.getch().decode("utf-8", errors="ignore")  # ty:ignore[unresolved-attribute]
-                    if char in ("q", "Q"):
-                        logger.warning("Cancel requested for model %s ('q' key)", model_id)
-                        session.cancel_current_inference()
-                        break
-                # Small sleep to avoid busy-waiting
-                stop_event.wait(0.1)
-        except Exception:
-            logger.debug("Cancel listener error for model %s", model_id, exc_info=True)
-
-    thread = threading.Thread(target=_listen, name="cancel-key-listener", daemon=True)
-    thread.start()
-    return thread, stop_event
 
 
 # endregion

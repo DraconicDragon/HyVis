@@ -6,7 +6,7 @@ Verifies category whitelisting, replacements, prefixes, and subset limits.
 from __future__ import annotations
 
 from hyvis.config import OutputFilterConfig, TagSubsetConfig
-from hyvis.inference import extract_tags
+from hyvis.tag_filter import extract_tags
 
 # region Filter Pipeline Tests
 
