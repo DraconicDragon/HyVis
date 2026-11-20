@@ -724,6 +724,11 @@ async def infer_files(
                         _drain_decode_errors()
 
                         for item in chunk:
+                            if not isinstance(item.input_ref, tuple):
+                                raise TypeError(
+                                    f"Pipeline desync: expected (file_hash, frame_idx, expected_n) tuple, got {type(item.input_ref).__name__}"
+                                )
+
                             file_hash, _frame_idx, expected_n = item.input_ref
                             if active_hash is not None and file_hash != active_hash:
                                 _flush_active_video()
