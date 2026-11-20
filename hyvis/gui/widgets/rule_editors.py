@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from hyvis.gui.widgets.entity_editors import HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from hyvis.gui.base_widgets import SemanticLabel
 from hyvis.gui.theme import AutoRepolishMixin, ButtonVariant, CardTheme, TextRole, ThemeProperty, WidgetState
+from hyvis.gui.widgets.entity_editors import HYDRUS_BUILTIN_ALL_KNOWN_TAGS_KEY
 from hyvis.gui.widgets.list_editors import StringListEditor
 
 # region Tag Subset List Editor (Joint Subset Limits)
