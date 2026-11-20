@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 import hyvis.config as config_mod
 from hyvis.config import StrictBaseModel, VideoConfig, field_meta
-from hyvis.gui.widgets import bind_field_metadata, setup_field_tooltip, validate_field_ui_metadata
+from hyvis.gui.schema_binding import bind_field_metadata, setup_field_tooltip, validate_field_ui_metadata
 
 
 def test_all_config_models_have_valid_ui_metadata() -> None:
