@@ -13,12 +13,66 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QPushButton,
     QSpinBox,
+    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from hyvis.gui.base_widgets import AutoResizingTableWidget, FloatSpinBox, SuggestionComboBox
+
+
+def parse_suggestions(
+    suggestions: Sequence[str] | Mapping[str, Sequence[str]],
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Parse raw suggestions into a sorted list of unique items and a provenance map."""
+    if isinstance(suggestions, Mapping):
+        s_map = cast(Mapping[str, Sequence[str]], suggestions)
+        return sorted(s_map.keys()), {k: list(v) for k, v in s_map.items()}
+    return sorted(dict.fromkeys(suggestions)), {}
+
+
+def populate_suggestion_combo(
+    combo: QComboBox,
+    suggestions: Sequence[str],
+    provenance: Mapping[str, Sequence[str]],
+    *,
+    current_val: str = "",
+    used_items: set[str] | None = None,
+) -> None:
+    """Populate a suggestion combobox, excluding used items while preserving provenance tooltips."""
+    combo.blockSignals(True)
+    combo.clear()
+
+    used = used_items or set()
+    available = [c for c in suggestions if c not in used or c == current_val]
+
+    for item in available:
+        combo.addItem(item)
+        models = provenance.get(item, [])
+        if models:
+            combo.setItemData(
+                combo.count() - 1,
+                f"From: {', '.join(models)}",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+
+    combo.setCurrentText(current_val)
+    combo.blockSignals(False)
+
+
+def remove_selected_table_rows(table: QTableWidget) -> bool:
+    """Remove currently selected rows in reverse index order. Returns True if any rows were deleted."""
+    selected_rows = sorted({idx.row() for idx in table.selectedIndexes()}, reverse=True)
+    if not selected_rows:
+        return False
+
+    table.blockSignals(True)
+    for row in selected_rows:
+        table.removeRow(row)
+    table.blockSignals(False)
+    return True
+
 
 # region Key-Value Mapping Editor
 
@@ -42,7 +96,7 @@ class KeyValueEditor(QWidget):
         self._key_header = key_header
         self._val_header = val_header
         self._use_combobox_for_key = use_combobox_for_key
-        self._key_suggestions: list[str] = []
+        self._suggestions: list[str] = []
         self._provenance: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
@@ -86,22 +140,13 @@ class KeyValueEditor(QWidget):
         return used
 
     def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
-        combo.blockSignals(True)
-        combo.clear()
-        used = self._get_used_keys(exclude_row=row_idx)
-        available = [c for c in self._key_suggestions if c not in used or c == current_val]
-
-        for cat in available:
-            combo.addItem(cat)
-            models = self._provenance.get(cat, [])
-            if models:
-                combo.setItemData(
-                    combo.count() - 1,
-                    f"From: {', '.join(models)}",
-                    Qt.ItemDataRole.ToolTipRole,
-                )
-        combo.setCurrentText(current_val)
-        combo.blockSignals(False)
+        populate_suggestion_combo(
+            combo,
+            self._suggestions,
+            self._provenance,
+            current_val=current_val,
+            used_items=self._get_used_keys(exclude_row=row_idx),
+        )
 
     def _refresh_all_combos(self) -> None:
         if not self._use_combobox_for_key:
@@ -111,15 +156,11 @@ class KeyValueEditor(QWidget):
             if isinstance(combo, QComboBox):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
-    def set_key_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
-        if isinstance(suggestions, Mapping):
-            s_map = cast(Mapping[str, Sequence[str]], suggestions)
-            self._key_suggestions = sorted(s_map.keys())
-            self._provenance = {k: list(v) for k, v in s_map.items()}
-        else:
-            self._key_suggestions = sorted(dict.fromkeys(suggestions))
-            self._provenance = {}
+    def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        self._suggestions, self._provenance = parse_suggestions(suggestions)
         self._refresh_all_combos()
+
+    set_key_suggestions = set_suggestions
 
     def get_mapping(self) -> dict[str, str]:
         mapping: dict[str, str] = {}
@@ -171,7 +212,7 @@ class KeyValueEditor(QWidget):
 
         if self._use_combobox_for_key:
             used = self._get_used_keys()
-            next_cat = next((c for c in self._key_suggestions if c not in used), "")
+            next_cat = next((c for c in self._suggestions if c not in used), "")
             combo = SuggestionComboBox(self)
             combo.setEditable(True)
             self._populate_combo_items(combo, next_cat, row)
@@ -193,16 +234,9 @@ class KeyValueEditor(QWidget):
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
-        if not selected_rows:
-            return
-
-        self.table.blockSignals(True)
-        for row in selected_rows:
-            self.table.removeRow(row)
-        self.table.blockSignals(False)
-        self._refresh_all_combos()
-        self.changed.emit()
+        if remove_selected_table_rows(self.table):
+            self._refresh_all_combos()
+            self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         del item
@@ -233,7 +267,7 @@ class ThresholdTableEditor(QWidget):
         super().__init__(parent)
         self._target_header = target_header
         self._use_combobox_for_target = use_combobox_for_target
-        self._target_suggestions: list[str] = []
+        self._suggestions: list[str] = []
         self._provenance: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
@@ -263,7 +297,7 @@ class ThresholdTableEditor(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-    def _get_used_targets(self, exclude_row: int = -1) -> set[str]:
+    def _get_used_keys(self, exclude_row: int = -1) -> set[str]:
         used = set()
         for r in range(self.table.rowCount()):
             if r == exclude_row:
@@ -279,22 +313,13 @@ class ThresholdTableEditor(QWidget):
         return used
 
     def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
-        combo.blockSignals(True)
-        combo.clear()
-        used = self._get_used_targets(exclude_row=row_idx)
-        available = [c for c in self._target_suggestions if c not in used or c == current_val]
-
-        for cat in available:
-            combo.addItem(cat)
-            models = self._provenance.get(cat, [])
-            if models:
-                combo.setItemData(
-                    combo.count() - 1,
-                    f"From: {', '.join(models)}",
-                    Qt.ItemDataRole.ToolTipRole,
-                )
-        combo.setCurrentText(current_val)
-        combo.blockSignals(False)
+        populate_suggestion_combo(
+            combo,
+            self._suggestions,
+            self._provenance,
+            current_val=current_val,
+            used_items=self._get_used_keys(exclude_row=row_idx),
+        )
 
     def _refresh_all_combos(self) -> None:
         if not self._use_combobox_for_target:
@@ -304,15 +329,11 @@ class ThresholdTableEditor(QWidget):
             if isinstance(combo, QComboBox):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
-    def set_target_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
-        if isinstance(suggestions, Mapping):
-            s_map = cast(Mapping[str, Sequence[str]], suggestions)
-            self._target_suggestions = sorted(s_map.keys())
-            self._provenance = {k: list(v) for k, v in s_map.items()}
-        else:
-            self._target_suggestions = sorted(dict.fromkeys(suggestions))
-            self._provenance = {}
+    def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
+        self._suggestions, self._provenance = parse_suggestions(suggestions)
         self._refresh_all_combos()
+
+    set_target_suggestions = set_suggestions
 
     def get_thresholds(self) -> dict[str, dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
@@ -394,8 +415,8 @@ class ThresholdTableEditor(QWidget):
         self.table.insertRow(row)
 
         if self._use_combobox_for_target:
-            used = self._get_used_targets()
-            next_cat = next((c for c in self._target_suggestions if c not in used), "")
+            used = self._get_used_keys()
+            next_cat = next((c for c in self._suggestions if c not in used), "")
             combo = SuggestionComboBox(self)
             combo.setEditable(True)
             self._populate_combo_items(combo, next_cat, row)
@@ -433,16 +454,9 @@ class ThresholdTableEditor(QWidget):
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
-        if not selected_rows:
-            return
-
-        self.table.blockSignals(True)
-        for row in selected_rows:
-            self.table.removeRow(row)
-        self.table.blockSignals(False)
-        self._refresh_all_combos()
-        self.changed.emit()
+        if remove_selected_table_rows(self.table):
+            self._refresh_all_combos()
+            self.changed.emit()
 
     def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
         del item
@@ -491,7 +505,7 @@ class CategoryLimitEditor(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-    def _get_used_categories(self, exclude_row: int = -1) -> set[str]:
+    def _get_used_keys(self, exclude_row: int = -1) -> set[str]:
         used = set()
         for r in range(self.table.rowCount()):
             if r == exclude_row:
@@ -502,22 +516,13 @@ class CategoryLimitEditor(QWidget):
         return used
 
     def _populate_combo_items(self, combo: QComboBox, current_val: str, row_idx: int) -> None:
-        combo.blockSignals(True)
-        combo.clear()
-        used = self._get_used_categories(exclude_row=row_idx)
-        available = [c for c in self._suggestions if c not in used or c == current_val]
-
-        for cat in available:
-            combo.addItem(cat)
-            models = self._provenance.get(cat, [])
-            if models:
-                combo.setItemData(
-                    combo.count() - 1,
-                    f"From: {', '.join(models)}",
-                    Qt.ItemDataRole.ToolTipRole,
-                )
-        combo.setCurrentText(current_val)
-        combo.blockSignals(False)
+        populate_suggestion_combo(
+            combo,
+            self._suggestions,
+            self._provenance,
+            current_val=current_val,
+            used_items=self._get_used_keys(exclude_row=row_idx),
+        )
 
     def _refresh_all_combos(self) -> None:
         for r in range(self.table.rowCount()):
@@ -526,13 +531,7 @@ class CategoryLimitEditor(QWidget):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
     def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
-        if isinstance(suggestions, Mapping):
-            s_map = cast(Mapping[str, Sequence[str]], suggestions)
-            self._suggestions = sorted(s_map.keys())
-            self._provenance = {k: list(v) for k, v in s_map.items()}
-        else:
-            self._suggestions = sorted(dict.fromkeys(suggestions))
-            self._provenance = {}
+        self._suggestions, self._provenance = parse_suggestions(suggestions)
         self._refresh_all_combos()
 
     def get_limits(self) -> dict[str, int]:
@@ -577,7 +576,7 @@ class CategoryLimitEditor(QWidget):
     def _on_add_row(self) -> None:
         self.table.blockSignals(True)
         row = self.table.rowCount()
-        used = self._get_used_categories()
+        used = self._get_used_keys()
         next_cat = next((c for c in self._suggestions if c not in used), "")
         self._insert_row(row, next_cat, 10)
         self.table.blockSignals(False)
@@ -585,15 +584,9 @@ class CategoryLimitEditor(QWidget):
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
-        if not selected_rows:
-            return
-        self.table.blockSignals(True)
-        for row in selected_rows:
-            self.table.removeRow(row)
-        self.table.blockSignals(False)
-        self._refresh_all_combos()
-        self.changed.emit()
+        if remove_selected_table_rows(self.table):
+            self._refresh_all_combos()
+            self.changed.emit()
 
 
 # endregion

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -17,6 +16,15 @@ from PySide6.QtWidgets import (
 )
 
 from hyvis.gui.base_widgets import SuggestionComboBox
+from hyvis.gui.widgets.table_editors import parse_suggestions
+
+
+def adjust_list_widget_height(list_widget: QListWidget, *, min_h: int = 68, max_h: int = 160) -> None:
+    """Dynamically expand list widget height to fit items up to max_h."""
+    count = list_widget.count()
+    target = max(min_h, min(min_h + max(0, count - 2) * 22, max_h))
+    list_widget.setFixedHeight(target)
+
 
 # region String List Editor
 
@@ -67,10 +75,7 @@ class StringListEditor(QWidget):
         layout.addLayout(input_layout)
 
     def _adjust_height(self) -> None:
-        """Starts compact (2-3 items) and expands dynamically up to a maximum cap."""
-        count = self.list_widget.count()
-        target = max(68, min(68 + max(0, count - 2) * 22, 160))
-        self.list_widget.setFixedHeight(target)
+        adjust_list_widget_height(self.list_widget)
 
     def get_items(self) -> list[str]:
         items: list[str] = []
@@ -188,9 +193,7 @@ class CategoryTagEditor(QWidget):
         layout.addLayout(input_layout)
 
     def _adjust_height(self) -> None:
-        count = self.list_widget.count()
-        target = max(68, min(68 + max(0, count - 2) * 22, 160))
-        self.list_widget.setFixedHeight(target)
+        adjust_list_widget_height(self.list_widget)
 
     def _refresh_combo(self) -> None:
         self.combo.blockSignals(True)
@@ -221,13 +224,7 @@ class CategoryTagEditor(QWidget):
         self.combo.blockSignals(False)
 
     def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
-        if isinstance(suggestions, Mapping):
-            s_map = cast(Mapping[str, Sequence[str]], suggestions)
-            self._suggestions = sorted(s_map.keys())
-            self._provenance = {k: list(v) for k, v in s_map.items()}
-        else:
-            self._suggestions = sorted(dict.fromkeys(suggestions))
-            self._provenance = {}
+        self._suggestions, self._provenance = parse_suggestions(suggestions)
         self._refresh_combo()
 
     def get_items(self) -> list[str]:
