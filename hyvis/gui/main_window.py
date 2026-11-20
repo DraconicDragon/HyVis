@@ -786,7 +786,7 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
         self.issues_title.setText(f"Issues ({count})")
 
         # 1. Clear previous error highlights
-        from hyvis.gui.widgets import set_widget_override_state
+        from hyvis.gui.schema_binding import set_widget_override_state
 
         for w in self._highlighted_error_widgets:
             set_widget_override_state(w, is_overridden=False, is_error=False)
