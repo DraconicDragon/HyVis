@@ -370,7 +370,7 @@ class PageQueryListEditor(BaseStackedEntityEditor):
         return bool(self._available_pages)
 
     def _get_all_available_keys(self) -> set[tuple[str, int | None]]:
-        return {self._extract_key(p) for p in self._available_pages} - {None}
+        return {k for p in self._available_pages if (k := self._extract_key(p)) is not None}
 
     def _pick_next_unused_target(self) -> dict[str, Any] | None:
         used = self._get_used_keys()

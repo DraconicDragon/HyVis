@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -221,8 +222,9 @@ class CategoryTagEditor(QWidget):
 
     def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
         if isinstance(suggestions, Mapping):
-            self._suggestions = sorted(suggestions.keys())
-            self._provenance = {k: list(v) for k, v in suggestions.items()}
+            s_map = cast(Mapping[str, Sequence[str]], suggestions)
+            self._suggestions = sorted(s_map.keys())
+            self._provenance = {k: list(v) for k, v in s_map.items()}
         else:
             self._suggestions = sorted(dict.fromkeys(suggestions))
             self._provenance = {}

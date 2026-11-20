@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -76,8 +76,8 @@ class KeyValueEditor(QWidget):
             if r == exclude_row:
                 continue
             if self._use_combobox_for_key:
-                combo: QComboBox | None = self.table.cellWidget(r, 0)
-                if combo and combo.currentText().strip():
+                combo = self.table.cellWidget(r, 0)
+                if isinstance(combo, QComboBox) and combo.currentText().strip():
                     used.add(combo.currentText().strip())
             else:
                 item = self.table.item(r, 0)
@@ -107,14 +107,15 @@ class KeyValueEditor(QWidget):
         if not self._use_combobox_for_key:
             return
         for r in range(self.table.rowCount()):
-            combo: QComboBox | None = self.table.cellWidget(r, 0)
-            if combo:
+            combo = self.table.cellWidget(r, 0)
+            if isinstance(combo, QComboBox):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
     def set_key_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
         if isinstance(suggestions, Mapping):
-            self._key_suggestions = sorted(suggestions.keys())
-            self._provenance = {k: list(v) for k, v in suggestions.items()}
+            s_map = cast(Mapping[str, Sequence[str]], suggestions)
+            self._key_suggestions = sorted(s_map.keys())
+            self._provenance = {k: list(v) for k, v in s_map.items()}
         else:
             self._key_suggestions = sorted(dict.fromkeys(suggestions))
             self._provenance = {}
@@ -124,8 +125,8 @@ class KeyValueEditor(QWidget):
         mapping: dict[str, str] = {}
         for row in range(self.table.rowCount()):
             if self._use_combobox_for_key:
-                combo: QComboBox | None = self.table.cellWidget(row, 0)
-                key = combo.currentText().strip() if combo else ""
+                combo = self.table.cellWidget(row, 0)
+                key = combo.currentText().strip() if isinstance(combo, QComboBox) else ""
             else:
                 key_item = self.table.item(row, 0)
                 key = key_item.text().strip() if key_item else ""
@@ -186,8 +187,9 @@ class KeyValueEditor(QWidget):
 
         if not self._use_combobox_for_key:
             item = self.table.item(row, 0)
-            self.table.setCurrentItem(item)
-            self.table.editItem(item)
+            if item is not None:
+                self.table.setCurrentItem(item)
+                self.table.editItem(item)
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
@@ -267,8 +269,8 @@ class ThresholdTableEditor(QWidget):
             if r == exclude_row:
                 continue
             if self._use_combobox_for_target:
-                combo: QComboBox | None = self.table.cellWidget(r, 0)
-                if combo and combo.currentText().strip():
+                combo = self.table.cellWidget(r, 0)
+                if isinstance(combo, QComboBox) and combo.currentText().strip():
                     used.add(combo.currentText().strip())
             else:
                 item = self.table.item(r, 0)
@@ -298,14 +300,15 @@ class ThresholdTableEditor(QWidget):
         if not self._use_combobox_for_target:
             return
         for r in range(self.table.rowCount()):
-            combo: QComboBox | None = self.table.cellWidget(r, 0)
-            if combo:
+            combo = self.table.cellWidget(r, 0)
+            if isinstance(combo, QComboBox):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
     def set_target_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
         if isinstance(suggestions, Mapping):
-            self._target_suggestions = sorted(suggestions.keys())
-            self._provenance = {k: list(v) for k, v in suggestions.items()}
+            s_map = cast(Mapping[str, Sequence[str]], suggestions)
+            self._target_suggestions = sorted(s_map.keys())
+            self._provenance = {k: list(v) for k, v in s_map.items()}
         else:
             self._target_suggestions = sorted(dict.fromkeys(suggestions))
             self._provenance = {}
@@ -315,8 +318,8 @@ class ThresholdTableEditor(QWidget):
         results: dict[str, dict[str, Any]] = {}
         for row in range(self.table.rowCount()):
             if self._use_combobox_for_target:
-                combo: QComboBox | None = self.table.cellWidget(row, 0)
-                target = combo.currentText().strip() if combo else ""
+                combo = self.table.cellWidget(row, 0)
+                target = combo.currentText().strip() if isinstance(combo, QComboBox) else ""
             else:
                 target_item = self.table.item(row, 0)
                 target = target_item.text().strip() if target_item else ""
@@ -324,8 +327,8 @@ class ThresholdTableEditor(QWidget):
             if not target:
                 continue
 
-            spin: QDoubleSpinBox | None = self.table.cellWidget(row, 1)
-            thresh_val = spin.value() if spin else 0.40
+            spin = self.table.cellWidget(row, 1)
+            thresh_val = spin.value() if isinstance(spin, QDoubleSpinBox) else 0.40
 
             chk_container: QWidget | None = self.table.cellWidget(row, 2)
             override_val = False
@@ -424,8 +427,9 @@ class ThresholdTableEditor(QWidget):
 
         if not self._use_combobox_for_target:
             item = self.table.item(row, 0)
-            self.table.setCurrentItem(item)
-            self.table.editItem(item)
+            if item is not None:
+                self.table.setCurrentItem(item)
+                self.table.editItem(item)
         self.changed.emit()
 
     def _on_remove_row(self) -> None:
@@ -492,8 +496,8 @@ class CategoryLimitEditor(QWidget):
         for r in range(self.table.rowCount()):
             if r == exclude_row:
                 continue
-            combo: QComboBox | None = self.table.cellWidget(r, 0)
-            if combo and combo.currentText().strip():
+            combo = self.table.cellWidget(r, 0)
+            if isinstance(combo, QComboBox) and combo.currentText().strip():
                 used.add(combo.currentText().strip())
         return used
 
@@ -517,14 +521,15 @@ class CategoryLimitEditor(QWidget):
 
     def _refresh_all_combos(self) -> None:
         for r in range(self.table.rowCount()):
-            combo: QComboBox | None = self.table.cellWidget(r, 0)
-            if combo:
+            combo = self.table.cellWidget(r, 0)
+            if isinstance(combo, QComboBox):
                 self._populate_combo_items(combo, combo.currentText(), r)
 
     def set_suggestions(self, suggestions: Sequence[str] | Mapping[str, Sequence[str]]) -> None:
         if isinstance(suggestions, Mapping):
-            self._suggestions = sorted(suggestions.keys())
-            self._provenance = {k: list(v) for k, v in suggestions.items()}
+            s_map = cast(Mapping[str, Sequence[str]], suggestions)
+            self._suggestions = sorted(s_map.keys())
+            self._provenance = {k: list(v) for k, v in s_map.items()}
         else:
             self._suggestions = sorted(dict.fromkeys(suggestions))
             self._provenance = {}
@@ -533,10 +538,10 @@ class CategoryLimitEditor(QWidget):
     def get_limits(self) -> dict[str, int]:
         limits: dict[str, int] = {}
         for row in range(self.table.rowCount()):
-            combo: QComboBox | None = self.table.cellWidget(row, 0)
-            cat = combo.currentText().strip() if combo else ""
-            spin: QSpinBox | None = self.table.cellWidget(row, 1)
-            val = spin.value() if spin else 1
+            combo = self.table.cellWidget(row, 0)
+            cat = combo.currentText().strip() if isinstance(combo, QComboBox) else ""
+            spin = self.table.cellWidget(row, 1)
+            val = spin.value() if isinstance(spin, QSpinBox) else 1
             if cat:
                 limits[cat] = val
         return limits

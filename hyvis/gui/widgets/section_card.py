@@ -11,6 +11,15 @@ from hyvis.gui.schema_binding import validate_field_ui_metadata
 from hyvis.gui.theme import AutoRepolishMixin, CardTheme, TextRole, ThemeProperty, WidgetState
 
 
+class _TitleLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, ev: QMouseEvent) -> None:
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(ev)
+
+
 class SectionCard(AutoRepolishMixin, QFrame):
     """
     Structured card with an inline header and QSS property integration.
@@ -64,11 +73,11 @@ class SectionCard(AutoRepolishMixin, QFrame):
         self._checkbox.toggled.connect(self._on_check_toggled)
         header_layout.addWidget(self._checkbox)
 
-        self._title_label = QLabel(title, self._header_widget)
+        self._title_label = _TitleLabel(title, self._header_widget)
         self._title_label.setStyleSheet("font-weight: 650;")
         if tooltip:
             self._title_label.setToolTip(tooltip)
-        self._title_label.mousePressEvent = self._on_title_clicked
+        self._title_label.clicked.connect(self._on_title_clicked)
         header_layout.addWidget(self._title_label)
 
         header_layout.addStretch(1)
@@ -90,7 +99,9 @@ class SectionCard(AutoRepolishMixin, QFrame):
 
     @property
     def content_layout(self) -> QVBoxLayout:
-        return self._content_layout
+        if isinstance(self._content_layout, QVBoxLayout):
+            return self._content_layout
+        raise TypeError(f"content_layout is {type(self._content_layout).__name__}, expected QVBoxLayout")
 
     def set_highlight_state(self, is_overridden: bool = False, is_error: bool = False) -> None:
         """Set state property; AutoRepolishMixin auto-repolishes QSS rules."""
@@ -159,8 +170,6 @@ class SectionCard(AutoRepolishMixin, QFrame):
         self._content_widget.setEnabled(checked)
         self.toggled.emit(checked)
 
-    def _on_title_clicked(self, event: QMouseEvent) -> None:
-        if self._is_checkable and event.button() == Qt.MouseButton.LeftButton:
+    def _on_title_clicked(self) -> None:
+        if self._is_checkable:
             self._checkbox.toggle()
-        else:
-            QLabel.mousePressEvent(self._title_label, event)

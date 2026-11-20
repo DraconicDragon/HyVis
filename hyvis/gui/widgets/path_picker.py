@@ -130,10 +130,10 @@ class PathPickerWidget(QWidget):
         """Update the resolved-path preview label using pure lexical path resolution."""
         raw = self.line_edit.text().strip()
         if not raw:
-            if callable(self._empty_display):
-                msg = self._empty_display()
-            elif self._empty_display:
+            if isinstance(self._empty_display, str):
                 msg = self._empty_display
+            elif callable(self._empty_display):
+                msg = self._empty_display()
             else:
                 msg = "(Empty)"
             self.resolved_label.setText(msg)
