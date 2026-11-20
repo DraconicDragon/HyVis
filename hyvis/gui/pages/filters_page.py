@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, OutputFilterConfig
 from hyvis.gui.base_widgets import FloatSpinBox, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.schema_binding import add_form_row, bind_field_metadata, set_widget_override_state
 from hyvis.gui.theme import CardTheme, TextRole
 from hyvis.gui.widgets import (
     CategoryLimitEditor,
@@ -32,9 +33,6 @@ from hyvis.gui.widgets import (
     StringListEditor,
     TagSubsetListEditor,
     ThresholdTableEditor,
-    add_form_row,
-    bind_field_metadata,
-    set_widget_override_state,
 )
 
 

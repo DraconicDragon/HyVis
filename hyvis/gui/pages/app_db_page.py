@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, DatabaseConfig, HyvisConfig
 from hyvis.gui.base_widgets import FloatSpinBox
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.schema_binding import add_form_row, bind_field_metadata, set_combo_value
 from hyvis.gui.theme import CardTheme
-from hyvis.gui.widgets import PathPickerWidget, SectionCard, add_form_row, bind_field_metadata, set_combo_value
+from hyvis.gui.widgets import PathPickerWidget, SectionCard
 
 
 class AppDbPage(BaseConfigPage):

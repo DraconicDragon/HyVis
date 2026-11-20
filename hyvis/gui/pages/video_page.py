@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, VideoConfig, adjust_threshold
 from hyvis.gui.base_widgets import FloatSpinBox, SemanticLabel
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.schema_binding import add_form_row, bind_field_metadata, set_combo_value
 from hyvis.gui.theme import TextRole
-from hyvis.gui.widgets import PathPickerWidget, SectionCard, add_form_row, bind_field_metadata, set_combo_value
+from hyvis.gui.widgets import PathPickerWidget, SectionCard
 from hyvis.video.planner import FramePlanConfig, plan_frames
 
 

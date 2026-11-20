@@ -21,6 +21,7 @@ from hyvis.config import (
     PreviewConfig,
 )
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.schema_binding import add_form_row, bind_field_metadata
 from hyvis.gui.theme import CardTheme
 from hyvis.gui.widgets import (
     PageQueryListEditor,
@@ -28,8 +29,6 @@ from hyvis.gui.widgets import (
     TagQueryListEditor,
     TagRuleListEditor,
     TagServiceListEditor,
-    add_form_row,
-    bind_field_metadata,
 )
 
 

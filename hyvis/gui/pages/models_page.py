@@ -34,14 +34,12 @@ from PySide6.QtWidgets import (
 from hyvis.config import AppConfig, InferenceConfig, ModelConfig
 from hyvis.gui.base_widgets import AutoResizingTableWidget, SmoothScrollArea
 from hyvis.gui.pages.base import BaseConfigPage
+from hyvis.gui.schema_binding import add_form_row, set_combo_value, setup_field_tooltip
 from hyvis.gui.theme import CardTheme, TextRole, ThemeProperty
 from hyvis.gui.widgets import (
     PathPickerWidget,
     SectionCard,
     TagServiceListEditor,
-    add_form_row,
-    set_combo_value,
-    setup_field_tooltip,
 )
 
 
