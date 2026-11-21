@@ -244,7 +244,7 @@ def construct_lenient(model_cls: type[BaseModel], data: Any) -> Any:
             if field_info.default is not PydanticUndefined:
                 fields_data[field_name] = field_info.default
             elif field_info.default_factory is not None:
-                fields_data[field_name] = field_info.default_factory()
+                fields_data[field_name] = field_info.default_factory()  # ty:ignore[missing-argument]
             else:
                 fields_data[field_name] = None
             continue
@@ -265,7 +265,7 @@ def construct_lenient(model_cls: type[BaseModel], data: Any) -> Any:
         else:
             fields_data[field_name] = val
 
-    return model_cls.model_construct(_fields_set=set(data.keys()), **fields_data)
+    return model_cls.model_construct(_fields_set={str(k) for k in data}, **fields_data)
 
 
 # endregion

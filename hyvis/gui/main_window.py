@@ -5,6 +5,7 @@ main_window.py — Modern sidebar-driven desktop interface for HyVis.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -104,7 +105,7 @@ def _format_field_msg(model_cls: type[Any], field_name: str, msg: str) -> str:
     return f"{title}: {msg}"
 
 
-def _parse_pydantic_error(err: dict[str, Any]) -> ValidationIssue:
+def _parse_pydantic_error(err: Mapping[str, Any]) -> ValidationIssue:
     loc = err.get("loc", ())
     msg = err.get("msg", "Invalid value")
 
@@ -768,7 +769,7 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
             cfg_for_business_rules = construct_lenient(AppConfig, data)
         except Exception as exc:
             self.state.set_dirty(True)
-            issues.append(ValidationIssue(message=str(exc), page_index=0, section_title="Configuration"))
+            issues.append(ValidationIssue(message=str(exc), page_index=PageIndex.HYDRUS, section_title="Configuration"))
 
         # 2. Business rules validation (runs on valid model or lenient fallback)
         if cfg_for_business_rules is not None:
@@ -868,7 +869,7 @@ class MainWindow(ThemeSubscriberMixin, QMainWindow):
         menu = QMenu(self)
         copy_msg_action = menu.addAction("Copy Message")
 
-        action = menu.exec(self.issues_list.mapToGlobal(pos))
+        action = menu.exec_(self.issues_list.mapToGlobal(pos))
         if action == copy_msg_action:
             clean_text = item.text().lstrip("▲ ").strip()
             QApplication.clipboard().setText(clean_text)

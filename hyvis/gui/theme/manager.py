@@ -60,7 +60,7 @@ class ThemeSubscriberMixin:
         theme_manager.theme_changed.connect(self._on_theme_changed_subscriber)
 
         # Clean up signal connection when Qt destroys the underlying C++ widget
-        if hasattr(self, "destroyed"):
+        if isinstance(self, QObject) and hasattr(self, "destroyed"):
             self.destroyed.connect(self._on_destroyed_cleanup)
 
     def _on_destroyed_cleanup(self) -> None:
@@ -96,9 +96,12 @@ class _ApplicationPaletteFilter(QObject):
         self._manager = manager
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.ApplicationPaletteChange:
-            if obj is QApplication.instance() and not self._manager._internal_palette_change:
-                self._manager.refresh()
+        if (
+            event.type() == QEvent.Type.ApplicationPaletteChange
+            and obj is QApplication.instance()
+            and not self._manager._internal_palette_change
+        ):
+            self._manager.refresh()
         return super().eventFilter(obj, event)
 
 
@@ -188,7 +191,7 @@ class ThemeManager(QObject):
     def refresh(self) -> None:
         """Handle external OS palette updates."""
         app = QApplication.instance()
-        if not app:
+        if not isinstance(app, QApplication):
             return
 
         # If on system theme, capture the fresh OS palette
@@ -200,7 +203,7 @@ class ThemeManager(QObject):
     def _apply_theme_state(self) -> None:
         """Unified pipeline: updates QPalette, recalculates tokens, and applies surgical QSS."""
         app = QApplication.instance()
-        if not app:
+        if not isinstance(app, QApplication):
             return
 
         preset = BUILTIN_THEMES.get(self._active_preset_id, BUILTIN_THEMES["system"])
@@ -246,7 +249,7 @@ class ThemeManager(QObject):
 
     def _recalculate_tokens(self) -> None:
         app = QApplication.instance()
-        pal = app.palette() if app else QPalette()
+        pal = app.palette() if isinstance(app, QApplication) else QPalette()
         preset = BUILTIN_THEMES.get(self._active_preset_id, BUILTIN_THEMES["system"])
         effective_accent = self._active_accent_hex or get_system_accent_color(self._system_palette)
         self._tokens = preset.create_tokens(pal, effective_accent)

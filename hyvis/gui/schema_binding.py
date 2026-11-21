@@ -204,7 +204,8 @@ def bind_field_metadata(
                 field_info,
                 set_placeholder=set_placeholder,
                 apply_default=apply_default,
-            )
+            )  # ty:ignore[call-non-callable]
+
     finally:
         widget.blockSignals(was_blocked)
 
@@ -217,16 +218,16 @@ def set_widget_override_state(widget: QWidget, is_overridden: bool, is_error: bo
     elif hasattr(widget, "table"):
         target = widget.table
     elif hasattr(widget, "set_highlight_state"):
-        widget.set_highlight_state(is_overridden=is_overridden, is_error=is_error)
+        widget.set_highlight_state(is_overridden=is_overridden, is_error=is_error)  # ty:ignore[call-non-callable]
         return
 
     state = WidgetState.ERROR if is_error else (WidgetState.OVERRIDDEN if is_overridden else WidgetState.DEFAULT)
-    target.setProperty(ThemeProperty.STATE, state.value if hasattr(state, "value") else str(state))
-    style = target.style()
+    target.setProperty(ThemeProperty.STATE, state.value if hasattr(state, "value") else str(state))  # ty:ignore[unresolved-attribute]
+    style = target.style()  # ty:ignore[unresolved-attribute]
     if style:
         style.unpolish(target)
         style.polish(target)
-        target.update()
+        target.update()  # ty:ignore[unresolved-attribute]
 
 
 def add_form_row(

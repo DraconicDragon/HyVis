@@ -108,7 +108,7 @@ class DevToolsStrip(QWidget):
 
         self.theme_combo.blockSignals(True)
         t_idx = self.theme_combo.findData(preset_id)
-        self.theme_combo.setCurrentIndex(t_idx if t_idx >= 0 else 0)
+        self.theme_combo.setCurrentIndex(max(t_idx, 0))
         self.theme_combo.blockSignals(False)
 
         self.accent_combo.blockSignals(True)
@@ -214,8 +214,8 @@ class DevToolsStrip(QWidget):
 
         orig_active = ld_mod.inspect_active_run_readonly
         orig_binding = ld_mod.inspect_client_binding_readonly
-        ld_mod.inspect_active_run_readonly = lambda _path: mock_inspection
-        ld_mod.inspect_client_binding_readonly = lambda _path: None
+        ld_mod.inspect_active_run_readonly = lambda _path: mock_inspection  # ty:ignore[invalid-assignment]
+        ld_mod.inspect_client_binding_readonly = lambda _path: None  # ty:ignore[invalid-assignment]
         try:
             dialog_class(state.config, config_path, window).exec()
         finally:
@@ -246,8 +246,8 @@ class DevToolsStrip(QWidget):
 
         orig_active = ld_mod.inspect_active_run_readonly
         orig_binding = ld_mod.inspect_client_binding_readonly
-        ld_mod.inspect_active_run_readonly = lambda _path: None
-        ld_mod.inspect_client_binding_readonly = lambda _path: mock_binding
+        ld_mod.inspect_active_run_readonly = lambda _path: None  # ty:ignore[invalid-assignment]
+        ld_mod.inspect_client_binding_readonly = lambda _path: mock_binding  # ty:ignore[invalid-assignment]
         try:
             dialog_class(state.config, config_path, window).exec()
         finally:
@@ -263,7 +263,7 @@ class DevToolsStrip(QWidget):
         dialog_class = self._reload_dialog_class("preferences_dialog", "PreferencesDialog")
         dialog = dialog_class(window.gui_settings, window)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            window.gui_settings = dialog.settings
+            window.gui_settings = dialog.settings  # ty:ignore[invalid-assignment]
 
     def _on_about_clicked(self) -> None:
         window = self._window_for(self._open_about)
@@ -281,7 +281,7 @@ class DevToolsStrip(QWidget):
             return
 
         dialog_class = self._reload_dialog_class("unsaved_changes_dialog", "UnsavedChangesDialog")
-        dialog_class(current_path=window.state.current_path, parent=window).exec()
+        dialog_class(current_path=window.state.current_path, parent=window).exec()  # ty:ignore[unresolved-attribute]
 
     @staticmethod
     def _window_for(callback: Callable[[], None]) -> QWidget | None:

@@ -379,16 +379,19 @@ class SmoothScrollArea(QScrollArea):
         if self._scroll_margin is None:
             return
         w = self.widget()
-        if not w or not w.layout():
+        if not w:
+            return
+        layout = w.layout()
+        if layout is None:
             return
 
         vbar = self.verticalScrollBar()
         has_scrollbar = vbar.maximum() > vbar.minimum()
         target_right = self._scroll_margin if has_scrollbar else self._base_margin
 
-        m = w.layout().contentsMargins()
+        m = layout.contentsMargins()
         if m.right() != target_right:
-            w.layout().setContentsMargins(m.left(), m.top(), target_right, m.bottom())
+            layout.setContentsMargins(m.left(), m.top(), target_right, m.bottom())
 
     def _neutralize_child_wheel_focus(self, container: QWidget) -> None:
         for spin in container.findChildren(QAbstractSpinBox):
@@ -499,7 +502,7 @@ class SmoothItemScrollFilter(QObject):
 def install_smooth_scroll(view: QAbstractItemView) -> SmoothItemScrollFilter:
     """Attach smooth pixel-level momentum scrolling to any list, table, or tree view."""
     filt = SmoothItemScrollFilter(view)
-    view._smooth_scroll_filter = filt
+    view._smooth_scroll_filter = filt  # ty:ignore[unresolved-attribute]
     return filt
 
 
