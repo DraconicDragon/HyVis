@@ -290,6 +290,7 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 | `prefer_tag_level_thresholds` | Boolean | No | Uses model-specific per-tag thresholds if supported. Falls back to `default_threshold` if unsupported. *(Note: Mainly supported by animetimm/"dbv4-full" models).* <br> Defaults to `true`. |
 | `tag_level_threshold_relative_offset` | Float | No | Relative offset applied to tag-level thresholds. Must be between `-1.0` and `1.0`. For example, `0.1` reduces the threshold requirements by 10%. <br> Defaults to `0.0`. |
 | `default_threshold` | Float | No | Fallback threshold (from `0.0` to `1.0`) when tag-level thresholds are disabled or unavailable. <br> Defaults to `0.4`. |
+| `replace_underscores_with_spaces` | Boolean | No | Replaces underscores with spaces in emitted tags while preserving kaomojis (e.g. `grea_(shingeki_no_bahamut)` -> `grea (shingeki no bahamut)`, `^_^` unchanged). Set to `false` to keep the model's raw tag formatting. <br> Defaults to `true`. |
 | `allowed_categories` | Array of Strings / Null | No | Limit output tags to specified categories. If omitted (or `null`), **all categories** are emitted. An explicit empty list `[]` allows no categories (useful if you only want to allow specific tags defined in `include_tags`). <br> *Usable: `rating`, `general`, `artist`, `contributor`, `copyright`, `character`, `meta`, `species`, `lore`*. <br> Defaults to `null`. |
 | `include_tags` | Array of Strings | No* | Explicit list of tags to **always include**, bypassing any `allowed_categories` limitations (exact matches only). <br> Defaults to `[]`. <br> **Required if `allowed_categories` is not specified or empty*. |
 | `exclude_tags` | Array of Strings | No | Explicit list of tags to **always discard**, even if their category is allowed (exact matches only). <br> Defaults to `[]`. |
@@ -302,6 +303,7 @@ Global settings for filtering and transforming tags before they are pushed to Hy
 prefer_tag_level_thresholds = true
 tag_level_threshold_relative_offset = 0.0
 default_threshold = 0.4
+replace_underscores_with_spaces = true
 allowed_categories = ["rating", "general", "artist", "copyright", "character"]
 
 # Ensure some specific meta tags bypass allowed_categories restriction:
@@ -416,7 +418,7 @@ meta = "meta:"
 
 > Required: No
 
-Replaces specific predicted tag names with alternative names before prefixing and output limits are applied. Useful for converting abbreviated ratings (e.g., `g` → `general`) or mapping tags to your preferred spelling.
+Replaces specific predicted tag names with alternative names before prefixing and output limits are applied. Useful for converting abbreviated ratings (e.g., `g` -> `general`) or mapping tags to your preferred spelling.
 
 - **Keys**: Predicted tag name (supports spaces or underscores)
 - **Values**: Replacement tag name

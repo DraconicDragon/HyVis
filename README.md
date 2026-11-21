@@ -5,11 +5,7 @@
 
 HyVis is a vibecoded local autotagging utility with optional desktop interface for your [Hydrus client](https://hydrusnetwork.github.io/hydrus/). It pairs vision transformer classification models with customizable tag filtering to automatically tag files and push them to Hydrus.
 
-HyVis reads files directly from your disk using paths retrieved from Hydrus file metadata, so it must run on the same machine (or have direct storage access) as your Hydrus client (I don't have a setup to test if files being saved on a NAS or similar works or not). Downloading files over API would be inefficient, so it's not implemented, but if needed, you can open an issue - I may or may not give it a try
-
-> [!NOTE]
-> HyVis automatically converts underscores to spaces (preserving kaomojis) before pushing tags to Hydrus: `grea_(shingeki_no_bahamut)` becomes `grea (shingeki no bahamut)`.  
-> Non-configurable (open an issue if you wish this to be configurable).
+HyVis reads files directly from your disk using paths retrieved from Hydrus file metadata, so it must run on the same machine (or have direct storage access) as your Hydrus client (I don't have a setup to test if files being saved on a NAS or similar works or not).
 
 ## Table of Contents
 
