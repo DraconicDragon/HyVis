@@ -5,8 +5,11 @@ Verifies category whitelisting, replacements, prefixes, and subset limits.
 
 from __future__ import annotations
 
+from vibe import TagEntry, TagResult
+
 from hyvis.config import OutputFilterConfig, TagSubsetConfig
-from hyvis.tag_filter import extract_tags
+from hyvis.db import CachedVocab
+from hyvis.tag_filter import build_transform_pipeline_from_vocab, extract_tags
 
 # region Filter Pipeline Tests
 
@@ -140,3 +143,61 @@ def test_category_limits_and_joint_subsets() -> None:
 
 
 # endregion
+
+
+def test_replace_underscores_with_spaces_disabled() -> None:
+    """When replace_underscores_with_spaces=False, raw underscores stay intact while Stage 1 rules still match."""
+    raw_input = {
+        "categories": {
+            "general": {
+                "long_hair": 0.90,
+                "bad_tag": 0.80,
+                "^_^": 0.75,
+            },
+            "character": {
+                "rem_(re:zero)": 0.92,
+                "hatsune_miku": 0.88,
+            },
+            "rating": {
+                "rating:g": 0.99,
+            },
+        }
+    }
+
+    filter_cfg = OutputFilterConfig(
+        replace_underscores_with_spaces=False,
+        allowed_categories=["general", "rating"],
+        include_tags=["hatsune miku"],  # space-formatted rule must still match underscore raw tag
+        exclude_tags=["bad tag"],
+        category_tag_prefix_mapping={"character": "character:"},
+        tag_replacements={"rating:g": "general"},
+        tag_prefix_overrides={"rating:g": "rating:"},
+    )
+
+    records = extract_tags(raw_input, output_filter=filter_cfg)
+    output_tags = {r.prefixed_tag for r in records}
+
+    assert "long_hair" in output_tags
+    assert "^_^" in output_tags
+    assert "character:hatsune_miku" in output_tags
+    assert "rating:general" in output_tags
+    assert "bad_tag" not in output_tags
+    assert "character:rem_(re:zero)" not in output_tags
+
+    # Also verify TransformPipeline omits CleanTags when False and applies it when True
+    vocab = CachedVocab(
+        model_row=1,
+        model_id="test",
+        variant_id="",
+        vocab_hash="abc",
+        idx_to_tag={0: "long_hair", 1: "^_^"},
+        idx_to_category={0: "general", 1: "general"},
+        calibrated_thresholds={},
+    )
+    raw_res = TagResult(categories={"general": [TagEntry("long_hair", 0.9), TagEntry("^_^", 0.8)]})
+
+    pipe_on = build_transform_pipeline_from_vocab(vocab, OutputFilterConfig(replace_underscores_with_spaces=True))
+    assert {e.tag for e in pipe_on(raw_res).tags} == {"long hair", "^_^"}
+
+    pipe_off = build_transform_pipeline_from_vocab(vocab, OutputFilterConfig(replace_underscores_with_spaces=False))
+    assert {e.tag for e in pipe_off(raw_res).tags} == {"long_hair", "^_^"}
