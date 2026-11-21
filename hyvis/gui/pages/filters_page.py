@@ -135,7 +135,7 @@ class FiltersPage(BaseConfigPage):
         layout.setContentsMargins(12, 12, 0, 12)
         layout.setSpacing(12)
 
-        # Card 1: Thresholds & TLT
+        # region Thresholds & TLT
         self.thresh_card = SectionCard("Threshold Settings", parent=container)
         self._card_meta[self.thresh_card] = (
             "Threshold Settings",
@@ -165,7 +165,26 @@ class FiltersPage(BaseConfigPage):
         self.thresh_card.setContentLayout(thresh_layout)
         layout.addWidget(self.thresh_card)
 
-        # Card 2: Allowed Categories (Dynamic & Checkable in Global Scope)
+        # region Tag Formatting
+        self.format_card = SectionCard("Tag Formatting", parent=container)
+        self._card_meta[self.format_card] = (
+            "Tag Formatting",
+            ["replace_underscores_with_spaces"],
+        )
+        self.format_card.toggled.connect(lambda chk: self._on_card_toggled(self.format_card, chk))
+        format_layout = QVBoxLayout()
+        self.replace_underscores_chk = QCheckBox(self)
+        bind_field_metadata(
+            self.replace_underscores_chk,
+            of_fields["replace_underscores_with_spaces"],
+            field_name="replace_underscores_with_spaces",
+        )
+        self.replace_underscores_chk.toggled.connect(lambda _: self._on_field_changed())
+        format_layout.addWidget(self.replace_underscores_chk)
+        self.format_card.setContentLayout(format_layout)
+        layout.addWidget(self.format_card)
+
+        # region Allowed Categories
         self.cat_card = SectionCard(
             field_info=of_fields["allowed_categories"],
             field_name="allowed_categories",
@@ -186,7 +205,7 @@ class FiltersPage(BaseConfigPage):
         inc_exc_row = QHBoxLayout()
         inc_exc_row.setSpacing(12)
 
-        # Card 3: Include Tags
+        # region Include Tags
         self.inc_card = SectionCard(
             field_info=of_fields["include_tags"],
             field_name="include_tags",
@@ -201,7 +220,7 @@ class FiltersPage(BaseConfigPage):
         self.inc_card.setContentLayout(inc_layout)
         inc_exc_row.addWidget(self.inc_card, stretch=1)
 
-        # Card 4: Exclude Tags
+        # region Exclude Tags
         self.exc_card = SectionCard(
             field_info=of_fields["exclude_tags"],
             field_name="exclude_tags",
@@ -218,7 +237,7 @@ class FiltersPage(BaseConfigPage):
 
         layout.addLayout(inc_exc_row)
 
-        # Card 5: Category Threshold Overrides (Editable Category ComboBox in Col 0)
+        # region Category Threshold Overrides
         self.cat_thresh_card = SectionCard(
             field_info=of_fields["category_thresholds"],
             field_name="category_thresholds",
@@ -240,7 +259,7 @@ class FiltersPage(BaseConfigPage):
         self.cat_thresh_card.setContentLayout(cat_thresh_layout)
         layout.addWidget(self.cat_thresh_card)
 
-        # Card 6: Tag Threshold Overrides
+        # region Tag Threshold Overrides
         self.tag_thresh_card = SectionCard(
             field_info=of_fields["tag_thresholds"],
             field_name="tag_thresholds",
@@ -255,7 +274,7 @@ class FiltersPage(BaseConfigPage):
         self.tag_thresh_card.setContentLayout(tag_thresh_layout)
         layout.addWidget(self.tag_thresh_card)
 
-        # Card 7: Category Tag Prefix Mapping (Editable Category ComboBox in Col 0)
+        # region Category Tag Prefix Mapping
         self.cat_pfx_card = SectionCard(
             field_info=of_fields["category_tag_prefix_mapping"],
             field_name="category_tag_prefix_mapping",
@@ -278,7 +297,7 @@ class FiltersPage(BaseConfigPage):
         self.cat_pfx_card.setContentLayout(cat_pfx_layout)
         layout.addWidget(self.cat_pfx_card)
 
-        # Card 8: Tag Prefix Overrides
+        # region Tag Prefix Overrides
         self.tag_pfx_card = SectionCard(
             field_info=of_fields["tag_prefix_overrides"],
             field_name="tag_prefix_overrides",
@@ -296,7 +315,7 @@ class FiltersPage(BaseConfigPage):
         self.tag_pfx_card.setContentLayout(tag_pfx_layout)
         layout.addWidget(self.tag_pfx_card)
 
-        # Card 9: Tag Replacements
+        # region Tag Replacements
         self.tag_rep_card = SectionCard(
             field_info=of_fields["tag_replacements"],
             field_name="tag_replacements",
@@ -311,7 +330,7 @@ class FiltersPage(BaseConfigPage):
         self.tag_rep_card.setContentLayout(rep_layout)
         layout.addWidget(self.tag_rep_card)
 
-        # Card 10: Max Tags Per Category
+        # region Max Tags Per Category
         self.cat_limit_card = SectionCard(
             field_info=of_fields["max_tags_per_category"],
             field_name="max_tags_per_category",
@@ -329,7 +348,7 @@ class FiltersPage(BaseConfigPage):
         self.cat_limit_card.setContentLayout(cat_limit_layout)
         layout.addWidget(self.cat_limit_card)
 
-        # Card 11: Joint Subset Limits (Stacked Cards avoiding comma bugs)
+        # region Joint Subset Limits
         self.subset_card = SectionCard(
             field_info=of_fields["max_tags_per_subset"],
             field_name="max_tags_per_subset",
@@ -556,6 +575,8 @@ class FiltersPage(BaseConfigPage):
             self.default_thresh_spin.setValue(float(d.get("default_threshold", 0.40)))
             self.prefer_tlt_chk.setChecked(bool(d.get("prefer_tag_level_thresholds", True)))
             self.tlt_offset_spin.setValue(float(d.get("tag_level_threshold_relative_offset", 0.00)))
+        elif card is self.format_card:
+            self.replace_underscores_chk.setChecked(bool(d.get("replace_underscores_with_spaces", True)))
         elif card is self.cat_card:
             cats = d.get("allowed_categories")
             self.cat_editor.set_items(cats if cats is not None else [])
@@ -585,6 +606,7 @@ class FiltersPage(BaseConfigPage):
             self._global_filter["default_threshold"] = float(self.default_thresh_spin.value())
             self._global_filter["prefer_tag_level_thresholds"] = self.prefer_tlt_chk.isChecked()
             self._global_filter["tag_level_threshold_relative_offset"] = float(self.tlt_offset_spin.value())
+            self._global_filter["replace_underscores_with_spaces"] = self.replace_underscores_chk.isChecked()
 
             # Unchecked card = None (All Categories Allowed), Checked card = list of categories
             if self.cat_card.isChecked():
@@ -613,6 +635,8 @@ class FiltersPage(BaseConfigPage):
                     draft["default_threshold"] = float(self.default_thresh_spin.value())
                     draft["prefer_tag_level_thresholds"] = self.prefer_tlt_chk.isChecked()
                     draft["tag_level_threshold_relative_offset"] = float(self.tlt_offset_spin.value())
+                if self.format_card.isChecked():
+                    draft["replace_underscores_with_spaces"] = self.replace_underscores_chk.isChecked()
                 if self.cat_card.isChecked():
                     draft["allowed_categories"] = self.cat_editor.get_items()
                 if self.inc_card.isChecked():
@@ -774,6 +798,13 @@ class FiltersPage(BaseConfigPage):
             self.tlt_offset_spin,
             "tag_level_threshold_relative_offset",
             of_fields["tag_level_threshold_relative_offset"].description or "",
+            is_global,
+            current_model_idx,
+        )
+        self._update_widget_diff(
+            self.replace_underscores_chk,
+            "replace_underscores_with_spaces",
+            of_fields["replace_underscores_with_spaces"].description or "",
             is_global,
             current_model_idx,
         )

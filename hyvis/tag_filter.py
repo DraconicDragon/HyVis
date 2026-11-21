@@ -179,8 +179,8 @@ def extract_tags(
     for r in surviving_records:
         norm_raw = _norm(r.raw_tag)
 
-        # 1. Clean underscores to spaces while preserving kaomojis
-        cleaned_tag = _CLEANER.clean_text(r.raw_tag)
+        # 1. Optionally clean underscores to spaces while preserving kaomojis
+        cleaned_tag = _CLEANER.clean_text(r.raw_tag) if filter_cfg.replace_underscores_with_spaces else r.raw_tag
         norm_cleaned = _norm(cleaned_tag)
 
         # 2. Tag replacement (checks both normalized raw and cleaned versions)
@@ -321,8 +321,9 @@ def build_transform_pipeline(
             threshold_map=threshold_map,
             fallback=global_fallback,
         ),
-        CleanTags(),
     ]
+    if output_filter.replace_underscores_with_spaces:
+        transforms.append(CleanTags())
     return TransformPipeline(transforms)
 
 
@@ -343,15 +344,15 @@ def build_transform_pipeline_from_vocab(
         output_filter,
         video_cfg=video_cfg,
     )
-    return TransformPipeline(
-        [
-            TagLevelThresholds(
-                threshold_map=threshold_map,
-                fallback=global_fallback,
-            ),
-            CleanTags(),
-        ]
-    )
+    transforms = [
+        TagLevelThresholds(
+            threshold_map=threshold_map,
+            fallback=global_fallback,
+        ),
+    ]
+    if output_filter.replace_underscores_with_spaces:
+        transforms.append(CleanTags())
+    return TransformPipeline(transforms)
 
 
 # endregion

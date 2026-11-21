@@ -525,6 +525,15 @@ class OutputFilterConfig(StrictBaseModel):
         description="Fallback confidence threshold (0.0 to 1.0) when tag-level thresholds are disabled or unavailable.",
         examples=[0.40],
     )
+    replace_underscores_with_spaces: bool = Field(
+        default=True,
+        title="Replace Underscores with Spaces",
+        description=(
+            "Replaces underscores with spaces in emitted tags while preserving kaomojis "
+            "(e.g. 'grea_(shingeki_no_bahamut)' -> 'grea (shingeki no bahamut)', '^_^' unchanged).\n"
+            "Disable to keep the model's original raw formatting."
+        ),
+    )
     allowed_categories: list[str] | None = Field(
         default=None,
         title="Allowed Categories",

@@ -315,6 +315,7 @@ def print_confirmation(
     print(f"    prefer TLT          {of.prefer_tag_level_thresholds}")
     print(f"    TLT offset          {of.tag_level_threshold_relative_offset}")
     print(f"    default threshold   {of.default_threshold}")
+    print(f"    replace underscores {of.replace_underscores_with_spaces}")
     if of.category_thresholds:
         print("    category thresholds")
         for cat, cfg_ in of.category_thresholds.items():
