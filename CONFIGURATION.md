@@ -247,7 +247,7 @@ only_if_tags_emitted = true
 
 Optional settings for sampling and processing videos (`MP4`, `WebM`, `MKV`, etc.) and multi-frame animated images (`GIF`, `APNG`, `WebP`, `AVIF`, `JXL`, etc.). Keeps the highest score per tag across sampled frames.
 
-When `enabled` is `false` (default), videos and multi-frame animations are skipped so Frame 0 is never processed alone. Single-frame images (including 1-frame GIFs, WebPs, etc.) continue to run normally.
+When `enabled` is `false` (default), videos and multi-frame animations are skipped. Single-frame images (including 1-frame GIFs, WebPs, etc.) continue to run normally.
 
 | Parameter | Type | Required | Description |
 | :-------- | :--- | :------- | :---------- |

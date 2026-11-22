@@ -64,7 +64,7 @@ class VideoPage(BaseConfigPage):
         desc_lbl = SemanticLabel(
             "Samples representative frames from videos (MP4, WebM, MKV, etc.) and multi-frame animated images "
             "(GIF, APNG, WebP, AVIF, JXL, etc.), taking each tag's highest score across sampled frames.\n"
-            "When disabled, videos and multi-frame animations are skipped so Frame 0 is never processed alone.",
+            "If disabled, videos / multi-frame animations are skipped. Single-frame images (i.e. 1-frame GIFs, WebPs, ...) continue to run normally.",
             role=TextRole.SECONDARY,
             parent=self.enable_card,
         )
