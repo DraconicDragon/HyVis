@@ -327,8 +327,8 @@ def test_frame_disk_cache_lifecycle_and_partial_cleanup(tmp_path: Path) -> None:
     loaded = list(fc.load_frames(fh, "prep_aaa"))
     assert len(loaded) == 2
     assert loaded[0].source_index == 0 and loaded[1].source_index == 5
-    assert loaded[0].image.getpixel((8, 8))[0] > 200
-    assert loaded[1].image.getpixel((8, 8))[1] > 200
+    assert loaded[0].image.getpixel((8, 8))[0] > 200  # ty:ignore[not-subscriptable]
+    assert loaded[1].image.getpixel((8, 8))[1] > 200  # ty:ignore[not-subscriptable]
 
     # 2. Aborted generator removes incomplete folder
     fh_bad = "e" * 64
@@ -880,3 +880,73 @@ def test_video_threshold_adjust_triggers_cpu_refilter_without_invalidating_stati
             )
         )
         assert s3.skipped == 1 and s3.refiltered == 1 and s3.zero_tags == 0
+
+
+def test_video_config_effort_validation_per_format() -> None:
+    from pydantic import ValidationError
+
+    from hyvis.config import VideoConfig
+
+    # WebP accepts 0..6, rejects 7
+    assert VideoConfig(frame_cache_format="webp", frame_cache_effort=6).frame_cache_effort == 6
+    with pytest.raises(ValidationError, match="frame_cache_effort"):
+        VideoConfig(frame_cache_format="webp", frame_cache_effort=7)
+
+    # PNG accepts 0..9
+    assert VideoConfig(frame_cache_format="png", frame_cache_effort=0).frame_cache_effort == 0
+    assert VideoConfig(frame_cache_format="png", frame_cache_effort=9).frame_cache_effort == 9
+
+    # JXL accepts 1..9, rejects 0
+    assert VideoConfig(frame_cache_format="jxl", frame_cache_effort=1).frame_cache_effort == 1
+    with pytest.raises(ValidationError, match="frame_cache_effort"):
+        VideoConfig(frame_cache_format="jxl_lossless", frame_cache_effort=0)
+
+    # JPEG ignores effort
+    assert VideoConfig(frame_cache_format="jpeg", frame_cache_effort=9).frame_cache_effort == 9
+
+
+@pytest.mark.parametrize(
+    ("fmt", "quality", "effort", "expected_ext"),
+    [
+        ("jpeg", 95, 3, ".jpg"),
+        ("webp", 85, 2, ".webp"),
+        ("webp_lossless", 50, 1, ".webp"),
+        ("png", 50, 2, ".png"),
+        ("jxl", 90, 2, ".jxl"),
+        ("jxl_lossless", 50, 2, ".jxl"),
+    ],
+)
+def test_frame_disk_cache_formats_and_invalidation(
+    tmp_path: Path,
+    fmt: str,
+    quality: int,
+    effort: int,
+    expected_ext: str,
+) -> None:
+    if fmt.startswith("jxl"):
+        pytest.importorskip("pillow_jxl")
+
+    fh = "a" * 64
+    frames = [
+        ExtractedFrame(index=0, source_index=0, timestamp_s=0.0, image=Image.new("RGB", (16, 16), (240, 20, 20))),
+        ExtractedFrame(index=1, source_index=4, timestamp_s=0.4, image=Image.new("RGB", (16, 16), (20, 240, 20))),
+    ]
+
+    fc = FrameDiskCache(tmp_path / "fc", image_format=fmt, quality=quality, effort=effort)
+    list(fc.save_and_yield_frames(fh, "prep_1", iter(frames)))
+
+    assert (tmp_path / "fc" / fh / f"0000{expected_ext}").is_file()
+    assert fc.validate_frames(fh, "prep_1") is True
+
+    loaded = list(fc.load_frames(fh, "prep_1"))
+    assert len(loaded) == 2
+    assert loaded[0].image.getpixel((8, 8))[0] > 200  # ty:ignore[not-subscriptable]
+
+    # Changing quality on lossless formats must NOT invalidate; changing quality on lossy formats MUST invalidate
+    other_q_fc = FrameDiskCache(tmp_path / "fc", image_format=fmt, quality=70, effort=effort)
+    is_lossless = fmt in ("webp_lossless", "png", "jxl_lossless")
+    assert other_q_fc.has_complete_frames(fh, "prep_1") is is_lossless
+
+    # Changing effort on formats that use effort MUST invalidate (JPEG ignores effort)
+    other_e_fc = FrameDiskCache(tmp_path / "fc", image_format=fmt, quality=quality, effort=5)
+    assert other_e_fc.has_complete_frames(fh, "prep_1") is (fmt == "jpeg")
