@@ -25,6 +25,20 @@ FieldSource = Literal["hydrus:tag_services", "vibe:models"]
 FieldPicker = Literal["file", "directory"]
 ThresholdAdjustMode = Literal["headroom", "additive", "multiplier"]
 
+FrameCacheFormat = Literal["jpeg", "png", "jxl", "jxl_lossless", "webp", "webp_lossless"]
+
+#: Valid compression effort bounds (min, max) per disk frame cache format (JPEG has no effort knob).
+FRAME_CACHE_EFFORT_RANGES: dict[str, tuple[int, int]] = {
+    "png": (0, 9),
+    "jxl": (1, 9),
+    "jxl_lossless": (1, 9),
+    "webp": (0, 6),
+    "webp_lossless": (0, 6),
+}
+
+#: Lossless frame cache formats where `frame_cache_quality` is ignored.
+LOSSLESS_CACHE_FORMATS: frozenset[str] = frozenset({"png", "jxl_lossless", "webp_lossless"})
+
 
 def field_meta(
     *,
@@ -426,7 +440,7 @@ class CategoryThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one output category.
 
-    threshold    Threshold score (0.0–1.0).
+    threshold    Threshold score (0.0-1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
                  this category.
     """
@@ -450,7 +464,7 @@ class TagThresholdConfig(StrictBaseModel):
     """
     Threshold settings for one specific tag.
 
-    threshold    Threshold score (0.0–1.0).
+    threshold    Threshold score (0.0-1.0).
     override_tlt If True this threshold also overrides TagLevelThresholds for
                  this tag.
     """
@@ -918,6 +932,48 @@ class VideoConfig(StrictBaseModel):
             }
         ),
     )
+    frame_cache_format: FrameCacheFormat = Field(
+        default="jpeg",
+        title="Frame Cache Format",
+        description=(
+            "Image format used when saving extracted frames to disk for multi-model runs:\n"
+            "• jpeg: Fastest encode/decode with minimal overhead (lossy).\n"
+            "• png: Universal lossless.\n"
+            "• jxl / jxl_lossless: JPEG XL via pillow-jxl-plugin (use low effort like 1-3 for speed).\n"
+            "• webp / webp_lossless: Can be slow to encode, and lossy WebP may look worse for a tagger than JPEG."
+        ),
+        json_schema_extra=field_meta(
+            labels={
+                "jpeg": "JPEG (Lossy, Fastest)",
+                "png": "PNG (Lossless)",
+                "jxl": "JPEG XL (Lossy)",
+                "jxl_lossless": "JPEG XL (Lossless)",
+                "webp": "WebP (Lossy)",
+                "webp_lossless": "WebP (Lossless)",
+            }
+        ),
+    )
+    frame_cache_quality: int = Field(
+        default=95,
+        ge=1,
+        le=100,
+        title="Frame Cache Quality",
+        description="Encoding quality (1-100) for lossy frame cache formats (JPEG, lossy JPEG XL, lossy WebP). Ignored for lossless formats.",
+        examples=[95],
+    )
+    frame_cache_effort: int = Field(
+        default=3,
+        ge=0,
+        le=9,
+        title="Compression Effort",
+        description=(
+            "Encoder speed vs. compression level for formats that support it (ignored for JPEG):\n"
+            "• PNG: 0-9 (recommended for temp cache: 1-3)\n"
+            "• JPEG XL / JXL Lossless: 1-9 (recommended for temp cache: 1-3 for much faster encoding)\n"
+            "• WebP / WebP Lossless: 0-6 (recommended for temp cache: 2-4)"
+        ),
+        examples=[3],
+    )
     frame_cache_dir: str | None = Field(
         default=None,
         title="Frame Disk Cache Directory",
@@ -928,8 +984,21 @@ class VideoConfig(StrictBaseModel):
 
     @model_validator(mode="after")
     def _validate_frame_bounds(self) -> VideoConfig:
+        errors: list[str] = []
         if self.min_frames > self.max_frames:
-            raise ValueError(f"min_frames ({self.min_frames}) cannot exceed max_frames ({self.max_frames}).")
+            errors.append(f"min_frames ({self.min_frames}) cannot exceed max_frames ({self.max_frames}).")
+
+        effort_bounds = FRAME_CACHE_EFFORT_RANGES.get(self.frame_cache_format)
+        if effort_bounds is not None:
+            lo, hi = effort_bounds
+            if not (lo <= self.frame_cache_effort <= hi):
+                errors.append(
+                    f"frame_cache_effort ({self.frame_cache_effort}) for '{self.frame_cache_format}' "
+                    f"must be between {lo} and {hi}."
+                )
+
+        if errors:
+            raise ValueError("; ".join(errors))
         return self
 
     def to_plan_config(self) -> Any:

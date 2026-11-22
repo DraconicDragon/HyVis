@@ -588,7 +588,12 @@ async def infer_files(
                     fc_mode == "disk" or (fc_mode == "auto" and len(config.inference.models) > 1)
                 )
                 frame_cache = (
-                    FrameDiskCache(resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None)))
+                    FrameDiskCache(
+                        resolve_frame_cache_dir(config, db_path=getattr(db, "_path", None)),
+                        image_format=config.video.frame_cache_format,
+                        quality=config.video.frame_cache_quality,
+                        effort=config.video.frame_cache_effort,
+                    )
                     if use_disk_cache
                     else None
                 )

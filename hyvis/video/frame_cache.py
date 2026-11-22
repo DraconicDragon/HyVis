@@ -1,9 +1,9 @@
 """
 frame_cache.py — Optional disk-backed temporary frame cache for multi-model video runs.
 
-Stores extracted raw frames as high-quality (Q97) JPEGs so multi-model pipelines don't
-have to re-decode long videos for Model 2+. Each video's directory is deleted immediately
-once all configured models finish inferring that file.
+Stores extracted raw frames in the configured format/quality/effort so multi-model pipelines
+don't have to re-decode long videos for Model 2+. Each video's directory is deleted
+immediately once all configured models finish inferring that file.
 """
 
 from __future__ import annotations
@@ -12,20 +12,38 @@ import json
 import logging
 import shutil
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PIL import Image
 
-from hyvis.video.extractor import ExtractedFrame
+from hyvis.video.extractor import ExtractedFrame, _ensure_pillow_plugins
 
 if TYPE_CHECKING:
-    from hyvis.config import AppConfig
+    from hyvis.config import AppConfig, FrameCacheFormat
 
 logger = logging.getLogger(__name__)
 
 _MANIFEST_NAME = "manifest.json"
-_JPEG_QUALITY = 97
+
+
+@dataclass(frozen=True, slots=True)
+class _CacheFormatSpec:
+    ext: str
+    pil_format: str
+    lossless: bool
+    effort_key: str | None
+
+
+_FORMAT_SPECS: dict[str, _CacheFormatSpec] = {
+    "jpeg": _CacheFormatSpec(ext=".jpg", pil_format="JPEG", lossless=False, effort_key=None),
+    "png": _CacheFormatSpec(ext=".png", pil_format="PNG", lossless=True, effort_key="compress_level"),
+    "jxl": _CacheFormatSpec(ext=".jxl", pil_format="JXL", lossless=False, effort_key="effort"),
+    "jxl_lossless": _CacheFormatSpec(ext=".jxl", pil_format="JXL", lossless=True, effort_key="effort"),
+    "webp": _CacheFormatSpec(ext=".webp", pil_format="WEBP", lossless=False, effort_key="method"),
+    "webp_lossless": _CacheFormatSpec(ext=".webp", pil_format="WEBP", lossless=True, effort_key="method"),
+}
 
 
 def resolve_frame_cache_dir(config: AppConfig, *, db_path: str | Path | None = None) -> Path:
@@ -44,16 +62,48 @@ def resolve_frame_cache_dir(config: AppConfig, *, db_path: str | Path | None = N
 
 
 class FrameDiskCache:
-    """Manages temporary extracted Q97 JPEG frames per file_hash on disk."""
+    """Manages temporary extracted frames per file_hash on disk."""
 
-    def __init__(self, root_dir: str | Path) -> None:
+    def __init__(
+        self,
+        root_dir: str | Path,
+        *,
+        image_format: FrameCacheFormat | str = "jpeg",
+        quality: int = 95,
+        effort: int = 3,
+    ) -> None:
+        if image_format not in _FORMAT_SPECS:
+            raise ValueError(f"Unsupported frame_cache_format: {image_format!r}")
         self.root = Path(root_dir)
+        self.image_format = str(image_format)
+        self.quality = int(quality)
+        self.effort = int(effort)
+        self._spec = _FORMAT_SPECS[self.image_format]
 
     def _file_dir(self, file_hash: str) -> Path:
         return self.root / file_hash
 
+    def _manifest_matches(self, data: dict[str, Any], prep_hash: str) -> bool:
+        if data.get("prep_hash") != prep_hash:
+            return False
+        if data.get("format", "jpeg") != self.image_format:
+            return False
+        if not self._spec.lossless and data.get("quality") != self.quality:
+            return False
+        return not (self._spec.effort_key is not None and data.get("effort") != self.effort)
+
+    def _build_save_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"format": self._spec.pil_format}
+        if not self._spec.lossless:
+            kwargs["quality"] = self.quality
+        if self._spec.lossless and self._spec.pil_format in ("WEBP", "JXL"):
+            kwargs["lossless"] = True
+        if self._spec.effort_key is not None:
+            kwargs[self._spec.effort_key] = self.effort
+        return kwargs
+
     def has_complete_frames(self, file_hash: str, prep_hash: str) -> bool:
-        """Return True only if a complete frame set matching `prep_hash` exists on disk."""
+        """Return True only if a complete frame set matching `prep_hash` and encoding settings exists on disk."""
         f_dir = self._file_dir(file_hash)
         manifest_path = f_dir / _MANIFEST_NAME
         if not manifest_path.is_file():
@@ -61,7 +111,7 @@ class FrameDiskCache:
 
         try:
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if data.get("prep_hash") != prep_hash:
+            if not self._manifest_matches(data, prep_hash):
                 return False
             entries = data.get("frames", [])
             if not entries:
@@ -72,13 +122,14 @@ class FrameDiskCache:
 
     def validate_frames(self, file_hash: str, prep_hash: str) -> bool:
         """
-        Verify manifest, prep_hash, file presence, and full image decodability for all cached frames.
-        Opens and closes one frame at a time (O(1) memory). If any frame is corrupt, invalidates
-        the file's cache directory and returns False so the caller re-extracts cleanly.
+        Verify manifest, prep_hash, format settings, file presence, and full image decodability
+        for all cached frames. Opens and closes one frame at a time (O(1) memory). If any frame
+        is corrupt, invalidates the file's cache directory and returns False so the caller re-extracts.
         """
         if not self.has_complete_frames(file_hash, prep_hash):
             return False
 
+        _ensure_pillow_plugins()
         f_dir = self._file_dir(file_hash)
         try:
             data = json.loads((f_dir / _MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -98,10 +149,11 @@ class FrameDiskCache:
 
     def load_frames(self, file_hash: str, prep_hash: str) -> Iterator[ExtractedFrame]:
         """Yield previously cached ExtractedFrames from disk (closing file handles immediately)."""
+        _ensure_pillow_plugins()
         f_dir = self._file_dir(file_hash)
         data: dict[str, Any] = json.loads((f_dir / _MANIFEST_NAME).read_text(encoding="utf-8"))
-        if data.get("prep_hash") != prep_hash:
-            raise ValueError(f"Frame cache prep_hash mismatch for {file_hash[:8]}")
+        if not self._manifest_matches(data, prep_hash):
+            raise ValueError(f"Frame cache mismatch for {file_hash[:8]}")
 
         for entry in data["frames"]:
             frame_path = f_dir / str(entry["file"])
@@ -123,23 +175,26 @@ class FrameDiskCache:
         frames: Iterator[ExtractedFrame],
     ) -> Iterator[ExtractedFrame]:
         """
-        Stream frames from `frames`, saving each as a Q97 JPEG to disk while yielding it.
+        Stream frames from `frames`, saving each in the configured format/quality/effort while yielding it.
         Writes manifest.json only upon full completion; cleans up partial folders on abort/error.
         """
+        _ensure_pillow_plugins()
         f_dir = self._file_dir(file_hash)
         if f_dir.exists():
             shutil.rmtree(f_dir, ignore_errors=True)
         f_dir.mkdir(parents=True, exist_ok=True)
 
+        save_kwargs = self._build_save_kwargs()
+        ext = self._spec.ext
         manifest_entries: list[dict[str, Any]] = []
         completed = False
 
         try:
             for frame in frames:
-                fname = f"{frame.index:04d}.jpg"
+                fname = f"{frame.index:04d}{ext}"
                 out_path = f_dir / fname
                 rgb = frame.image.convert("RGB") if frame.image.mode != "RGB" else frame.image
-                rgb.save(out_path, format="JPEG", quality=_JPEG_QUALITY)
+                rgb.save(out_path, **save_kwargs)
 
                 manifest_entries.append(
                     {
@@ -152,7 +207,13 @@ class FrameDiskCache:
                 yield frame
 
             if manifest_entries:
-                payload = {"prep_hash": prep_hash, "frames": manifest_entries}
+                payload = {
+                    "prep_hash": prep_hash,
+                    "format": self.image_format,
+                    "quality": None if self._spec.lossless else self.quality,
+                    "effort": self.effort if self._spec.effort_key is not None else None,
+                    "frames": manifest_entries,
+                }
                 (f_dir / _MANIFEST_NAME).write_text(
                     json.dumps(payload, separators=(",", ":")),
                     encoding="utf-8",
@@ -175,7 +236,7 @@ class FrameDiskCache:
         removed = 0
         for child in self.root.iterdir():
             # Only delete 64-char hex folders containing HyVis manifest.json
-            if child.is_dir() and len(child.name) == 64 and (child / "manifest.json").is_file():
+            if child.is_dir() and len(child.name) == 64 and (child / _MANIFEST_NAME).is_file():
                 shutil.rmtree(child, ignore_errors=True)
                 removed += 1
         return removed

@@ -18,7 +18,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hyvis.config import AppConfig, VideoConfig, adjust_threshold
+from hyvis.config import (
+    FRAME_CACHE_EFFORT_RANGES,
+    LOSSLESS_CACHE_FORMATS,
+    AppConfig,
+    VideoConfig,
+    adjust_threshold,
+)
 from hyvis.gui.base_widgets import FloatSpinBox, SemanticLabel
 from hyvis.gui.pages.base import BaseConfigPage
 from hyvis.gui.schema_binding import add_form_row, bind_field_metadata, set_combo_value
@@ -155,8 +161,20 @@ class VideoPage(BaseConfigPage):
         cache_form.setSpacing(8)
 
         self.cache_mode_combo = QComboBox(self.cache_card)
-        self.cache_mode_combo.currentIndexChanged.connect(lambda _: self._on_cache_mode_changed())
+        self.cache_mode_combo.currentIndexChanged.connect(lambda _: self._on_cache_setting_changed())
         add_form_row(cache_form, v_fields, "frame_cache_mode", self.cache_mode_combo)
+
+        self.cache_format_combo = QComboBox(self.cache_card)
+        self.cache_format_combo.currentIndexChanged.connect(lambda _: self._on_cache_setting_changed())
+        self._cache_format_label = add_form_row(cache_form, v_fields, "frame_cache_format", self.cache_format_combo)
+
+        self.cache_quality_spin = QSpinBox(self.cache_card)
+        self.cache_quality_spin.valueChanged.connect(lambda _: self.emit_changed())
+        self._cache_quality_label = add_form_row(cache_form, v_fields, "frame_cache_quality", self.cache_quality_spin)
+
+        self.cache_effort_spin = QSpinBox(self.cache_card)
+        self.cache_effort_spin.valueChanged.connect(lambda _: self.emit_changed())
+        self._cache_effort_label = add_form_row(cache_form, v_fields, "frame_cache_effort", self.cache_effort_spin)
 
         # Frame Cache Directory Row
         self.cache_dir_picker = PathPickerWidget(
@@ -210,9 +228,37 @@ class VideoPage(BaseConfigPage):
         self.threshold_card.setEnabled(is_enabled)
 
         mode = str(self.cache_mode_combo.currentData() or "auto")
-        dir_active = is_enabled and (mode != "memory")
-        self._cache_dir_label.setEnabled(dir_active)
-        self.cache_dir_picker.setEnabled(dir_active)
+        disk_possible = is_enabled and (mode != "memory")
+        fmt = str(self.cache_format_combo.currentData() or "jpeg")
+        is_lossless = fmt in LOSSLESS_CACHE_FORMATS
+        effort_bounds = FRAME_CACHE_EFFORT_RANGES.get(fmt)
+
+        self._cache_format_label.setEnabled(disk_possible)
+        self.cache_format_combo.setEnabled(disk_possible)
+
+        quality_active = disk_possible and (not is_lossless)
+        self._cache_quality_label.setEnabled(quality_active)
+        self.cache_quality_spin.setEnabled(quality_active)
+        if is_lossless:
+            self.cache_quality_spin.setToolTip("Not used for lossless frame cache formats.")
+        else:
+            self.cache_quality_spin.setToolTip(str(VideoConfig.model_fields["frame_cache_quality"].description))
+
+        if effort_bounds is not None:
+            lo, hi = effort_bounds
+            was_blocked = self.cache_effort_spin.signalsBlocked()
+            self.cache_effort_spin.blockSignals(True)
+            self.cache_effort_spin.setRange(lo, hi)
+            self.cache_effort_spin.blockSignals(was_blocked)
+
+            self._cache_effort_label.setEnabled(disk_possible)
+            self.cache_effort_spin.setEnabled(disk_possible)
+        else:
+            self._cache_effort_label.setEnabled(False)
+            self.cache_effort_spin.setEnabled(False)
+
+        self._cache_dir_label.setEnabled(disk_possible)
+        self.cache_dir_picker.setEnabled(disk_possible)
 
     def _update_sampling_preview(self) -> None:
         min_f = self.min_frames_spin.value()
@@ -264,7 +310,7 @@ class VideoPage(BaseConfigPage):
         self._update_sampling_preview()
         self.emit_changed()
 
-    def _on_cache_mode_changed(self) -> None:
+    def _on_cache_setting_changed(self) -> None:
         self._sync_enabled_states()
         self.emit_changed()
 
@@ -287,13 +333,16 @@ class VideoPage(BaseConfigPage):
             self.sparse_below_spin.setValue(int(v.sparse_below_frames))
 
             set_combo_value(self.cache_mode_combo, v.frame_cache_mode)
+            set_combo_value(self.cache_format_combo, v.frame_cache_format)
+            self._sync_enabled_states()  # Apply format-specific effort bounds before setting value
+            self.cache_quality_spin.setValue(int(v.frame_cache_quality))
+            self.cache_effort_spin.setValue(int(v.frame_cache_effort))
             self.cache_dir_picker.setText(v.frame_cache_dir or "")
             self.cache_dir_picker.refresh_resolved_path()
 
             set_combo_value(self.thresh_mode_combo, v.threshold_adjust_mode)
             self.thresh_val_spin.setValue(float(v.threshold_adjust_value))
 
-            self._sync_enabled_states()
             self._update_sampling_preview()
             self._update_threshold_preview()
 
@@ -305,6 +354,9 @@ class VideoPage(BaseConfigPage):
         v_dict["max_frames"] = int(self.max_frames_spin.value())
         v_dict["sparse_below_frames"] = int(self.sparse_below_spin.value())
         v_dict["frame_cache_mode"] = str(self.cache_mode_combo.currentData() or "auto")
+        v_dict["frame_cache_format"] = str(self.cache_format_combo.currentData() or "jpeg")
+        v_dict["frame_cache_quality"] = int(self.cache_quality_spin.value())
+        v_dict["frame_cache_effort"] = int(self.cache_effort_spin.value())
         v_dict["frame_cache_dir"] = self.cache_dir_picker.text().strip() or None
         v_dict["threshold_adjust_mode"] = str(self.thresh_mode_combo.currentData() or "headroom")
         v_dict["threshold_adjust_value"] = float(self.thresh_val_spin.value())

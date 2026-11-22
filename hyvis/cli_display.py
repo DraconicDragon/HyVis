@@ -289,6 +289,8 @@ def print_confirmation(
     # region Video & Animation
     vid = config.video
     if vid.enabled:
+        from hyvis.config import FRAME_CACHE_EFFORT_RANGES, LOSSLESS_CACHE_FORMATS
+
         print(_c("  Video & Animation", BOLD))
         print(
             f"    sampling            k={vid.density_k}  min={vid.min_frames}  max={vid.max_frames}  sparse<{vid.sparse_below_frames}"
@@ -299,7 +301,16 @@ def print_confirmation(
                 f"    threshold adjust    mode={vid.threshold_adjust_mode}  k={vid.threshold_adjust_value:+.2f}  "
                 + _c(f"(e.g. 0.40 → {ex_after:.2f})", DIM)
             )
-        print(f"    frame cache         mode={vid.frame_cache_mode}")
+        uses_disk_cache = vid.frame_cache_mode == "disk" or (vid.frame_cache_mode == "auto" and len(inf.models) > 1)
+        if uses_disk_cache:
+            fmt_parts = [vid.frame_cache_format]
+            if vid.frame_cache_format not in LOSSLESS_CACHE_FORMATS:
+                fmt_parts.append(f"q={vid.frame_cache_quality}")
+            if vid.frame_cache_format in FRAME_CACHE_EFFORT_RANGES:
+                fmt_parts.append(f"effort={vid.frame_cache_effort}")
+            print(f"    frame cache         mode={vid.frame_cache_mode} ({', '.join(fmt_parts)})")
+        else:
+            print(f"    frame cache         mode={vid.frame_cache_mode}")
         if len(inf.models) > 1 and vid.frame_cache_mode in ("auto", "disk"):
             print(
                 _c(
