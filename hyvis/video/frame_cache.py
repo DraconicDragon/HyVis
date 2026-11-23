@@ -37,13 +37,64 @@ class _CacheFormatSpec:
 
 
 _FORMAT_SPECS: dict[str, _CacheFormatSpec] = {
-    "jpeg": _CacheFormatSpec(ext=".jpg", pil_format="JPEG", lossless=False, effort_key=None),
-    "png": _CacheFormatSpec(ext=".png", pil_format="PNG", lossless=True, effort_key="compress_level"),
-    "jxl": _CacheFormatSpec(ext=".jxl", pil_format="JXL", lossless=False, effort_key="effort"),
-    "jxl_lossless": _CacheFormatSpec(ext=".jxl", pil_format="JXL", lossless=True, effort_key="effort"),
-    "webp": _CacheFormatSpec(ext=".webp", pil_format="WEBP", lossless=False, effort_key="method"),
-    "webp_lossless": _CacheFormatSpec(ext=".webp", pil_format="WEBP", lossless=True, effort_key="method"),
+    "jpeg": _CacheFormatSpec(
+        ext=".jpg",
+        pil_format="JPEG",
+        lossless=False,
+        effort_key=None,
+    ),
+    "png": _CacheFormatSpec(
+        ext=".png",
+        pil_format="PNG",
+        lossless=True,
+        effort_key="compress_level",
+    ),
+    "jxl": _CacheFormatSpec(
+        ext=".jxl",
+        pil_format="JXL",
+        lossless=False,
+        effort_key="effort",
+    ),
+    "jxl_lossless": _CacheFormatSpec(
+        ext=".jxl",
+        pil_format="JXL",
+        lossless=True,
+        effort_key="effort",
+    ),
+    "webp": _CacheFormatSpec(
+        ext=".webp",
+        pil_format="WEBP",
+        lossless=False,
+        effort_key="method",
+    ),
+    "webp_lossless": _CacheFormatSpec(
+        ext=".webp",
+        pil_format="WEBP",
+        lossless=True,
+        effort_key="method",
+    ),
 }
+
+
+def get_format_extension_and_save_kwargs(
+    image_format: FrameCacheFormat | str,
+    *,
+    quality: int = 95,
+    effort: int = 3,
+) -> tuple[str, dict[str, Any]]:
+    """Return `(file_extension, pillow_save_kwargs)` for a configured frame cache format."""
+    if image_format not in _FORMAT_SPECS:
+        raise ValueError(f"Unsupported frame_cache_format: {image_format!r}")
+
+    spec = _FORMAT_SPECS[image_format]
+    kwargs: dict[str, Any] = {"format": spec.pil_format}
+    if not spec.lossless:
+        kwargs["quality"] = int(quality)
+    if spec.lossless and spec.pil_format in ("WEBP", "JXL"):
+        kwargs["lossless"] = True
+    if spec.effort_key is not None:
+        kwargs[spec.effort_key] = int(effort)
+    return spec.ext, kwargs
 
 
 def resolve_frame_cache_dir(config: AppConfig, *, db_path: str | Path | None = None) -> Path:
@@ -93,13 +144,11 @@ class FrameDiskCache:
         return not (self._spec.effort_key is not None and data.get("effort") != self.effort)
 
     def _build_save_kwargs(self) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"format": self._spec.pil_format}
-        if not self._spec.lossless:
-            kwargs["quality"] = self.quality
-        if self._spec.lossless and self._spec.pil_format in ("WEBP", "JXL"):
-            kwargs["lossless"] = True
-        if self._spec.effort_key is not None:
-            kwargs[self._spec.effort_key] = self.effort
+        _, kwargs = get_format_extension_and_save_kwargs(
+            self.image_format,
+            quality=self.quality,
+            effort=self.effort,
+        )
         return kwargs
 
     def has_complete_frames(self, file_hash: str, prep_hash: str) -> bool:

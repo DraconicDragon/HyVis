@@ -499,6 +499,7 @@ def iter_extract_frames(
     *,
     probe: MediaProbe | None = None,
     plan: FramePlan | None = None,
+    strategy: ExtractionStrategy | None = None,
 ) -> Iterator[ExtractedFrame]:
     """
     Stream upright RGB PIL images from any static image, animated image, or video.
@@ -506,7 +507,7 @@ def iter_extract_frames(
     """
     active_probe = probe or probe_media(path)
     active_plan = plan or plan_frames(active_probe.duration_s, active_probe.total_frames, config=config)
-    strategy = select_strategy(active_probe, active_plan)
+    active_strategy = strategy or select_strategy(active_probe, active_plan)
 
     logger.debug(
         "Extracting '%s' | kind=%s | mode=%s | planned=%d | strategy=%s",
@@ -514,12 +515,12 @@ def iter_extract_frames(
         active_probe.kind,
         active_plan.mode,
         active_plan.target_count,
-        strategy,
+        active_strategy,
     )
 
-    if strategy in ("static", "pillow_animated"):
+    if active_strategy in ("static", "pillow_animated"):
         gen = _extract_pillow_frames(active_probe, active_plan)
-    elif strategy == "pyav_seek":
+    elif active_strategy == "pyav_seek":
         gen = _extract_video_seek(active_probe, active_plan)
     else:
         gen = _extract_video_sequential(active_probe, active_plan)
@@ -536,6 +537,8 @@ def iter_extract_frames(
 def extract_frames(
     path: str | Path,
     config: FramePlanConfig | None = None,
+    *,
+    strategy: ExtractionStrategy | None = None,
 ) -> ExtractionResult:
     """
     Probe, plan, and extract all target frames into memory with timing telemetry.
@@ -544,8 +547,8 @@ def extract_frames(
     t0 = time.perf_counter()
     probe = probe_media(path)
     plan = plan_frames(probe.duration_s, probe.total_frames, config=config)
-    strategy = select_strategy(probe, plan)
-    frames = list(iter_extract_frames(path, config=config, probe=probe, plan=plan))
+    active_strategy = strategy or select_strategy(probe, plan)
+    frames = list(iter_extract_frames(path, config=config, probe=probe, plan=plan, strategy=active_strategy))
     elapsed = time.perf_counter() - t0
 
     return ExtractionResult(
@@ -553,7 +556,7 @@ def extract_frames(
         plan=plan,
         frames=frames,
         elapsed_s=elapsed,
-        strategy=strategy,
+        strategy=active_strategy,
     )
 
 
