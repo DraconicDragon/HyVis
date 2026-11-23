@@ -1,15 +1,8 @@
 # TODO
 
-- video: option to increase thresholds globally for multi-frame content
-  - or add a note for users to make multi-frame content tagging a separate run
-
-- print/show info of pyav and its bunlded ffmpeg in about page (maybe video page), and cli display if video stuff is enabled
-
 - reusable function to handle "file(s)" thing and correctly show either plural or singular
 
 - supported models doc should probably show tag amount and link to them or something, also have vibe have some description and note field(s) or such to be able to give more info on a model or family
-
-- future: theres an open pr for adding close page api endpoint, add support for that for preview
 
 - move add/remove tags to output filter?
   - also move model specific destination tag services there since it kinda doesnt fit to models page
@@ -29,8 +22,6 @@
   - Would this even be useful?
 
 ## TODO For User Interface
-
-- stop hardcoding ui values and instead resolve cleanly from config.py pydantic models for a real single source of truth
 
 - separate window for viewing logs in a table?
   - spawned from menu bar, will show latest to oldest
@@ -76,6 +67,8 @@
 ## lower priority (in order, somewhat, maybe)
 
 - Aesthetic scoring model support
+  - with each passing moment i have less interest in this because available models are simply not good
+    - the ones i know of seems to just use danbooru order:rank (hot) scoring over time and that is not good data when people upvote almost anything as long as vageen and booboo is to see in a "good enough" style with 1girl white background
 
 - (vibe) store param count for each model(-plugin)
   - what is this useful for
@@ -93,8 +86,10 @@
     - ~~every frame (too heavy but an option, maybe for gifs/very short vids)~~
     - ~~every nth frame (could do fps percentage based or hard user-set frame intervals)~~
     - [ ] keyframes only (if easily possible)
+      - there's a few things here; unindexed av1, keyframe-only (intra?) codecs, other edge cases
+    - [ ] investigate if WebM unusually slow
     - [ ] do analysis and find frames with cuts or scene changes (too heavy likely)
-    - [ ] duplicate processing (would include loop)
+    - [ ] duplicate processing (would include loop, and possibly fades)
     - [ ] fade in/outs? this is not reliable so probably no, or as an experimental setting
   - [ ] UI for selecting/dropping video to see planning for that video
     - [ ] make new compound widget, re: textboxes with browse button, add drop support there too, show file path on there too so relative isnt a mystery
