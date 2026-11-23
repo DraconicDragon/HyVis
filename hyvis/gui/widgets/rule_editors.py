@@ -242,6 +242,7 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
         show_condition: bool = False,
+        show_system_predicates: bool = False,
         theme: CardTheme = CardTheme.DEFAULT,
         parent: QWidget | None = None,
     ) -> None:
@@ -314,7 +315,11 @@ class TagRuleCard(AutoRepolishMixin, QFrame):
         t_label = SemanticLabel(tags_label, TextRole.SECONDARY, self)
         card_layout.addWidget(t_label)
 
-        self.tags_editor = StringListEditor(placeholder=placeholder, parent=self)
+        self.tags_editor = StringListEditor(
+            placeholder=placeholder,
+            show_system_predicates=show_system_predicates,
+            parent=self,
+        )
         self.tags_editor.changed.connect(self.changed.emit)
         card_layout.addWidget(self.tags_editor)
 
@@ -436,6 +441,7 @@ class TagRuleListEditor(QWidget):
         placeholder: str = "Enter tag and press Enter or Add...",
         allow_search_all: bool = False,
         show_condition: bool = False,
+        show_system_predicates: bool = False,
         theme: CardTheme = CardTheme.DEFAULT,
         add_btn_text: str = "+ Add Rule",
         empty_text: str = "(No rules configured — click button below)",
@@ -449,6 +455,7 @@ class TagRuleListEditor(QWidget):
         self._placeholder = placeholder
         self._allow_search_all = allow_search_all
         self._show_condition = show_condition
+        self._show_system_predicates = show_system_predicates
         self._theme = theme
 
         self._root_layout = QVBoxLayout(self)
@@ -526,6 +533,7 @@ class TagRuleListEditor(QWidget):
             placeholder=self._placeholder,
             allow_search_all=self._allow_search_all,
             show_condition=self._show_condition,
+            show_system_predicates=self._show_system_predicates,
             theme=self._theme,
             parent=self._cards_widget,
         )
@@ -573,6 +581,7 @@ class TagQueryListEditor(TagRuleListEditor):
             tags_label="Search Tags:",
             placeholder="Enter search tag and press Enter or Add...",
             allow_search_all=True,
+            show_system_predicates=True,
             theme=CardTheme.INFO,
             add_btn_text="+ Add Tag Query",
             empty_text="(No tag queries configured — click '+ Add Tag Query' below)",
