@@ -937,14 +937,15 @@ class VideoConfig(StrictBaseModel):
         title="Frame Cache Format",
         description=(
             "Image format used when saving extracted frames to disk for multi-model runs:\n"
-            "• jpeg: Fastest encode/decode with minimal overhead (lossy).\n"
+            "• jpeg: Possibly fastest encode/decode with minimal overhead (lossy).\n"
             "• png: Universal lossless.\n"
-            "• jxl / jxl_lossless: JPEG XL via pillow-jxl-plugin (use low effort like 1-3 for speed).\n"
-            "• webp / webp_lossless: Can be slow to encode, and lossy WebP may look worse for a tagger than JPEG."
+            "• jxl / jxl_lossless: JPEG XL via pillow-jxl-plugin (use low effort like 3 for speed).\n"
+            "• webp / webp_lossless: Can be slow to encode, and lossy WebP may look worse for a tagger than JPEG - depending on settings.\n\n"
+            "From my own short testing, at effort level 3, lossy JXL may be as fast or slightly faster than JPEG for lower filesize & ~same quality."
         ),
         json_schema_extra=field_meta(
             labels={
-                "jpeg": "JPEG (Lossy, Fastest)",
+                "jpeg": "JPEG (Lossy)",
                 "png": "PNG (Lossless)",
                 "jxl": "JPEG XL (Lossy)",
                 "jxl_lossless": "JPEG XL (Lossless)",
