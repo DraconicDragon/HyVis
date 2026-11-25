@@ -202,7 +202,6 @@ def get_system_info() -> list[DependencyGroup]:
 
     # 2. Core Dependencies
     vibe_ver, vibe_inst, vibe_sum = _get_dist_info("vibe")
-    vrt_ver, vrt_inst, vrt_sum = _get_dist_info("vibe-result-transforms")
 
     # Clean leading 'v' from HyVis version string
     hyvis_ver = get_version().removeprefix("v")
@@ -218,12 +217,6 @@ def get_system_info() -> list[DependencyGroup]:
             vibe_ver,
             is_installed=vibe_inst,
             summary=vibe_sum or "Vision model inference library",
-        ),
-        DependencyInfo(
-            "vibe-result-transforms",
-            vrt_ver,
-            is_installed=vrt_inst,
-            summary=vrt_sum or "Result post-processing transforms for vibe",
         ),
     ]
 

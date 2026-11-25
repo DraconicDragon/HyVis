@@ -12,9 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import vibe
 from vibe import InferenceCancelled, TagResult
-from vibe_result_transforms import (
-    TagLevelThresholds,
-)
+from vibe.transforms import TagLevelThresholds
 
 from hyvis.db import CacheDatabase, FileStatus
 from hyvis.logging_utils import BOLD, GREEN, MAGENTA, _c

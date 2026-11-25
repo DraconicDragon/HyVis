@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vibe import TagResult
-from vibe_result_transforms import CleanTags, TagLevelThresholds, TransformPipeline
+from vibe.transforms import CleanTags, TagLevelThresholds, TransformPipeline
 
 if TYPE_CHECKING:
     import vibe
@@ -306,7 +306,7 @@ def build_transform_pipeline(
     video_cfg: VideoConfig | None = None,
 ) -> TransformPipeline:
     """
-    Build the TransformPipeline for one model session using vibe-result-transforms.
+    Build the TransformPipeline for one model session using vibe.transforms.
     """
     threshold_map, global_fallback = resolve_effective_thresholds(
         session,

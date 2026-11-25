@@ -157,7 +157,6 @@ def setup_logging(
 
     # Keep vibe aligned with hyvis
     logging.getLogger("vibe").setLevel(root.level)
-    logging.getLogger("vibe_result_transforms").setLevel(root.level)
 
     # Silence noisy third-party libraries even in DEBUG mode
     logging.getLogger("PIL").setLevel(logging.INFO)
