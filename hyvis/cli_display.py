@@ -295,6 +295,11 @@ def print_confirmation(
         print(
             f"    sampling            k={vid.density_k}  min={vid.min_frames}  max={vid.max_frames}  sparse<{vid.sparse_below_frames}"
         )
+        if vid.extract_keyframes:
+            print(
+                f"    keyframes           enabled (max={vid.max_keyframes})  "
+                + _c("[opt-in extra; skipped on intra-only & animated images]", DIM)
+            )
         if vid.threshold_adjust_value != 0.0:
             ex_after = vid.adjust_threshold(0.40)
             print(
