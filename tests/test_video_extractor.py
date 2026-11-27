@@ -16,6 +16,7 @@ from PIL import Image
 from hyvis.video.extractor import (
     _extract_video_seek,
     _extract_video_sequential,
+    build_video_plan,
     extract_frames,
     is_animated_image,
     probe_media,
@@ -48,7 +49,7 @@ def test_static_png_vs_animated_gif_and_webp(tmp_path: Path) -> None:
     # Verify extracted RGB colors actually correspond to their planned source indices
     for frame in res_gif.frames:
         assert frame.source_index is not None
-        r, _g, _b = frame.image.getpixel((32, 32))
+        r, _g, _b = frame.image.getpixel((32, 32))  # ty:ignore[not-iterable]
         assert abs(r - frame.source_index * 25) <= 4
 
     # 3. Animated WebP (8 frames)
@@ -199,8 +200,8 @@ def test_pyav_applies_display_rotation(tmp_path: Path) -> None:
     right_pixel = img.getpixel((56, 32))
 
     # Left side must be red-dominant, right side must be blue-dominant
-    assert left_pixel[0] > 180 and left_pixel[2] < 60
-    assert right_pixel[2] > 180 and right_pixel[0] < 60
+    assert left_pixel[0] > 180 and left_pixel[2] < 60  # ty:ignore[not-subscriptable]
+    assert right_pixel[2] > 180 and right_pixel[0] < 60  # ty:ignore[not-subscriptable]
 
 
 def test_pyav_mid_seek_error_falls_back_sequential(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,3 +242,124 @@ def test_pyav_mid_seek_error_falls_back_sequential(tmp_path: Path, monkeypatch: 
     frames = list(_extract_video_seek(probe, plan))
     assert len(frames) == 4
     assert [f.index for f in frames] == [0, 1, 2, 3]
+
+
+def _write_multi_gop_video(path: Path, *, num_frames: int = 40, fps: int = 20, gop_size: int = 10) -> None:
+    """Create a synthetic H.264/MPEG4 video with forced periodic keyframes every `gop_size` frames."""
+    av = pytest.importorskip("av")
+    with av.open(str(path), mode="w") as container:
+        stream = container.add_stream("mpeg4", rate=fps)
+        stream.width = 64
+        stream.height = 64
+        stream.pix_fmt = "yuv420p"
+        stream.codec_context.gop_size = gop_size
+
+        for i in range(num_frames):
+            arr = np.full((64, 64, 3), (i * 5) % 250, dtype=np.uint8)
+            vframe = av.VideoFrame.from_ndarray(arr, format="rgb24")
+            for pkt in stream.encode(vframe):
+                container.mux(pkt)
+        for pkt in stream.encode():
+            container.mux(pkt)
+
+
+def test_pyav_keyframe_extraction_and_thinning(tmp_path: Path) -> None:
+    """Verify keyframes are merged alongside uniform samples and thinned to max_keyframes."""
+    pytest.importorskip("av")
+    mp4_path = tmp_path / "multi_gop.mp4"
+    _write_multi_gop_video(mp4_path, num_frames=40, fps=20, gop_size=10)  # ~4 keyframes (0, 10, 20, 30)
+
+    cfg = FramePlanConfig(min_frames=4, max_frames=4)
+    res_unif = extract_frames(mp4_path, config=cfg, extract_keyframes=False)
+    assert res_unif.plan.keyframe_count == 0
+    assert len(res_unif.frames) == 4
+
+    res_kf = extract_frames(mp4_path, config=cfg, extract_keyframes=True, max_keyframes=2)
+    assert res_kf.plan.keyframe_count == 2
+    assert res_kf.plan.target_count == 6
+    assert len(res_kf.frames) == 6
+
+
+def test_keyframe_extraction_skips_intra_only_and_animations(tmp_path: Path) -> None:
+    """Intra-only codecs (MJPEG) and animated images must skip keyframe scanning cleanly."""
+    av = pytest.importorskip("av")
+
+    # 1. MJPEG (intra-only) video
+    mjpeg_path = tmp_path / "intra.avi"
+    with av.open(str(mjpeg_path), mode="w") as container:
+        stream = container.add_stream("mjpeg", rate=10)
+        stream.width = 64
+        stream.height = 64
+        stream.pix_fmt = "yuvj420p"
+        for _ in range(12):
+            arr = np.full((64, 64, 3), 120, dtype=np.uint8)
+            vframe = av.VideoFrame.from_ndarray(arr, format="rgb24")
+            for pkt in stream.encode(vframe):
+                container.mux(pkt)
+        for pkt in stream.encode():
+            container.mux(pkt)
+
+    probe_mjpeg = probe_media(mjpeg_path)
+    plan_mjpeg = build_video_plan(
+        probe_mjpeg,
+        FramePlanConfig(min_frames=4, max_frames=4),
+        extract_keyframes=True,
+        max_keyframes=32,
+    )
+    assert plan_mjpeg.keyframe_count == 0
+    assert plan_mjpeg.target_count == 4
+
+    # 2. Animated GIF
+    gif_path = tmp_path / "anim.gif"
+    gif_frames = [Image.new("RGB", (32, 32), (i * 30, 10, 10)) for i in range(6)]
+    gif_frames[0].save(gif_path, save_all=True, append_images=gif_frames[1:], duration=100, loop=0)
+
+    probe_gif = probe_media(gif_path)
+    plan_gif = build_video_plan(
+        probe_gif,
+        FramePlanConfig(min_frames=4, max_frames=8),
+        extract_keyframes=True,
+        max_keyframes=32,
+    )
+    assert plan_gif.keyframe_count == 0
+
+
+def test_keyframe_missing_pts_falls_back_gracefully(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing packet PTS must skip keyframe extraction without failing uniform extraction."""
+    av = pytest.importorskip("av")
+    mp4_path = tmp_path / "no_pts_kf.mp4"
+    _write_multi_gop_video(mp4_path, num_frames=24, fps=24, gop_size=8)
+
+    probe = probe_media(mp4_path)
+    orig_open = av.open
+
+    class _NoPtsPktProxy:
+        def __init__(self, pkt: Any) -> None:
+            self._pkt = pkt
+            self.pts = None
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._pkt, name)
+
+    class _NoPtsContainerProxy:
+        def __init__(self, real: Any) -> None:
+            self._real = real
+
+        def demux(self, *args: Any, **kwargs: Any) -> Any:
+            for pkt in self._real.demux(*args, **kwargs):
+                yield _NoPtsPktProxy(pkt)
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self._real.close()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: _NoPtsContainerProxy(orig_open(*args, **kwargs)))
+
+    plan = build_video_plan(probe, FramePlanConfig(min_frames=4, max_frames=4), extract_keyframes=True)
+    assert plan.keyframe_count == 0
+    assert plan.target_count == 4

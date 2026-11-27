@@ -950,3 +950,25 @@ def test_frame_disk_cache_formats_and_invalidation(
     # Changing effort on formats that use effort MUST invalidate (JPEG ignores effort)
     other_e_fc = FrameDiskCache(tmp_path / "fc", image_format=fmt, quality=quality, effort=5)
     assert other_e_fc.has_complete_frames(fh, "prep_1") is (fmt == "jpeg")
+
+
+def test_video_config_prep_hash_keyframe_compatibility() -> None:
+    """extract_keyframes=False must keep the exact legacy prep_hash; enabling it must invalidate."""
+    from hyvis.config import VideoConfig
+
+    base = VideoConfig(enabled=True, density_k=2.0, min_frames=4, max_frames=128, sparse_below_frames=32)
+    off_diff_max_kf = VideoConfig(
+        enabled=True,
+        density_k=2.0,
+        min_frames=4,
+        max_frames=128,
+        sparse_below_frames=32,
+        extract_keyframes=False,
+        max_keyframes=64,
+    )
+    on_32 = VideoConfig(enabled=True, extract_keyframes=True, max_keyframes=32)
+    on_64 = VideoConfig(enabled=True, extract_keyframes=True, max_keyframes=64)
+
+    assert base.prep_hash() == off_diff_max_kf.prep_hash()
+    assert on_32.prep_hash() != base.prep_hash()
+    assert on_64.prep_hash() != on_32.prep_hash()
