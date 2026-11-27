@@ -437,7 +437,7 @@ def _extract_video_seek(probe: MediaProbe, plan: FramePlan) -> Iterator[Extracte
         logged_rotation = False
 
         for target_idx, target_t in enumerate(plan.times_s):
-            seek_pts = int((target_t + start_s) / time_base)
+            seek_pts = round((target_t + start_s) / time_base)
             try:
                 container.seek(seek_pts, backward=True, stream=stream)
             except av.FFmpegError as exc:
