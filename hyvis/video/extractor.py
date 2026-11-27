@@ -113,12 +113,14 @@ def is_animated_image(path: str | Path) -> bool:
     try:
         with Image.open(p) as img:
             return bool(getattr(img, "is_animated", False)) or int(getattr(img, "n_frames", 1)) > 1
-    except UnidentifiedImageError:
+    except (PermissionError, Image.DecompressionBombError):
+        raise
+    except (UnidentifiedImageError, OSError):
         return False
 
 
 def _probe_pillow_image(path: Path) -> MediaProbe | None:
-    """Inspect a file with Pillow. Returns None if Pillow does not recognize it."""
+    """Inspect a file with Pillow. Returns None if Pillow does not recognize or cannot decode it."""
     _ensure_pillow_plugins()
     try:
         with Image.open(path) as img:
@@ -173,7 +175,9 @@ def _probe_pillow_image(path: Path) -> MediaProbe | None:
                 total_frames=n_frames,
                 fps=fps,
             )
-    except UnidentifiedImageError:
+    except (PermissionError, Image.DecompressionBombError):
+        raise
+    except (UnidentifiedImageError, OSError):
         return None
 
 
