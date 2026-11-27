@@ -116,18 +116,25 @@ class VideoPage(BaseConfigPage):
         self.preview_label.setWordWrap(True)
         sampling_outer.addWidget(self.preview_label)
 
-        # Opt-in keyframe extraction sub-section
-        self.extract_keyframes_chk = QCheckBox(self.sampling_card)
-        bind_field_metadata(self.extract_keyframes_chk, v_fields["extract_keyframes"], field_name="extract_keyframes")
-        self.extract_keyframes_chk.toggled.connect(self._on_keyframes_toggled)
-        sampling_outer.addWidget(self.extract_keyframes_chk)
+        # Opt-in keyframe extraction
+        self.keyframes_card = SectionCard(
+            field_info=v_fields["extract_keyframes"],
+            field_name="extract_keyframes",
+            parent=self.sampling_card,
+        )
+        self.keyframes_card.setCheckable(True)
+        self.keyframes_card.setChecked(False)
+        self.keyframes_card.toggled.connect(self._on_keyframes_toggled)
+
+        kf_outer = QVBoxLayout()
+        kf_outer.setSpacing(6)
 
         kf_form = QFormLayout()
         kf_form.setSpacing(8)
-        self.max_keyframes_spin = QSpinBox(self.sampling_card)
+        self.max_keyframes_spin = QSpinBox(self.keyframes_card)
         self.max_keyframes_spin.valueChanged.connect(lambda _: self.emit_changed())
         self._max_keyframes_label = add_form_row(kf_form, v_fields, "max_keyframes", self.max_keyframes_spin)
-        sampling_outer.addLayout(kf_form)
+        kf_outer.addLayout(kf_form)
 
         kf_note = SemanticLabel(
             "Note: Many videos force periodic keyframes (e.g. every ~2-5 seconds). "
@@ -136,7 +143,10 @@ class VideoPage(BaseConfigPage):
             role=TextRole.SECONDARY,
             parent=self.sampling_card,
         )
-        sampling_outer.addWidget(kf_note)
+        kf_outer.addWidget(kf_note)
+
+        self.keyframes_card.setContentLayout(kf_outer)
+        sampling_outer.addWidget(self.keyframes_card)
 
         self.sampling_card.setContentLayout(sampling_outer)
         layout.addWidget(self.sampling_card)
@@ -249,7 +259,7 @@ class VideoPage(BaseConfigPage):
         self.cache_card.setEnabled(is_enabled)
         self.threshold_card.setEnabled(is_enabled)
 
-        kf_active = is_enabled and self.extract_keyframes_chk.isChecked()
+        kf_active = is_enabled and self.keyframes_card.isChecked()
         self._max_keyframes_label.setEnabled(kf_active)
         self.max_keyframes_spin.setEnabled(kf_active)
 
@@ -361,7 +371,7 @@ class VideoPage(BaseConfigPage):
             self.min_frames_spin.setValue(int(v.min_frames))
             self.max_frames_spin.setValue(int(v.max_frames))
             self.sparse_below_spin.setValue(int(v.sparse_below_frames))
-            self.extract_keyframes_chk.setChecked(bool(v.extract_keyframes))
+            self.keyframes_card.setChecked(bool(v.extract_keyframes))
             self.max_keyframes_spin.setValue(int(v.max_keyframes))
 
             set_combo_value(self.cache_mode_combo, v.frame_cache_mode)
@@ -385,7 +395,7 @@ class VideoPage(BaseConfigPage):
         v_dict["min_frames"] = int(self.min_frames_spin.value())
         v_dict["max_frames"] = int(self.max_frames_spin.value())
         v_dict["sparse_below_frames"] = int(self.sparse_below_spin.value())
-        v_dict["extract_keyframes"] = self.extract_keyframes_chk.isChecked()
+        v_dict["extract_keyframes"] = self.keyframes_card.isChecked()
         v_dict["max_keyframes"] = int(self.max_keyframes_spin.value())
         v_dict["frame_cache_mode"] = str(self.cache_mode_combo.currentData() or "auto")
         v_dict["frame_cache_format"] = str(self.cache_format_combo.currentData() or "jpeg")
