@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from hyvis.video.planner import FramePlan, FramePlanConfig, plan_frames
+from hyvis.video.planner import FramePlan, FramePlanConfig, plan_frames, select_even_indices
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,11 @@ ExtractionStrategy = Literal["static", "pillow_animated", "pyav_sequential", "py
 #: Switch from sequential decode to keyframe seeks only when targets are spaced out on longer videos.
 _SEEK_MIN_DURATION_S = 30.0
 _SEEK_MIN_INTERVAL_S = 2.5
+
+#: Known intra-only codecs where every frame is a keyframe (fallback if av.codec.Properties is unavailable).
+_KNOWN_INTRA_ONLY_CODECS: frozenset[str] = frozenset(
+    {"mjpeg", "prores", "dnxhd", "ffv1", "utvideo", "huffyuv", "hap", "rawvideo", "png", "qtrle", "cfhd", "magicyuv"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,6 +488,151 @@ def _extract_video_seek(probe: MediaProbe, plan: FramePlan) -> Iterator[Extracte
 # endregion
 
 
+# region Keyframe Scanning & Unified Planning
+
+
+def _is_intra_only_stream(av_mod: Any, stream: Any) -> bool:
+    """Return True if the video stream uses an intra-only codec where every frame is a keyframe."""
+    codec_ctx = getattr(stream, "codec_context", None)
+    codec = getattr(codec_ctx, "codec", None)
+    props = getattr(codec, "properties", 0)
+    props_enum = getattr(getattr(av_mod, "codec", None), "Properties", None)
+    if props_enum is not None and hasattr(props_enum, "intra_only"):
+        try:
+            if int(props) & int(props_enum.intra_only):
+                return True
+        except (TypeError, ValueError):
+            pass
+
+    codec_name = str(getattr(codec_ctx, "name", "") or "").lower()
+    return codec_name in _KNOWN_INTRA_ONLY_CODECS
+
+
+def _scan_keyframe_times(probe: MediaProbe, *, max_keyframes: int = 32) -> tuple[float, ...]:
+    """
+    Scan compressed video packet headers (zero pixel decoding) to collect keyframe timestamps.
+
+    Guards:
+      - Skips intra-only codecs (every frame is a keyframe).
+      - Skips streams with >= 32 packets where >= 90% are flagged as keyframes.
+      - Skips streams missing packet PTS/time_base (unindexed raw streams).
+      - Evenly thins keyframes to `max_keyframes` when exceeded.
+    """
+    if probe.kind != "video" or max_keyframes < 1:
+        return ()
+
+    av = _import_av()
+    raw_kf_times: list[float] = []
+    total_packets = 0
+    missing_pts_keyframes = 0
+
+    try:
+        with av.open(str(probe.path)) as container:
+            if not container.streams.video:
+                return ()
+            stream = container.streams.video[0]
+            time_base = stream.time_base
+            if time_base is None:
+                logger.warning(
+                    "Skipping keyframe extraction for '%s': missing stream time_base.",
+                    probe.path.name,
+                )
+                return ()
+
+            if _is_intra_only_stream(av, stream):
+                codec_name = getattr(getattr(stream, "codec_context", None), "name", "unknown")
+                logger.debug(
+                    "Skipping keyframe extraction for '%s': codec '%s' is intra-only.",
+                    probe.path.name,
+                    codec_name,
+                )
+                return ()
+
+            start_s: float | None = float(stream.start_time * time_base) if stream.start_time is not None else None
+
+            for packet in container.demux(stream):
+                if packet.size == 0 or (packet.pts is None and packet.dts is None):
+                    continue
+                total_packets += 1
+
+                if packet.pts is not None and start_s is None:
+                    first_t = float(packet.pts * time_base)
+                    start_s = first_t if first_t > 0.5 else 0.0
+
+                if not packet.is_keyframe:
+                    continue
+
+                if packet.pts is None:
+                    missing_pts_keyframes += 1
+                    continue
+
+                rel_t = float(packet.pts * time_base) - (start_s or 0.0)
+                if rel_t >= -0.5:
+                    raw_kf_times.append(max(0.0, rel_t))
+    except av.FFmpegError as exc:
+        logger.warning(
+            "Keyframe packet scan failed for '%s' (%s); falling back to uniform sampling only.",
+            probe.path.name,
+            exc,
+        )
+        return ()
+
+    if missing_pts_keyframes > 0 and not raw_kf_times:
+        logger.warning(
+            "Skipping keyframe extraction for '%s': stream lacks packet PTS timestamps; using uniform sampling only.",
+            probe.path.name,
+        )
+        return ()
+
+    if total_packets >= 32 and (len(raw_kf_times) / total_packets) >= 0.90:
+        logger.warning(
+            "Skipping keyframe extraction for '%s': %d/%d packets flagged as keyframes (intra-only/broken muxer).",
+            probe.path.name,
+            len(raw_kf_times),
+            total_packets,
+        )
+        return ()
+
+    if not raw_kf_times:
+        logger.debug("No keyframes flagged in '%s'; using uniform sampling only.", probe.path.name)
+        return ()
+
+    raw_kf_times.sort()
+    chosen_indices = select_even_indices(len(raw_kf_times), max_keyframes)
+    return tuple(raw_kf_times[idx] for idx in chosen_indices)
+
+
+def build_video_plan(
+    probe: MediaProbe,
+    config: FramePlanConfig | None = None,
+    *,
+    extract_keyframes: bool = False,
+    max_keyframes: int = 32,
+) -> FramePlan:
+    """
+    Build the uniform FramePlan for `probe`, optionally merging thinned keyframe timestamps
+    for video containers.
+    """
+    base_plan = plan_frames(probe.duration_s, probe.total_frames, config=config)
+    if not extract_keyframes or probe.kind != "video" or not base_plan.times_s:
+        return base_plan
+
+    kf_times = _scan_keyframe_times(probe, max_keyframes=max_keyframes)
+    if not kf_times:
+        return base_plan
+
+    merged_times = tuple(sorted([*base_plan.times_s, *kf_times]))
+    return dataclasses.replace(
+        base_plan,
+        target_count=len(merged_times),
+        times_s=merged_times,
+        keyframe_count=len(kf_times),
+    )
+
+
+# endregion
+
+
 # region Public Extraction API
 
 
@@ -504,21 +654,29 @@ def iter_extract_frames(
     probe: MediaProbe | None = None,
     plan: FramePlan | None = None,
     strategy: ExtractionStrategy | None = None,
+    extract_keyframes: bool = False,
+    max_keyframes: int = 32,
 ) -> Iterator[ExtractedFrame]:
     """
     Stream upright RGB PIL images from any static image, animated image, or video.
     Raises RuntimeError if no frames could be decoded from the file.
     """
     active_probe = probe or probe_media(path)
-    active_plan = plan or plan_frames(active_probe.duration_s, active_probe.total_frames, config=config)
+    active_plan = plan or build_video_plan(
+        active_probe,
+        config=config,
+        extract_keyframes=extract_keyframes,
+        max_keyframes=max_keyframes,
+    )
     active_strategy = strategy or select_strategy(active_probe, active_plan)
 
     logger.debug(
-        "Extracting '%s' | kind=%s | mode=%s | planned=%d | strategy=%s",
+        "Extracting '%s' | kind=%s | mode=%s | planned=%d (keyframes=%d) | strategy=%s",
         active_probe.path.name,
         active_probe.kind,
         active_plan.mode,
         active_plan.target_count,
+        active_plan.keyframe_count,
         active_strategy,
     )
 
@@ -543,6 +701,8 @@ def extract_frames(
     config: FramePlanConfig | None = None,
     *,
     strategy: ExtractionStrategy | None = None,
+    extract_keyframes: bool = False,
+    max_keyframes: int = 32,
 ) -> ExtractionResult:
     """
     Probe, plan, and extract all target frames into memory with timing telemetry.
@@ -550,9 +710,24 @@ def extract_frames(
     """
     t0 = time.perf_counter()
     probe = probe_media(path)
-    plan = plan_frames(probe.duration_s, probe.total_frames, config=config)
+    plan = build_video_plan(
+        probe,
+        config=config,
+        extract_keyframes=extract_keyframes,
+        max_keyframes=max_keyframes,
+    )
     active_strategy = strategy or select_strategy(probe, plan)
-    frames = list(iter_extract_frames(path, config=config, probe=probe, plan=plan, strategy=active_strategy))
+    frames = list(
+        iter_extract_frames(
+            path,
+            config=config,
+            probe=probe,
+            plan=plan,
+            strategy=active_strategy,
+            extract_keyframes=extract_keyframes,
+            max_keyframes=max_keyframes,
+        )
+    )
     elapsed = time.perf_counter() - t0
 
     return ExtractionResult(

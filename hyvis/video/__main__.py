@@ -2,9 +2,7 @@
 __main__.py — Standalone CLI inspection and frame-encoding benchmark tool for HyVis video/animation extraction.
 
 Usage:
-    python -m hyvis.video <media_path> [--k 2.0] [--min-frames 4] [--max-frames 128]
-                                       [--format jpeg] [--quality 95] [--effort 3]
-                                       [--out-dir ./debug_frames]
+    python -m hyvis.video <media_path> [options]
 """
 
 from __future__ import annotations
@@ -19,12 +17,13 @@ from hyvis.config import FRAME_CACHE_EFFORT_RANGES, LOSSLESS_CACHE_FORMATS, Fram
 from hyvis.video.extractor import (
     ExtractionStrategy,
     _ensure_pillow_plugins,
+    build_video_plan,
     extract_frames,
     probe_media,
     select_strategy,
 )
 from hyvis.video.frame_cache import get_format_extension_and_save_kwargs
-from hyvis.video.planner import FramePlanConfig, plan_frames
+from hyvis.video.planner import FramePlanConfig
 
 _FORMAT_CHOICES = get_args(FrameCacheFormat)
 
@@ -47,6 +46,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-frames", type=int, default=4, help="Minimum sampled frames (default: 4).")
     parser.add_argument("--max-frames", type=int, default=128, help="Maximum sampled frames (default: 128).")
     parser.add_argument("--sparse-below", type=int, default=32, help="Sparse threshold in frames (default: 32).")
+    parser.add_argument(
+        "--keyframes",
+        action="store_true",
+        help="Also extract video keyframes (up to --max-keyframes) alongside uniform sampling.",
+    )
+    parser.add_argument(
+        "--max-keyframes",
+        type=int,
+        default=32,
+        help="Maximum keyframes extracted per video when --keyframes is set (default: 32).",
+    )
     parser.add_argument(
         "--strategy",
         choices=("auto", "sequential", "seek"),
@@ -84,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.min_frames > args.max_frames:
         parser.error(f"--min-frames ({args.min_frames}) cannot exceed --max-frames ({args.max_frames}).")
+    if args.max_keyframes < 1:
+        parser.error(f"--max-keyframes must be >= 1, got {args.max_keyframes}.")
     if not (1 <= args.quality <= 100):
         parser.error(f"--quality must be between 1 and 100, got {args.quality}.")
 
@@ -104,7 +116,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     probe = probe_media(args.path)
-    plan = plan_frames(probe.duration_s, probe.total_frames, config=cfg)
+    plan = build_video_plan(
+        probe,
+        config=cfg,
+        extract_keyframes=args.keyframes,
+        max_keyframes=args.max_keyframes,
+    )
 
     strategy_override: ExtractionStrategy | None = None
     if args.strategy != "auto":
@@ -132,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Kind         : {probe.kind} ({probe.format_name}{f' / {probe.codec}' if probe.codec else ''})")
     print(f"Dimensions   : {probe.width}x{probe.height} (rotation={probe.rotation}°)")
     print(f"Stream Info  : duration={dur_str} | frames={frames_str} | fps={fps_str}")
-    print(f"Plan         : mode={plan.mode} | target_count={plan.target_count} | strategy={effective_strategy}")
+    kf_info = f" (+{plan.keyframe_count} keyframes)" if args.keyframes else ""
+    print(f"Plan         : mode={plan.mode} | target_count={plan.target_count}{kf_info} | strategy={effective_strategy}")
 
     if plan.times_s:
         shown_t = plan.times_s if args.verbose else plan.times_s[:10]
@@ -148,7 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_plan:
         return 0
 
-    result = extract_frames(args.path, config=cfg, strategy=strategy_override)
+    result = extract_frames(
+        args.path,
+        config=cfg,
+        strategy=strategy_override,
+        extract_keyframes=args.keyframes,
+        max_keyframes=args.max_keyframes,
+    )
     print(f"\nExtracted    : {len(result.frames)} frame(s) in {result.elapsed_s * 1000:.1f} ms")
 
     if args.verbose:

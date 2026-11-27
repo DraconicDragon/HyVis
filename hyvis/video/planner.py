@@ -49,6 +49,7 @@ class FramePlan:
     total_frames: int | None
     times_s: tuple[float, ...] = ()
     indices: tuple[int, ...] = ()
+    keyframe_count: int = 0
 
 
 # region Planning Math
@@ -62,6 +63,15 @@ def _compute_midpoint_times(duration_s: float, count: int) -> tuple[float, ...]:
 def _compute_midpoint_indices(total_frames: int, count: int) -> tuple[int, ...]:
     """Return `count` strictly increasing frame indices across `0..total_frames - 1`."""
     return tuple(min(total_frames - 1, int((i + 0.5) * total_frames / count)) for i in range(count))
+
+
+def select_even_indices(total_items: int, max_items: int) -> tuple[int, ...]:
+    """Select up to `max_items` evenly spaced indices from `0..total_items - 1`."""
+    if total_items <= 0 or max_items <= 0:
+        return ()
+    if total_items <= max_items:
+        return tuple(range(total_items))
+    return _compute_midpoint_indices(total_items, max_items)
 
 
 def plan_frames(

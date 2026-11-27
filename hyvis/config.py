@@ -883,6 +883,29 @@ class VideoConfig(StrictBaseModel):
         description="Files with fewer total frames than this threshold use frame-count scaling instead of duration scaling.",
         examples=[32],
     )
+    extract_keyframes: bool = Field(
+        default=False,
+        title="Also Extract Keyframes",
+        description=(
+            "When enabled, also scans video containers for keyframe (I-frame) timestamps and extracts up to "
+            "'max_keyframes' alongside uniform sampling.\n\n"
+            "Notes & Limitations:\n"
+            "• Many videos force periodic keyframes (e.g. every ~2-5 seconds). "
+            "Scene changes may trigger keyframes but it is not guaranteed.\n"
+            "• Automatically skipped on intra-only codecs (MJPEG, ProRes, FFV1, etc.) and animated images."
+        ),
+    )
+    max_keyframes: int = Field(
+        default=32,
+        ge=1,
+        le=7200,
+        title="Max Keyframes Per Video",
+        description=(
+            "Upper limit on keyframes extracted per video when keyframe extraction is enabled. "
+            "If a video contains more keyframes than set value, they are evenly thinned across the keyframe list."
+        ),
+        examples=[32],
+    )
     threshold_adjust_mode: ThresholdAdjustMode = Field(
         default="headroom",
         title="Threshold Adjustment Mode",
@@ -1018,12 +1041,15 @@ class VideoConfig(StrictBaseModel):
         import hashlib
         import json
 
-        payload = {
+        payload: dict[str, Any] = {
             "density_k": float(self.density_k),
             "min_frames": int(self.min_frames),
             "max_frames": int(self.max_frames),
             "sparse_below_frames": int(self.sparse_below_frames),
         }
+        if self.extract_keyframes:
+            payload["extract_keyframes"] = True
+            payload["max_keyframes"] = int(self.max_keyframes)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]
 
