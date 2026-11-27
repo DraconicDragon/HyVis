@@ -338,8 +338,7 @@ async def infer_files(
 
     from hyvis.config import ANIMATABLE_IMAGE_MIMES
     from hyvis.video.aggregator import FrameMaxAggregator
-    from hyvis.video.extractor import is_animated_image, iter_extract_frames, probe_media
-    from hyvis.video.planner import plan_frames
+    from hyvis.video.extractor import build_video_plan, is_animated_image, iter_extract_frames, probe_media
 
     source = LocalFileSource(plan.files_to_infer)
     file_info_map: dict[str, FileInfo] = {fi.file_hash: fi for fi in plan.files_to_infer}
@@ -611,7 +610,12 @@ async def infer_files(
                             probe = probe_media(fi.local_path)
                             if probe.total_frames is not None:
                                 fi.num_frames = probe.total_frames
-                            f_plan = plan_frames(probe.duration_s, probe.total_frames, config=plan_cfg)
+                            f_plan = build_video_plan(
+                                probe,
+                                config=plan_cfg,
+                                extract_keyframes=config.video.extract_keyframes,
+                                max_keyframes=config.video.max_keyframes,
+                            )
                             expected_n = f_plan.target_count
 
                             if frame_cache is not None and frame_cache.validate_frames(fi.file_hash, prep_hash):
