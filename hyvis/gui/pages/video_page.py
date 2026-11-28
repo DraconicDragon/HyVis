@@ -140,7 +140,7 @@ class VideoPage(BaseConfigPage):
         kf_note = SemanticLabel(
             "Note: Many videos force periodic keyframes (e.g. every ~2-5 seconds). "
             "Scene changes may trigger keyframes but it is not guaranteed. "
-            "Keyframe extraction is skipped on intra-only codecs && animated images.",
+            "Keyframe extraction is skipped on intra-only codecs and animated images.",
             role=TextRole.SECONDARY,
             parent=self.sampling_card,
         )
