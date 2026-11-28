@@ -773,6 +773,16 @@ async def infer_files(
 
                     _flush_active_video()
                     _drain_decode_errors()
+                    if total_frames_inferred > 0:
+                        fr_elapsed = max(time.monotonic() - multiframe_t0, 1e-3)
+                        logger.debug(
+                            "Multi-frame pass for '%s': inferred %d frame(s) across %d file(s) in %.1fs (%.1f fr/s).",
+                            model_cfg.model_id,
+                            total_frames_inferred,
+                            len(multiframe_files),
+                            fr_elapsed,
+                            total_frames_inferred / fr_elapsed,
+                        )
                 except ImportError as imp_exc:
                     stats.aborted_early = True
                     stats.abort_reason = f"Aborted: {imp_exc}"

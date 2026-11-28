@@ -599,6 +599,14 @@ def _scan_keyframe_times(probe: MediaProbe, *, max_keyframes: int = 32) -> tuple
 
     raw_kf_times.sort()
     chosen_indices = select_even_indices(len(raw_kf_times), max_keyframes)
+    logger.debug(
+        "Keyframe scan for '%s': found %d keyframe(s) across %d packet(s); selected %d (max=%d).",
+        probe.path.name,
+        len(raw_kf_times),
+        total_packets,
+        len(chosen_indices),
+        max_keyframes,
+    )
     return tuple(raw_kf_times[idx] for idx in chosen_indices)
 
 

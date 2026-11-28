@@ -149,7 +149,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Kind         : {probe.kind} ({probe.format_name}{f' / {probe.codec}' if probe.codec else ''})")
     print(f"Dimensions   : {probe.width}x{probe.height} (rotation={probe.rotation}°)")
     print(f"Stream Info  : duration={dur_str} | frames={frames_str} | fps={fps_str}")
-    kf_info = f" (+{plan.keyframe_count} keyframes)" if args.keyframes else ""
+    uniform_count = max(0, plan.target_count - plan.keyframe_count)
+    if args.keyframes:
+        kf_info = f" ({uniform_count} uniform + {plan.keyframe_count} keyframes)"
+    else:
+        kf_info = ""
     print(f"Plan         : mode={plan.mode} | target_count={plan.target_count}{kf_info} | strategy={effective_strategy}")
 
     if plan.times_s:
@@ -173,7 +177,14 @@ def main(argv: list[str] | None = None) -> int:
         extract_keyframes=args.keyframes,
         max_keyframes=args.max_keyframes,
     )
-    print(f"\nExtracted    : {len(result.frames)} frame(s) in {result.elapsed_s * 1000:.1f} ms")
+    if args.keyframes:
+        if len(result.frames) == plan.target_count:
+            ext_detail = f" ({uniform_count} uniform + {plan.keyframe_count} keyframes)"
+        else:
+            ext_detail = f" (planned {uniform_count} uniform + {plan.keyframe_count} keyframes)"
+    else:
+        ext_detail = ""
+    print(f"\nExtracted    : {len(result.frames)} frame(s){ext_detail} in {result.elapsed_s * 1000:.1f} ms")
 
     if args.verbose:
         for f in result.frames:
