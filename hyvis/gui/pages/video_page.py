@@ -52,12 +52,13 @@ class VideoPage(BaseConfigPage):
         container, layout = self.create_scroll_layout()
 
         # 1. Master Enable Card
-        self.enable_card = SectionCard(field_info=app_fields["video"], parent=container)
+        self.enable_card = SectionCard(title="Video & Animated Format Processing", field_info=app_fields["video"], parent=container)
         enable_layout = QVBoxLayout()
         enable_layout.setSpacing(6)
 
         self.enabled_chk = QCheckBox(self.enable_card)
         bind_field_metadata(self.enabled_chk, v_fields["enabled"], field_name="enabled")
+        self.enabled_chk.setText("Enable")
         self.enabled_chk.toggled.connect(self._on_enabled_toggled)
         enable_layout.addWidget(self.enabled_chk)
 
